@@ -20,7 +20,7 @@ from reportlab.platypus import (BaseDocTemplate, Frame, Image, KeepTogether,
 from reportlab.platypus.tableofcontents import TableOfContents
 
 import manual_style as ms
-from manual_figures import ArrowLegend, NotebookLayout
+from manual_figures import ArrowLegend, FoldHint, NotebookLayout
 from manual_style import (ACCENT, CONTENT_W, HRule, INK, JP, JPB, MARGIN,
                           MUTED, PAGE_H, PAGE_W, RULE, S, TocMark, bullets,
                           callout, code_block, h1, h2, steps, table)
@@ -488,14 +488,24 @@ def build(out_path):
         "画面が一気に短くなります。",
         "<b>「アウトライン」でセルへ飛ぶ。</b>"
         "同じくツールバーにあります。スクロールせずに目的のセルへ移動できます。",
+        "<b>読まないところは折りたたむ。</b>"
+        "コードの行の左はしにマウスを近づけると <b>∨</b> が出ます。"
+        "押すと、その行から下のひとかたまりが 1 行に縮みます。"
+        "たとえばセル C の設定を書き終えたら、"
+        "セル A を丸ごと畳んでしまえば画面がぐっと短くなります。",
     ], st))
-    ext(callout("実行ボタンの右の ∨ は「折りたたみ」ではありません", [
+    add(KeepTogether([FoldHint(CONTENT_W), Spacer(1, 3)]))
+    ext(callout("折りたたみの ∨ は「コードの左はし」。実行ボタンの右の ∨ ではありません", [
         "セルの左端にある <b>▷</b> が実行ボタンです。"
         "そのすぐ右にある小さな <b>∨</b> を押すと "
         "<b>「[デバッグ] セル」</b>というメニューが出ます。"
         "これは不具合を調べるための機能で、折りたたみではありません。",
-        "VS Code には「セルを畳んだ状態で配る」しくみがないため、"
-        "このマニュアルの版では<b>そもそも畳む必要がないように</b>、"
+        "折りたたむための <b>∨</b> は、ボタンの並びではなく"
+        "<b>コードの行そのものの左はし</b>にあります（上の図）。"
+        "マウスを置いたときだけ出るので、"
+        "普段は見えていなくても心配ありません。",
+        "なお「畳んだ状態で配る」しくみは VS Code にないため、"
+        "このマニュアルの版では<b>そもそも畳まなくてよいように</b>、"
         "長い部分を zahyou_engine.py へ追い出してあります。",
     ], st))
 
@@ -519,6 +529,8 @@ def build(out_path):
          "速くなるので通常は True のまま", "True"],
         ["SEARCH_RADIUS_DEG", "手がかりから何度の範囲まで探すか。"
          "導入誤差が大きいときは広げます", "5.0"],
+        ["IGNORE_EXISTING_WCS", "画像に既に座標情報が入っていても、"
+         "無視して解き直すか", "True"],
         ["SHOW_DETECTED_SOURCES", "拾った星に緑の丸を重ねるか", "True"],
         ["IMAGE_PATH", "ボタンを使わずファイルのパスを直接書くとき", "None"],
     ], st, widths=[41 * mm, CONTENT_W - 41 * mm - 20 * mm, 20 * mm],
