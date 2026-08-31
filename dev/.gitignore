@@ -1,0 +1,12 @@
+tcase/
+realcase/
+zahyou.ipynb
+zahyou_engine.py
+_cell2_check.py
+__pycache__/
+
+# フォントは 33 MB あるので入れない。make_manual.py が手元から用意する。
+fonts/
+
+# テスト実行時に dev/ 直下へ吐かれる画像。assets/ の図は残す。
+/*.png
