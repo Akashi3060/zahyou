@@ -1,0 +1,1058 @@
+# ==============================================================================
+#  zahyou  解析エンジン
+#
+#  役割 : どんな天体画像 (FITS / PNG / JPEG / TIFF / 動画キューブ) が来ても
+#         「星の座標リスト」を作り、Astrometry.net に確実に解かせる。
+# ==============================================================================
+
+from __future__ import annotations
+
+import concurrent.futures
+import json
+import os
+import shlex
+import shutil
+import subprocess
+import tempfile
+import time
+
+import numpy as np
+from astropy.io import fits
+from astropy.stats import sigma_clipped_stats
+from astropy.wcs import WCS
+
+try:
+    from scipy import ndimage
+except ImportError:                                   # pragma: no cover
+    ndimage = None
+
+
+def _log(msg=""):
+    print(msg, flush=True)
+
+
+class SolveInput:
+    """解析エンジンに渡す準備が整った画像。"""
+
+    def __init__(self, data, header, note, display_data=None, flip_y=False):
+        self.data = data                 # 2次元 float32 (星検出用)
+        self.header = header if header is not None else fits.Header()
+        self.note = note                 # 読み込み方法の説明
+        # 表示用。検出用と同じ幾何であること (同じ WCS を当てるため)
+        self.display = display_data if display_data is not None else data
+        # 表示するとき上下を反転するか (行 0 が画面の上に来る画像なら True)
+        self.flip_y = flip_y
+
+    @property
+    def shape(self):
+        return self.data.shape
+
+
+# ============================================================== 画像読み込み ===
+
+_COLOR_WEIGHTS = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+_FITS_EXT = (".fits", ".fit", ".fts", ".fz", ".fits.gz", ".fit.gz")
+
+
+def _planes_to_mono(cube, axis):
+    """RGB(A) の面を輝度 1 面にまとめる。"""
+    cube = np.moveaxis(np.asarray(cube), axis, 0)[:3]
+    n = cube.shape[0]
+    w = _COLOR_WEIGHTS[:n] / _COLOR_WEIGHTS[:n].sum()
+    return np.tensordot(w, cube.astype(np.float32), axes=(0, 0))
+
+
+def _reduce_to_2d(data, max_frames=200):
+    """3 次元以上を 2 次元へ。戻り値 (2次元 float32, 説明)"""
+    data = np.asarray(data)
+    while data.ndim > 3 and 1 in data.shape[:-2]:
+        data = np.squeeze(data, axis=int(np.argmax([s == 1 for s in data.shape[:-2]])))
+    if data.ndim > 3:
+        data = data[(0,) * (data.ndim - 3)]
+    if data.ndim == 2:
+        return np.array(data, dtype=np.float32), ""
+    if data.ndim == 3:
+        nz, ny, nx = data.shape
+        if nz in (3, 4) and ny > 8 and nx > 8:
+            return _planes_to_mono(data, 0), "カラー 3 面を輝度に合成"
+        if nx in (3, 4) and ny > 8 and nz > 8:
+            return _planes_to_mono(data, 2), "カラー 3 面を輝度に合成"
+        use = int(min(nz, max_frames))
+        acc = np.zeros((ny, nx), dtype=np.float64)
+        for i in range(use):                  # 巨大キューブでも一度に載せない
+            acc += np.asarray(data[i], dtype=np.float64)
+        return (acc / use).astype(np.float32), \
+               f"{nz} 枚のキューブのうち先頭 {use} 枚を平均 (SNR 稼ぎ)"
+    raise ValueError(f"2 次元画像に変換できない形状です: {data.shape}")
+
+
+def _image_hdus(hdul):
+    for hdu in hdul:
+        if isinstance(hdu, (fits.PrimaryHDU, fits.ImageHDU, fits.CompImageHDU)):
+            naxis = int(hdu.header.get("NAXIS", 0) or 0)
+            if naxis >= 2:
+                yield hdu
+
+
+def _pick_fits_hdu(hdul):
+    """一番大きい画像 HDU を選ぶ (拡張 HDU・圧縮 HDU も対象)。"""
+    best, best_size = None, -1
+    for hdu in _image_hdus(hdul):
+        h = hdu.header
+        size = 1
+        for i in range(1, int(h.get("NAXIS", 0)) + 1):
+            size *= int(h.get(f"NAXIS{i}", 1))
+        if size > best_size:
+            best, best_size = hdu, size
+    if best is not None:
+        return best
+    # ヘッダが壊れていて HDU の種別を判別できないファイル向けの保険
+    for hdu in hdul:
+        try:
+            arr = hdu.data
+        except Exception:
+            continue
+        if arr is not None and getattr(arr, "dtype", None) is not None \
+                and arr.dtype.fields is None and np.ndim(arr) >= 2:
+            return hdu
+    return None
+
+
+def _bayer_pattern(header):
+    pat = header.get("BAYERPAT") or header.get("COLORTYP") or header.get("CFAIMAGE")
+    if pat is None and ("XBAYROFF" in header or "BAYOFFX" in header):
+        pat = "RGGB"
+    if pat is None:
+        return None
+    pat = str(pat).strip().upper()
+    return pat if pat in ("RGGB", "BGGR", "GRBG", "GBRG") else None
+
+
+def _load_fits(path):
+    """戻り値 (2次元配列, header, notes, flip_y)"""
+    notes = []
+    # memmap は巨大キューブで効くが、BZERO/BSCALE 付き (= 一般的な 16bit FITS)
+    # では astropy が拒否するので、そのときだけ読み込みに切り替える。
+    for use_memmap in (True, False):
+        notes = []
+        try:
+            with fits.open(path, memmap=use_memmap,
+                           ignore_missing_simple=True) as hdul:
+                hdu = _pick_fits_hdu(hdul)
+                if hdu is None:
+                    raise ValueError("画像データを含む HDU が FITS の中にありません。")
+                header = hdu.header.copy()
+                idx = list(hdul).index(hdu)
+                raw = hdu.data
+                notes.append(f"FITS HDU[{idx}] {tuple(np.shape(raw))} "
+                             f"{np.asarray(raw).dtype}")
+                data, note = _reduce_to_2d(raw)      # ここで必ずコピーが作られる
+                if note:
+                    notes.append(note)
+                blank = header.get("BLANK")
+                if blank is not None:
+                    data[data == float(blank)] = np.nan
+            # SharpCap / FireCapture は 1 行目が画面の上
+            flip = str(header.get("ROWORDER", "")).upper().startswith("TOP")
+            return data, header, notes, flip
+        except ValueError as e:
+            if use_memmap and "memory-mapped" in str(e):
+                continue
+            raise
+    raise ValueError("FITS を読めませんでした。")
+
+
+def _load_pil(path):
+    from PIL import Image, ImageOps
+    notes = []
+    with Image.open(path) as im:
+        try:
+            im = ImageOps.exif_transpose(im)
+        except Exception:
+            pass
+        notes.append(f"{im.format} {im.size} mode={im.mode}")
+        if im.mode in ("I;16", "I;16B", "I;16L", "I", "F"):
+            arr = np.asarray(im)
+        elif im.mode in ("RGB", "RGBA", "P", "YCbCr", "CMYK", "LA"):
+            arr = np.asarray(im.convert("RGB"))
+            notes.append("カラー 3 面を輝度に合成")
+        else:
+            arr = np.asarray(im.convert("F"))
+    data, note = _reduce_to_2d(arr)
+    if note and note not in notes:
+        notes.append(note)
+    return data, fits.Header(), notes, True     # 画像ファイルは 1 行目が上
+
+
+def load_image_any(path):
+    """FITS / PNG / JPEG / TIFF / キューブ を読み、2 次元 float32 にして返す。"""
+    lower = str(path).lower()
+    order = (_load_fits, _load_pil) if lower.endswith(_FITS_EXT) \
+        else (_load_pil, _load_fits)
+
+    first_error = None
+    for loader in order:
+        try:
+            data, header, notes, flip_y = loader(path)
+            break
+        except Exception as e:                # 拡張子と中身が食い違うファイル対策
+            if first_error is None:
+                first_error = e
+    else:
+        raise ValueError(f"画像として読み込めませんでした: {first_error}")
+
+    data = np.array(data, dtype=np.float32, copy=True)
+    if data.ndim != 2:
+        raise ValueError(f"2 次元画像になりませんでした: shape={data.shape}")
+    if min(data.shape) < 16:
+        raise ValueError(f"画像が小さすぎて解析できません: {data.shape}")
+
+    display = data.copy()
+
+    pat = _bayer_pattern(header)
+    if pat and ndimage is not None:
+        data = ndimage.uniform_filter(data, size=2, mode="nearest")
+        notes.append(f"ベイヤー配列 ({pat}) を 2x2 平均で平滑化")
+
+    bad = ~np.isfinite(data)
+    if bad.any():
+        good = data[~bad]
+        data[bad] = float(np.median(good)) if good.size else 0.0
+        notes.append(f"非有限値 {int(bad.sum())} 画素を中央値で補完")
+
+    if float(np.ptp(data)) <= 0:
+        raise ValueError("画像が一様です (全画素が同じ値)。露出やファイルを確認してください。")
+
+    return SolveInput(data, header, " / ".join(notes), display, flip_y)
+
+
+# ================================================================== 前処理 ===
+
+def _mask_overlay_bands(data, mask, max_band=0.08):
+    """
+    SharpCap / FireCapture などが焼き込む日時オーバーレイを検出してマスクする。
+    文字は「画面の縁に張り付き」「1 行の中で横に広く散らばり」「飽和に近い」。
+    """
+    ny, nx = data.shape
+    med = float(np.median(data))
+    sigma = float(sigma_clipped_stats(data, sigma=3.0)[2]) or 1.0
+    hot = data > med + 8.0 * sigma
+    if not hot.any():
+        return 0
+
+    masked = 0
+    band_rows = max(3, int(ny * max_band))
+    band_cols = max(3, int(nx * max_band))
+
+    def scan(count_fn, length, span, band, apply_fn):
+        nonlocal masked
+        for seq in (range(0, band), range(length - 1, length - band - 1, -1)):
+            streak = []
+            for i in seq:
+                idxs = count_fn(i)
+                if idxs.size >= 12 and (idxs.max() - idxs.min()) > 0.10 * span:
+                    streak.append(i)
+                elif streak:
+                    break
+            if streak:
+                lo = max(0, min(streak) - 3)
+                hi = min(length - 1, max(streak) + 3)
+                apply_fn(lo, hi)
+                masked += (hi - lo + 1) * span
+
+    scan(lambda y: np.flatnonzero(hot[y]), ny, nx, band_rows,
+         lambda lo, hi: mask.__setitem__((slice(lo, hi + 1), slice(None)), True))
+    scan(lambda x: np.flatnonzero(hot[:, x]), nx, ny, band_cols,
+         lambda lo, hi: mask.__setitem__((slice(None), slice(lo, hi + 1)), True))
+    return int(masked)
+
+
+def _mask_dead_edges(data, mask, frac=0.02):
+    """周辺減光やデベイヤー端で潰れた縁をマスクする。"""
+    ny, nx = data.shape
+    med = float(np.median(data))
+    for y in range(max(1, int(ny * frac))):
+        for row in (y, ny - 1 - y):
+            line = data[row]
+            if float(np.ptp(line)) < 1e-6 or float(np.median(line)) < med * 0.05:
+                mask[row, :] = True
+    for x in range(max(1, int(nx * frac))):
+        for col in (x, nx - 1 - x):
+            line = data[:, col]
+            if float(np.ptp(line)) < 1e-6 or float(np.median(line)) < med * 0.05:
+                mask[:, col] = True
+
+
+def _background(data, box=64):
+    """粗いグリッドの中央値を伸ばして背景面を作る (かぶり・周辺減光対策)。"""
+    ny, nx = data.shape
+    if ndimage is None:
+        return np.full_like(data, float(np.median(data)))
+    by, bx = max(1, ny // box), max(1, nx // box)
+    if by < 3 or bx < 3:
+        return np.full_like(data, float(np.median(data)))
+    ys = np.linspace(0, ny, by + 1).astype(int)
+    xs = np.linspace(0, nx, bx + 1).astype(int)
+    coarse = np.empty((by, bx), dtype=np.float32)
+    for i in range(by):
+        for j in range(bx):
+            tile = data[ys[i]:ys[i + 1], xs[j]:xs[j + 1]]
+            coarse[i, j] = np.median(tile) if tile.size else 0.0
+    coarse = ndimage.median_filter(coarse, size=3, mode="nearest")
+    back = ndimage.zoom(coarse, (ny / by, nx / bx), order=1)
+    if back.shape != data.shape:                     # zoom の丸め対策
+        out = np.full(data.shape, float(np.median(coarse)), dtype=np.float32)
+        h = min(ny, back.shape[0])
+        w = min(nx, back.shape[1])
+        out[:h, :w] = back[:h, :w]
+        back = out
+    return back
+
+
+def _kill_hot_pixels(sub, sigma):
+    """
+    まわりに何の広がりも持たない 1 画素だけの突出 (ホットピクセル / 宇宙線) を消す。
+
+    「隣 8 画素の合計が中心の 30% 未満」を条件にする。星は FWHM が 1 画素を
+    下回らないので、アンダーサンプルの星でも隣接画素が必ずついてくる。
+    個数でしきい値を切ると、光跡などで数が増えたときに一切効かなくなるので
+    条件そのもので判定する。
+    """
+    if ndimage is None:
+        return sub, 0
+    neigh_sum = ndimage.uniform_filter(sub, size=3, mode="nearest") * 9.0 - sub
+    hot = (sub > 8.0 * sigma) & (neigh_sum < 0.30 * sub)
+    n = int(hot.sum())
+    if n == 0 or n > 0.05 * sub.size:
+        return sub, 0
+    med3 = ndimage.median_filter(sub, size=3, mode="nearest")
+    return np.where(hot, med3, sub), n
+
+
+def preprocess(data, mask_overlay=True):
+    """背景を引き、マスクを作る。戻り値 (背景差引画像, mask, ノイズσ, 説明)"""
+    ny, nx = data.shape
+    mask = np.zeros(data.shape, dtype=bool)
+    info = []
+
+    sub = data - _background(data)
+    sigma = float(sigma_clipped_stats(sub, sigma=3.0)[2])
+    if not np.isfinite(sigma) or sigma <= 0:
+        sigma = float(np.std(sub)) or 1.0
+
+    # 焼き込み文字の判定より先に外す。ホットピクセルが行に散っていると
+    # 「文字列がある」と誤判定してしまうため。
+    sub, n_hot = _kill_hot_pixels(sub, sigma)
+    if n_hot:
+        info.append(f"ホットピクセル {n_hot} 画素を平滑化")
+
+    _mask_dead_edges(data, mask)
+    if mask_overlay:
+        n = _mask_overlay_bands(sub + float(np.median(data)), mask)
+        if n:
+            info.append(f"焼き込みオーバーレイとみられる {n} 画素をマスク")
+
+    ref = sub[~mask] if (~mask).any() else sub
+    s2 = float(sigma_clipped_stats(ref, sigma=3.0)[2])
+    if np.isfinite(s2) and s2 > 0:
+        sigma = s2
+
+    if mask.any():
+        info.append(f"マスク合計 {int(mask.sum())} / {ny * nx} 画素")
+    return sub, mask, sigma, info
+
+
+# ================================================================ 星の検出 ===
+
+def _measure(sub, labels, keep):
+    """ラベル領域ごとに重心・フラックス・伸びを測る。"""
+    out = []
+    slices = ndimage.find_objects(labels)
+    for lab in keep:
+        sl = slices[lab - 1]
+        if sl is None:
+            continue
+        tile = np.asarray(sub[sl], dtype=np.float64)
+        m = labels[sl] == lab
+        w = np.where(m, tile, 0.0)
+        tot = float(w.sum())
+        if tot <= 0:
+            continue
+        yy, xx = np.mgrid[sl[0].start:sl[0].stop, sl[1].start:sl[1].stop]
+        cx = float((w * xx).sum() / tot)
+        cy = float((w * yy).sum() / tot)
+        vx = float((w * (xx - cx) ** 2).sum() / tot)
+        vy = float((w * (yy - cy) ** 2).sum() / tot)
+        vxy = float((w * (xx - cx) * (yy - cy)).sum() / tot)
+        tr, det = vx + vy, vx * vy - vxy ** 2
+        root = np.sqrt(max(tr * tr / 4.0 - det, 0.0))
+        a2 = max(tr / 2.0 + root, 1e-6)
+        b2 = max(tr / 2.0 - root, 1e-6)
+        out.append(dict(x=cx, y=cy, flux=tot, peak=float(tile[m].max()),
+                        area=int(m.sum()), elong=float(np.sqrt(a2 / b2)),
+                        fwhm=float(2.3548 * np.sqrt(max((vx + vy) / 2.0, 1e-6)))))
+    return out
+
+
+def detect_sources(sub, mask, sigma, min_sources=12, max_sources=400,
+                   max_elongation=4.0, min_area=3, min_snr=5.0):
+    """
+    しきい値を下げながら星を探す。少なくとも min_sources 個見つかるまで粘る。
+    astrometry.net は 4 個で 1 quad を作るが、実用上は 10 個以上ほしい。
+    """
+    if ndimage is None:
+        raise RuntimeError("scipy が必要です:  pip install scipy")
+
+    work = np.where(mask, 0.0, sub)
+    ny, nx = work.shape
+    smooth = ndimage.gaussian_filter(work, sigma=1.0)
+    smooth_sigma = sigma / 2.0          # 平滑化でノイズが下がる分
+
+    best, used = [], None
+    for thr in (12.0, 8.0, 6.0, 5.0, 4.0, 3.0, 2.5, 2.0):
+        binary = smooth > thr * smooth_sigma
+        n_on = int(binary.sum())
+        if n_on == 0:
+            continue
+        if n_on > 0.25 * binary.size:   # 何かおかしい (雲・月明かり) ので下げない
+            break
+        labels, n = ndimage.label(binary)
+        if n == 0:
+            continue
+        if n > 20000:                   # ノイズが噴き出している
+            break
+        sizes = ndimage.sum(binary, labels, range(1, n + 1))
+        keep = np.flatnonzero(sizes >= min_area) + 1
+        if keep.size == 0:
+            continue
+        cand = []
+        for c in _measure(work, labels, keep):
+            # 開口 SNR。ノイズのこぶは面積のわりに光量が無いのでここで落ちる。
+            c["snr"] = c["flux"] / (sigma * np.sqrt(max(c["area"], 1)))
+            if c["snr"] < min_snr or c["elong"] > max_elongation:
+                continue
+            if not (2.0 <= c["x"] <= nx - 3 and 2.0 <= c["y"] <= ny - 3):
+                continue
+            cand.append(c)
+        if len(cand) > len(best):
+            best, used = cand, thr
+        if len(cand) >= min_sources:
+            best, used = cand, thr
+            break
+
+    best.sort(key=lambda c: -c["flux"])
+    return best[:max_sources], used
+
+
+def write_xylist(sources, width, height, path):
+    """solve-field に渡す xylist。FITS 規約なので座標は 1 始まりで書く。"""
+    x = np.array([s["x"] for s in sources], dtype=np.float32) + 1.0
+    y = np.array([s["y"] for s in sources], dtype=np.float32) + 1.0
+    flux = np.array([s["flux"] for s in sources], dtype=np.float32)
+    hdu = fits.BinTableHDU.from_columns(fits.ColDefs([
+        fits.Column(name="X", format="E", array=x),
+        fits.Column(name="Y", format="E", array=y),
+        fits.Column(name="FLUX", format="E", array=flux),
+    ]))
+    hdu.header["IMAGEW"] = int(width)
+    hdu.header["IMAGEH"] = int(height)
+    fits.HDUList([fits.PrimaryHDU(), hdu]).writeto(path, overwrite=True)
+    return path
+
+
+def write_solver_fits(data, path):
+    """solve-field にそのまま渡せる素直な 2 次元 float32 FITS。"""
+    arr = np.asarray(data, dtype=np.float32)
+    if not np.isfinite(arr).all():
+        arr = np.nan_to_num(arr, nan=float(np.nanmedian(arr)), posinf=0.0, neginf=0.0)
+    fits.PrimaryHDU(arr).writeto(path, overwrite=True)
+    return path
+
+
+# ============================================================ スケール推定 ===
+
+def _first_float(header, keys):
+    for k in keys:
+        if k in header:
+            try:
+                v = float(header[k])
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(v) and v != 0:
+                return v, k
+    return None, None
+
+
+def rig_key(header, shape):
+    """
+    「同じ機材・同じ画像サイズ」を表す鍵。
+    画素スケールは焦点距離とセンサーで決まるので、これが同じなら前回の実測値が使える。
+    """
+    ny, nx = shape
+    cam = str(header.get("INSTRUME") or header.get("CAMID")
+              or header.get("CAMERA") or "?").strip()
+    bx = header.get("XBINNING") or header.get("BINX") or 1
+    tel = str(header.get("TELESCOP") or "").strip()
+    focal = header.get("FOCALLEN") or ""
+    return f"{cam}|{tel}|{nx}x{ny}|bin{bx}|f{focal}"
+
+
+def remembered_scale(header, shape):
+    """前に同じ機材で解いたときの実測スケール [arcsec/px]。無ければ None。"""
+    return _cache_load().get("rigs", {}).get(rig_key(header, shape))
+
+
+def remember_scale(header, shape, scale_arcsec):
+    """解けたので、この機材の画素スケールを覚えておく。"""
+    if not (scale_arcsec and 0.01 < scale_arcsec < 3600):
+        return
+    cache = _cache_load()
+    cache.setdefault("rigs", {})[rig_key(header, shape)] = float(scale_arcsec)
+    _cache_save(cache)
+
+
+def estimate_pixel_scale(header, focal_length_mm=None, shape=None):
+    """
+    1 画素の秒角を推定する。戻り値 (arcsec/px or None, 説明)
+
+    上ほど信用できる順:
+      1. ユーザーが焦点距離を書いた
+      2. この画像自身が持っている WCS
+      3. ヘッダの画素スケールキーワード
+      4. ヘッダの焦点距離 x 画素サイズ
+      5. 前に同じ機材で解いたときの実測値  ← 2 回目以降は設定不要で速くなる
+
+    5 を最後に置いているのは、鏡筒を替えてもカメラが同じなら鍵が一致してしまうため。
+    ヘッダが焦点距離を書いてくれているなら、そちらを信じた方が安全。
+    """
+    if focal_length_mm:
+        pix, pk = _first_float(header, ["XPIXSZ", "PIXSIZE1", "XPIXELSZ",
+                                        "PIXSZ", "PIXSIZEX"])
+        if pix:
+            s = 206.264806 * pix / float(focal_length_mm)
+            if 0.01 < s < 3600:
+                return s, f"{pk}={pix}um と FOCAL_LENGTH_MM={focal_length_mm:g}mm から"
+
+    try:
+        w = WCS(header)
+        if w.is_celestial:
+            from astropy.wcs.utils import proj_plane_pixel_scales
+            s = float(np.mean(proj_plane_pixel_scales(w.celestial)) * 3600.0)
+            if 0.01 < s < 3600:
+                return s, "画像に既にあった WCS から"
+    except Exception:
+        pass
+
+    v, k = _first_float(header, ["SECPIX", "SECPIX1", "PIXSCALE", "SCALE",
+                                 "PLTSCALE", "CDELT1"])
+    if v is not None:
+        s = abs(v) * (3600.0 if k == "CDELT1" else 1.0)
+        if 0.01 < s < 3600:
+            return s, f"ヘッダ {k} から"
+
+    pix, pk = _first_float(header, ["XPIXSZ", "PIXSIZE1", "XPIXELSZ",
+                                    "PIXSZ", "PIXSIZEX"])
+    focal, fk = _first_float(header, ["FOCALLEN", "FOCAL", "FOCALLENGTH"])
+    if pix and focal:
+        s = 206.264806 * pix / focal
+        if 0.01 < s < 3600:
+            return s, f"{pk}={pix}um, {fk}={focal:g}mm から"
+
+    if shape is not None:
+        s = remembered_scale(header, shape)
+        if s:
+            return float(s), "前回この機材で解いたときの実測値"
+
+    return None, "手がかりなし (星図データが対応する画角を総当たりします)"
+
+
+def implied_focal_length(header, scale_arcsec):
+    """解けたスケールから焦点距離を逆算する (ヘッダに画素サイズがあるときだけ)。"""
+    pix, _ = _first_float(header, ["XPIXSZ", "PIXSIZE1", "XPIXELSZ",
+                                   "PIXSZ", "PIXSIZEX"])
+    if not pix or not scale_arcsec:
+        return None
+    return 206.264806 * pix / scale_arcsec
+
+
+# ================================================================ WSL 実行 ===
+
+def _run(cmd, timeout):
+    return subprocess.run(cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=timeout)
+
+
+def _bash(command, timeout):
+    """Windows なら WSL 経由、Linux/macOS ならそのまま bash に渡す。"""
+    if os.name == "nt":
+        return _run(["wsl.exe", "-e", "bash", "-lc", command], timeout=timeout)
+    return _run(["bash", "-lc", command], timeout=timeout)
+
+
+def wsl_available():
+    if os.name != "nt":
+        return shutil.which("solve-field") is not None
+    if not (shutil.which("wsl") or shutil.which("wsl.exe")):
+        return False
+    try:
+        p = _bash("echo ok", timeout=45)
+        return p.returncode == 0 and "ok" in (p.stdout or "")
+    except Exception:
+        return False
+
+
+def to_solver_path(win_path):
+    """Windows パス → WSL パス。wslpath に任せるので空白も日本語も安全。"""
+    if os.name != "nt":
+        return win_path
+    try:
+        p = _run(["wsl.exe", "-e", "wslpath", "-a", "-u", win_path], timeout=60)
+        if p.returncode == 0 and p.stdout.strip():
+            return p.stdout.strip()
+    except Exception:
+        pass
+    drive, rest = os.path.splitdrive(os.path.abspath(win_path))
+    return "/mnt/" + drive[0].lower() + rest.replace("\\", "/")
+
+
+# --- インデックスがカバーする画角 (arcmin)。astrometry.net の付番規則 ---------
+_INDEX_SCALES = {
+    0: (2, 2.8), 1: (2.8, 4), 2: (4, 5.6), 3: (5.6, 8), 4: (8, 11),
+    5: (11, 16), 6: (16, 22), 7: (22, 30), 8: (30, 42), 9: (42, 60),
+    10: (60, 85), 11: (85, 120), 12: (120, 170), 13: (170, 240),
+    14: (240, 340), 15: (340, 480), 16: (480, 680), 17: (680, 1000),
+    18: (1000, 1400), 19: (1400, 2000),
+}
+
+
+def index_coverage(index_names):
+    """index-XXXX[-YY].fits の一覧から、扱える画角 (arcmin) の範囲を返す。"""
+    lo = hi = None
+    for name in index_names:
+        core = os.path.basename(str(name))
+        if not core.startswith("index-"):
+            continue
+        num = core[len("index-"):].split("-")[0].split(".")[0]
+        if not num.isdigit() or len(num) < 2:
+            continue
+        s = _INDEX_SCALES.get(int(num[-2:]))
+        if not s:
+            continue
+        lo = s[0] if lo is None else min(lo, s[0])
+        hi = s[1] if hi is None else max(hi, s[1])
+    return lo, hi
+
+
+def blind_scale_bounds(width_px, index_names=None):
+    """
+    画角が全く分からないときに使う --scale-low/--scale-high。
+
+    手持ちの index が扱える画角から逆算するので、
+    「絶対に当たらない範囲」を探索しない = 総当たりでも無駄がない。
+    """
+    lo_fov, hi_fov = index_coverage(index_names or [])
+    if lo_fov is None:
+        lo_fov, hi_fov = 2.0, 2000.0        # astrometry.net が配布する全範囲
+    # index の quad は画角の 10%〜100% 程度まで使えるので下側に少し余裕を持たせる
+    low = lo_fov * 60.0 / float(width_px) * 0.9
+    high = hi_fov * 60.0 / float(width_px) * 1.1
+    return max(low, 0.01), min(high, 3600.0)
+
+
+def missing_index_advice(fov_arcmin, index_names):
+    """
+    この画角を解くにはどの index を足せばよいかを教える。
+    戻り値 (足りているか, 案内文のリスト)
+    """
+    have = set()
+    for name in index_names or []:
+        core = os.path.basename(str(name))
+        if core.startswith("index-"):
+            num = core[len("index-"):].split("-")[0].split(".")[0]
+            if num.isdigit() and len(num) >= 2:
+                have.add(int(num[-2:]))
+    need = [k for k, (lo, hi) in _INDEX_SCALES.items() if lo <= fov_arcmin < hi]
+    if not need:
+        return False, [f"画角 {fov_arcmin:.1f}′ は astrometry.net が配布する星図データの範囲 "
+                       "(2′〜2000′) の外です。ビニングやモザイクで画角を稼ぐか、"
+                       "build-astrometry-index で自作する必要があります。"]
+    if need[0] in have:
+        return True, []
+    lo, hi = _INDEX_SCALES[need[0]]
+    files = f"index-52{need[0]:02d}-00〜47.fits" if need[0] <= 6 else f"index-41{need[0]:02d}.fits"
+    msgs = [
+        f"画角 {fov_arcmin:.1f}′ に対応する星図データ ({lo:g}′〜{hi:g}′ 段) がありません。",
+        f"必要なファイル: {files}",
+    ]
+    if need[0] <= 6:
+        msgs.append(f"取得: python dev/fetch_index.py 52{need[0]:02d}")
+    return False, msgs
+
+
+def solver_diagnostics():
+    """solve-field と星図データが本当に使えるかを事前に確認する。"""
+    rep = {"ok": False, "messages": [], "indexes": [], "cfg": "", "paths": []}
+    if not wsl_available():
+        rep["messages"].append(
+            "WSL (または solve-field) が使えません。マニュアル 2.1〜2.2 のとおり "
+            "`wsl --install` と `sudo apt install astrometry.net -y` を実行してください。")
+        return rep
+
+    p = _bash("command -v solve-field", timeout=60)
+    if p.returncode != 0 or not p.stdout.strip():
+        rep["messages"].append(
+            "WSL の中に solve-field がありません。WSL のターミナルで "
+            "`sudo apt update && sudo apt install astrometry.net -y` を実行してください。")
+        return rep
+
+    cfg = _bash("cat /etc/astrometry.cfg 2>/dev/null", timeout=60)
+    rep["cfg"] = cfg.stdout or ""
+    paths = [ln.split(None, 1)[1].strip()
+             for ln in rep["cfg"].splitlines()
+             if ln.strip().startswith("add_path") and len(ln.split(None, 1)) > 1]
+    paths += ["/usr/share/astrometry", "/usr/local/astrometry/data"]
+    rep["paths"] = paths
+
+    listing = _bash(
+        "for d in %s; do ls -1 \"$d\"/index-*.fits 2>/dev/null; done"
+        % " ".join(shlex.quote(x) for x in paths), timeout=240)
+    rep["indexes"] = sorted({os.path.basename(x)
+                             for x in listing.stdout.split() if x.strip()})
+    if not rep["indexes"]:
+        rep["messages"].append(
+            "星図データ (index-*.fits) が 1 つも見つかりません。C:\\AstrometryData に "
+            "展開されているか、/etc/astrometry.cfg の add_path が正しいかを確認してください。")
+        return rep
+
+    rep["ok"] = True
+    return rep
+
+
+# ============================================================== solve-field ===
+
+def _wcs_from_dir(out_dir_win):
+    for name in sorted(os.listdir(out_dir_win)):
+        if not name.endswith(".wcs"):
+            continue
+        try:
+            hdr = fits.getheader(os.path.join(out_dir_win, name))
+            if WCS(hdr).is_celestial:
+                return hdr
+        except Exception:
+            continue
+    return None
+
+
+def _clean_outputs(out_dir_win):
+    for name in os.listdir(out_dir_win):
+        if name.endswith((".wcs", ".corr", ".axy", ".solved", ".rdls", ".match")):
+            try:
+                os.remove(os.path.join(out_dir_win, name))
+            except OSError:
+                pass
+
+
+def run_solve_field(file_win, kind, out_dir_win, width, height, opts,
+                    timeout, verbose=True):
+    """solve-field を 1 回だけ動かす。成功したら WCS ヘッダ、失敗したら None。"""
+    _clean_outputs(out_dir_win)
+    args = ["solve-field", to_solver_path(file_win),
+            "--overwrite", "--no-plots",
+            "--dir", to_solver_path(out_dir_win),
+            "--new-fits", "none", "--rdls", "none",
+            "--match", "none", "--solved", "none", "--index-xyls", "none"]
+    if kind == "xylist":
+        args += ["--width", str(int(width)), "--height", str(int(height)),
+                 "--x-column", "X", "--y-column", "Y", "--sort-column", "FLUX"]
+    args += list(opts)
+    command = " ".join(shlex.quote(a) for a in args)
+    if verbose:
+        _log(f"    $ {command}")
+    try:
+        p = _bash(command, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if verbose:
+            _log("      ! 制限時間内に終わりませんでした")
+        return None
+
+    hdr = _wcs_from_dir(out_dir_win)
+    if hdr is None and verbose:
+        for line in (p.stdout or "").splitlines():
+            if "simplexy: found" in line or "Field center" in line:
+                _log(f"      · {line.strip()}")
+        for line in (p.stderr or "").strip().splitlines()[-6:]:
+            _log(f"      ! {line}")
+    return hdr
+
+
+def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
+                  hint_radec=None, hint_radius_deg=5.0, verbose=True,
+                  diagnostics=None):
+    """
+    オフライン (WSL の astrometry.net) で解く。条件を変えながら粘り強く挑む。
+    戻り値: WCS ヘッダ or None
+    """
+    ny, nx = bundle.shape
+    if not sources:
+        _log("  ❌ 星が 1 つも無いので解析できません。")
+        return None
+
+    scale, how = estimate_pixel_scale(bundle.header, focal_length_mm, bundle.shape)
+    if scale:
+        _log(f"  - 画素スケール {scale:.3f}″/px ({how}) → 画角 {nx * scale / 60.0:.1f}′")
+    else:
+        _log(f"  - 画素スケール: {how}")
+
+    installed = (diagnostics or {}).get("indexes") or []
+    if installed:
+        lo, hi = index_coverage(installed)
+        if lo is not None:
+            _log(f"  - 手持ちの星図データが対応する画角: {lo:g}′ 〜 {hi:g}′"
+                 f" (index ファイル {len(installed)} 個)")
+            if scale:
+                ok, msgs = missing_index_advice(nx * scale / 60.0, installed)
+                for m in msgs:
+                    _log(("  ⚠️ " if not ok else "  - ") + m)
+
+    xy_path = write_xylist(sources, nx, ny,
+                           os.path.join(work_dir, "zahyou_sources.xyls"))
+    img_path = write_solver_fits(bundle.data,
+                                 os.path.join(work_dir, "zahyou_image.fits"))
+
+    t_short = max(30, int(timeout * 0.25))
+    t_long = max(60, int(timeout * 0.5))
+
+    def base(cpu):
+        return ["--cpulimit", str(int(cpu)), "--objs", str(min(len(sources), 200))]
+
+    hint = []
+    if hint_radec is not None:
+        hint = ["--ra", f"{hint_radec[0]:.6f}", "--dec", f"{hint_radec[1]:.6f}",
+                "--radius", f"{hint_radius_deg:g}"]
+
+    narrow = []
+    if scale:
+        narrow = ["--scale-units", "arcsecperpix",
+                  "--scale-low", f"{max(scale * 0.75, 0.01):.4f}",
+                  "--scale-high", f"{scale * 1.25:.4f}"]
+    # 画角が分からないときは「手持ちの index で解ける範囲」を総当たりする。
+    # 固定値 (v6.0 は 0.2〜120) だと、長焦点の画像がそもそも範囲外になってしまう。
+    wlo, whi = blind_scale_bounds(nx, installed)
+    wide = ["--scale-units", "arcsecperpix",
+            "--scale-low", f"{wlo:.4f}", "--scale-high", f"{whi:.4f}"]
+    if not scale:
+        _log(f"  - 探索するスケール: {wlo:.3f}〜{whi:.3f}″/px "
+             f"(画角 {wlo * nx / 60:.1f}′〜{whi * nx / 60:.0f}′ 相当)")
+
+    attempts = []
+    if hint and narrow:
+        attempts.append(("xylist", xy_path, "座標ヒント + スケール既知",
+                         base(t_short) + hint + narrow, t_short))
+    if hint:
+        attempts.append(("xylist", xy_path, "座標ヒント + スケール全域",
+                         base(t_short) + hint + wide, t_short))
+    if narrow:
+        attempts.append(("xylist", xy_path, "全天 + スケール既知",
+                         base(t_long) + narrow, t_long))
+    attempts += [
+        ("xylist", xy_path, "全天 + スケール全域", base(t_long) + wide, t_long),
+        ("xylist", xy_path, "全天 + 歪み補正なし (星が少ない画像向け)",
+         base(t_long) + wide + ["--no-tweak"], t_long),
+        ("image", img_path, "画像を直接渡す (2x 縮小)",
+         base(t_long) + wide + ["--downsample", "2"], t_long),
+        ("image", img_path, "画像を直接渡す (4x 縮小)",
+         base(t_long) + wide + ["--downsample", "4"], t_long),
+    ]
+
+    deadline = time.time() + timeout
+    for i, (kind, path, label, opts, t) in enumerate(attempts, 1):
+        left = deadline - time.time()
+        if left < 20:
+            _log("  ⏱ 制限時間に達したので、これ以上の再試行はしません。")
+            break
+        t = int(min(t, left))
+        _log(f"\n  [{i}/{len(attempts)}] {label}  (最大 {t} 秒)")
+        hdr = run_solve_field(path, kind, work_dir, nx, ny, opts,
+                              timeout=t + 45, verbose=verbose)
+        if hdr is not None:
+            _log(f"  ✅ 解析成功 ({label})")
+            return hdr
+
+    _log("\n  ❌ すべての条件で解けませんでした。心当たりの順に:")
+    if len(sources) < 15:
+        _log(f"     ・写っている星が {len(sources)} 個と少なめです。"
+             "露出を伸ばすか、複数フレームを重ねてください。")
+    lo_fov, hi_fov = index_coverage(installed)
+    if lo_fov is not None:
+        _log(f"     ・手持ちの星図データは画角 {lo_fov:g}′〜{hi_fov:g}′ しか解けません。"
+             "これより狭い(長焦点)画像なら、細かい index が必要です:")
+        _log(f"         python dev/fetch_index.py 5204 5203 5202"
+             f"   ({'4′' if lo_fov <= 4 else '4′'}まで対応)")
+    if not scale:
+        _log("     ・FOCAL_LENGTH_MM に焦点距離を書くと画角が確定し、"
+             "総当たりをやめるので格段に速く・確実になります。")
+    _log("     ・ピントや雲、極端な露出過多も疑ってください。")
+    return None
+
+
+# ============================================================ オンライン解析 ===
+
+def internet_available(timeout=4):
+    """astrometry.net に本当に届くかを見る (google では意味がない)。"""
+    import urllib.request
+    for url in ("https://nova.astrometry.net/api/", "https://nova.astrometry.net/"):
+        try:
+            urllib.request.urlopen(url, timeout=timeout)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _with_deadline(fn, timeout, label):
+    """
+    指定時間で必ず戻る呼び出し。
+    v5 は with ThreadPoolExecutor(...) を使っていたため、タイムアウト後も
+    ブロックの出口でワーカーの終了を待ってしまい、実際には打ち切れなかった。
+    """
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        future = executor.submit(fn)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            future.cancel()
+            _log(f"⚠️ {label}が {timeout:.0f} 秒で終わりませんでした。")
+            return None
+    finally:
+        # wait=False にしないと、ここで居残りスレッドの終了を待ってしまう
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def solve_online(image_path, api_key, sources=None, shape=None, timeout=120,
+                 hint_radec=None, hint_radius_deg=5.0, scale_hint=None):
+    """
+    nova.astrometry.net に投げる。指定時間で必ず戻る。
+
+    星のリストがあるならそれを送る。画像そのものより桁違いに軽く、
+    オフラインとまったく同じ検出結果で解けるので結果もぶれない。
+    """
+    from astroquery.astrometry_net import AstrometryNet
+
+    ast = AstrometryNet()
+    ast.api_key = api_key
+    settings = {}
+    if hint_radec is not None:
+        settings.update(center_ra=float(hint_radec[0]),
+                        center_dec=float(hint_radec[1]),
+                        radius=float(hint_radius_deg))
+    if scale_hint:
+        settings.update(scale_units="arcsecperpix", scale_type="ul",
+                        scale_lower=float(scale_hint) * 0.75,
+                        scale_upper=float(scale_hint) * 1.25)
+
+    if sources and shape is not None:
+        ny, nx = shape
+        xs = [s["x"] + 1.0 for s in sources]      # xylist は FITS 規約で 1 始まり
+        ys = [s["y"] + 1.0 for s in sources]
+        _log(f"  - 検出した {len(xs)} 個の星の位置だけを送ります。")
+        hdr = _with_deadline(
+            lambda: ast.solve_from_source_list(
+                xs, ys, int(nx), int(ny),
+                solve_timeout=int(timeout), verbose=False, **settings),
+            timeout + 15, "オンライン解析")
+        if hdr:
+            return hdr
+        _log("  - 星の位置だけでは解けなかったので、画像そのものを送ります。")
+
+    return _with_deadline(
+        lambda: ast.solve_from_image(image_path, solve_timeout=int(timeout),
+                                     verbose=False, **settings),
+        timeout + 30, "オンライン解析")
+
+
+# ============================================================== 目標の座標 ===
+
+def _cache_path():
+    """目標の座標と機材ごとの画素スケールを覚えておくファイル。"""
+    return os.environ.get(
+        "ZAHYOU_CACHE",
+        os.path.join(tempfile.gettempdir(), "zahyou_cache.json"))
+
+
+def _cache_load():
+    try:
+        with open(_cache_path(), encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _cache_save(cache):
+    try:
+        with open(_cache_path(), "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=1)
+    except Exception:
+        pass
+
+
+def resolve_target_name(name, online=True):
+    """
+    天体名 / カタログ名 → (RA, Dec) [度]。
+    一度引いた名前はキャッシュするので、次からはオフラインでも使える。
+    """
+    from astropy.coordinates import SkyCoord
+    import astropy.units as u
+
+    key = " ".join(str(name).split()).upper()
+    cache = _cache_load()
+    targets = cache.setdefault("targets", {})
+
+    if not online:
+        hit = targets.get(key)
+        if hit:
+            _log(f"  (オフライン) 以前調べた座標を再利用します: {name}")
+            return hit["ra"], hit["dec"]
+        _log(f"  ❌ オフラインでは '{name}' を座標に変換できません。"
+             " INPUT_MODE='COORDS' で赤経赤緯を直接入力してください。")
+        return None, None
+
+    _log(f"\n'{name}' の座標を調べています...")
+    try:
+        base = SkyCoord.from_name(name)
+    except Exception as e:
+        _log(f"  ❌ 名前を解決できませんでした: {e}")
+        hit = targets.get(key)
+        if hit:
+            _log("  → 以前調べた座標を使います。")
+            return hit["ra"], hit["dec"]
+        return None, None
+    _log(f"  - 名前解決 (SIMBAD/Sesame): {base.to_string('hmsdms', precision=3)}")
+
+    ra, dec = base.ra.deg, base.dec.deg
+    try:
+        from astroquery.vizier import Vizier
+        v = Vizier(catalog="I/355/gaiadr3",
+                   columns=["RA_ICRS", "DE_ICRS", "Gmag"])
+        v.ROW_LIMIT = 50
+        res = v.query_region(base, radius=5 * u.arcsec)
+        if res and len(res[0]):
+            t = res[0]
+            cand = SkyCoord(np.asarray(t["RA_ICRS"], dtype=float),
+                            np.asarray(t["DE_ICRS"], dtype=float), unit="deg")
+            # v5 は先頭行を無条件に採用していた。5″以内に複数あると別の星を掴む。
+            i = int(np.argmin(base.separation(cand).arcsec))
+            ra, dec = float(t["RA_ICRS"][i]), float(t["DE_ICRS"][i])
+            extra = ""
+            if "Gmag" in t.colnames:
+                try:
+                    extra = f" (G={float(t['Gmag'][i]):.2f}, 候補 {len(t)} 個中で最も近い星)"
+                except Exception:
+                    pass
+            _log(f"  - Gaia DR3 で精密化: RA={ra:.6f}° Dec={dec:.6f}°{extra}")
+    except Exception as e:
+        _log(f"  - Gaia DR3 の照合はできませんでした ({e})。SIMBAD の座標を使います。")
+
+    targets[key] = {"ra": ra, "dec": dec, "name": str(name)}
+    _cache_save(cache)
+    return ra, dec
