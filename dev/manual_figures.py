@@ -3,9 +3,11 @@ from __future__ import annotations
 
 from reportlab.lib import colors
 from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
 from reportlab.platypus import Flowable
 
-from manual_style import ACCENT, CODE_BG, INK, JP, JPB, MUTED, RULE
+from manual_style import (ACCENT, CODE, CODE_BG, INK, JP, JPB, MUTED,
+                          RULE)
 
 
 class NotebookLayout(Flowable):
@@ -151,4 +153,106 @@ class ArrowLegend(Flowable):
             c.setFillColor(colors.HexColor("#3A424E"))
             c.drawString(32 * mm, y, desc)
             y -= 6 * mm
+        c.restoreState()
+
+
+class FoldHint(Flowable):
+    """行の左はしの ∨ でコードを折りたたむ操作の図。"""
+
+    PW = 92 * mm          # コード枠の幅
+    CX = 99 * mm          # 説明文の左はし
+
+    def __init__(self, width):
+        super().__init__()
+        self.width = width
+        self.height = 44 * mm
+
+    def _chevron(self, c, cx, cy, direction):
+        """折りたたみの矢印。フォントに頼らず線で描く。"""
+        s = 1.3 * mm
+        c.setStrokeColor(colors.HexColor("#5A6472"))
+        c.setLineWidth(1.0)
+        c.setLineCap(1)
+        c.setLineJoin(1)
+        if direction == "down":
+            c.line(cx - s, cy + s * 0.6, cx, cy - s * 0.6)
+            c.line(cx, cy - s * 0.6, cx + s, cy + s * 0.6)
+        else:
+            c.line(cx - s * 0.6, cy + s, cx + s * 0.6, cy)
+            c.line(cx + s * 0.6, cy, cx - s * 0.6, cy - s)
+
+    def _panel(self, c, y, h):
+        c.setStrokeColor(RULE)
+        c.setFillColor(CODE_BG)
+        c.setLineWidth(0.7)
+        c.roundRect(0, y, self.PW, h, 1.5 * mm, stroke=1, fill=1)
+
+    def _note(self, c, y, lines):
+        for i, ln in enumerate(lines):
+            c.setFont(JPB if i == 0 else JP, 8.4)
+            c.setFillColor(INK if i == 0 else colors.HexColor("#3A424E"))
+            c.drawString(self.CX, y - i * 4.6 * mm, ln)
+
+    def draw(self):
+        c = self.canv
+        c.saveState()
+        h = self.height
+        size, lh = 7.8, 3.9 * mm
+
+        # ---- 上: 開いた状態 ------------------------------------------
+        top_h, top_y = 15 * mm, h - 15 * mm
+        self._panel(c, top_y, top_h)
+        c.setFont(CODE, size)
+        c.setFillColor(INK)
+        base = top_y + top_h - 4.6 * mm
+        for i, ln in enumerate(["try:",
+                                "    with open(_path) as _f:",
+                                "        exec(_f.read())"]):
+            c.drawString(8 * mm, base - i * lh, ln)
+        self._chevron(c, 4.8 * mm, base + 0.9 * mm, "down")
+        self._note(c, base + 0.2 * mm,
+                   ["① 行の左はしにマウスを置く",
+                    "∨ が出てきます。押すと畳めます"])
+
+        # ---- 矢印 ----------------------------------------------------
+        c.setStrokeColor(colors.HexColor("#9AA7B4"))
+        c.setLineWidth(0.9)
+        c.line(6 * mm, top_y - 1.5 * mm, 6 * mm, top_y - 6.0 * mm)
+        p = c.beginPath()
+        p.moveTo(6 * mm, top_y - 7.4 * mm)
+        p.lineTo(4.8 * mm, top_y - 5.6 * mm)
+        p.lineTo(7.2 * mm, top_y - 5.6 * mm)
+        p.close()
+        c.setFillColor(colors.HexColor("#9AA7B4"))
+        c.drawPath(p, stroke=0, fill=1)
+        c.setFont(JP, 7.8)
+        c.setFillColor(MUTED)
+        c.drawString(9.5 * mm, top_y - 5.4 * mm, "クリック")
+
+        # ---- 下: 畳んだ状態 ------------------------------------------
+        bot_h, bot_y = 8.6 * mm, h - 15 * mm - 9.4 * mm - 8.6 * mm
+        self._panel(c, bot_y, bot_h)
+        c.setFillColor(colors.HexColor("#E3EAF2"))       # 畳んだ行は色が付く
+        c.rect(1 * mm, bot_y + 2.2 * mm, self.PW - 2 * mm, 4.2 * mm,
+               stroke=0, fill=1)
+        c.setFont(CODE, size)
+        c.setFillColor(INK)
+        c.drawString(8 * mm, bot_y + 3.3 * mm, "try:")
+        c.setFillColor(MUTED)
+        c.drawString(8 * mm + pdfmetrics.stringWidth("try: ", CODE, size),
+                     bot_y + 3.3 * mm, "⋯")
+        self._chevron(c, 4.8 * mm, bot_y + 4.2 * mm, "right")
+        self._note(c, bot_y + bot_h - 3.0 * mm,
+                   ["② 中身が 1 行に縮みます",
+                    "左は ＞ に変わり、行末に ⋯ が付きます"])
+
+        c.setFont(JP, 7.8)
+        c.setFillColor(MUTED)
+        c.drawString(0, 6.2 * mm,
+                     "※ 矢印の上にマウスを置くと"
+                     "「クリックして範囲を折りたたみます。」と説明が出ます。"
+                     "これが目印です。")
+        c.drawString(0, 1.8 * mm,
+                     "※ 変わるのは見た目だけです。畳んだまま実行しても、"
+                     "動くのは中身の全部です。もう一度押すと開きます。")
         c.restoreState()
