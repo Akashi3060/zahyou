@@ -1,0 +1,9 @@
+# PyInstaller が作るもの (exe は Release に置く。リポジトリには入れない)
+build/
+dist/
+__pycache__/
+
+# 自己診断の出力
+selftest.txt
+engine.txt
+_test_out/
