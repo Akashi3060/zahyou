@@ -531,6 +531,13 @@ class App(tk.Tk):
         ttk.Label(g, text="Dec").grid(row=4, column=0, sticky="w")
         self.e_dec = ttk.Entry(g, textvariable=self.v_dec)
         self.e_dec.grid(row=4, column=1, sticky="ew", pady=1)
+        ttk.Radiobutton(g, text="指定しない (完全ブラインド)", value="NONE",
+                        variable=self.v_mode, command=self._sync_mode
+                        ).grid(row=5, column=0, columnspan=2, sticky="w",
+                               pady=(8, 0))
+        ttk.Label(g, text="画像がどこを向いているかだけ求めます。矢印は出ません。",
+                  style="Muted.TLabel", wraplength=310).grid(
+            row=6, column=0, columnspan=2, sticky="w")
         g.columnconfigure(1, weight=1)
 
         # --- 望遠鏡 -----------------------------------------------------
@@ -603,12 +610,15 @@ class App(tk.Tk):
         self.v_r1 = tk.StringVar(value="—")
         self.v_r2 = tk.StringVar(value="—")
         self.v_r3 = tk.StringVar(value="—")
-        for i, (cap, var) in enumerate([("画像中心から目標までの距離", self.v_r1),
-                                        ("赤経 (RA) 方向", self.v_r2),
-                                        ("赤緯 (Dec) 方向", self.v_r3)]):
+        self.v_c1 = tk.StringVar(value="画像中心から目標までの距離")
+        self.v_c2 = tk.StringVar(value="赤経 (RA) 方向")
+        self.v_c3 = tk.StringVar(value="赤緯 (Dec) 方向")
+        for i, (cap, var) in enumerate([(self.v_c1, self.v_r1),
+                                        (self.v_c2, self.v_r2),
+                                        (self.v_c3, self.v_r3)]):
             cell = ttk.Frame(box, padding=(2, 2))
             cell.grid(row=0, column=i, sticky="ew", padx=(0, 18))
-            ttk.Label(cell, text=cap, style="BigCap.TLabel").pack(anchor="w")
+            ttk.Label(cell, textvariable=cap, style="BigCap.TLabel").pack(anchor="w")
             ttk.Label(cell, textvariable=var, style="Big.TLabel").pack(anchor="w")
         box.columnconfigure((0, 1, 2), weight=1)
         self.v_detail = tk.StringVar(value="画像を選んで「解析を実行」を押してください。")
@@ -912,10 +922,10 @@ class App(tk.Tk):
             self.image_path.set(p)
 
     def _sync_mode(self):
-        star = self.v_mode.get() == "STAR_NAME"
-        self.e_name.configure(state="normal" if star else "disabled")
+        mode = self.v_mode.get()
+        self.e_name.configure(state="normal" if mode == "STAR_NAME" else "disabled")
         for w in (self.e_ra, self.e_dec):
-            w.configure(state="disabled" if star else "normal")
+            w.configure(state="normal" if mode == "COORDS" else "disabled")
 
     def _params(self):
         def num(s, default=None):
@@ -954,7 +964,11 @@ class App(tk.Tk):
             messagebox.showwarning(APP_NAME, "画像を選んでください。")
             return
         if self.v_mode.get() == "STAR_NAME" and not self.v_name.get().strip():
-            messagebox.showwarning(APP_NAME, "目標の天体名を入れてください。")
+            messagebox.showwarning(
+                APP_NAME,
+                "目標の天体名を入れてください。\n"
+                "目標を決めずに画像の向きだけ知りたいときは"
+                "「指定しない (完全ブラインド)」を選んでください。")
             return
         self.txt_log.delete("1.0", "end")
         self._clear_figures()
@@ -1000,9 +1014,22 @@ class App(tk.Tk):
         off = res.get("offsets")
         if off:
             sep, ra_min, dec_min, ra_dir, dec_dir = off
+            self.v_c1.set("画像中心から目標までの距離")
+            self.v_c2.set("赤経 (RA) 方向")
+            self.v_c3.set("赤緯 (Dec) 方向")
             self.v_r1.set(f"{sep.arcmin:.3f}′")
             self.v_r2.set(f"{abs(ra_min):.3f}′ {ra_dir}")
             self.v_r3.set(f"{abs(dec_min):.3f}′ {dec_dir}")
+        elif s:
+            # 目標を指定していないとき (完全ブラインド) は向きそのものを出す
+            self.v_c1.set("画像中心 (赤経)")
+            self.v_c2.set("画像中心 (赤緯)")
+            self.v_c3.set("画素スケール")
+            c = s["center"]
+            self.v_r1.set(c.ra.to_string(unit="hourangle", sep="hms", precision=1))
+            self.v_r2.set(c.dec.to_string(unit="deg", sep="dms", precision=0,
+                                          alwayssign=True))
+            self.v_r3.set(f"{s['scale']:.3f}″/px")
         else:
             for v in (self.v_r1, self.v_r2, self.v_r3):
                 v.set("—")
@@ -1064,23 +1091,45 @@ class App(tk.Tk):
 
         canvas = FigureCanvasTkAgg(fig, master=frame)
         canvas.draw()
+        # matplotlib のツールバーは「黒い絵」のアイコンを素の tk ボタンに貼るので、
+        # 暗い配色だとほとんど見えない。状態機械としてだけ借りて、
+        # 見た目は ttk で作り直す (配色が必ず付いてくるし、文字なので意味も分かる)。
         tb = NavigationToolbar2Tk(canvas, frame, pack_toolbar=False)
-        tb.update()
-        # ツールバーは素の tk 部品なので、配色は自分で入れる
-        th = self.th
+        bar = ttk.Frame(frame)
+        v_pan = tk.BooleanVar(value=False)
+        v_zoom = tk.BooleanVar(value=False)
+        slot["vars"] = (v_pan, v_zoom)          # 参照を残さないと GC される
+
+        def sync():
+            m = str(getattr(tb, "mode", "") or "")
+            v_pan.set("pan" in m)
+            v_zoom.set("zoom" in m)
+
+        def act(fn):
+            def run():
+                fn()
+                sync()
+            return run
+
+        ttk.Button(bar, text="全体", width=6,
+                   command=act(tb.home)).pack(side="left")
+        ttk.Button(bar, text="戻る", width=6,
+                   command=act(tb.back)).pack(side="left", padx=2)
+        ttk.Button(bar, text="進む", width=6,
+                   command=act(tb.forward)).pack(side="left")
+        ttk.Checkbutton(bar, text="移動", width=6, style="Toolbutton",
+                        variable=v_pan,
+                        command=act(tb.pan)).pack(side="left", padx=(8, 2))
+        ttk.Checkbutton(bar, text="拡大", width=6, style="Toolbutton",
+                        variable=v_zoom,
+                        command=act(tb.zoom)).pack(side="left")
+        ttk.Button(bar, text="画像を保存",
+                   command=tb.save_figure).pack(side="left", padx=(8, 0))
+        bar.pack(side="bottom", fill="x", pady=(2, 0))
         try:
-            tb.configure(background=th["bg"])
-            for w in tb.winfo_children():
-                try:
-                    w.configure(background=th["bg"])
-                    if isinstance(w, tk.Label):
-                        w.configure(foreground=th["muted"])
-                except tk.TclError:
-                    pass
-            canvas.get_tk_widget().configure(bg=th["bg"], highlightthickness=0)
+            canvas.get_tk_widget().configure(bg=self.th["bg"], highlightthickness=0)
         except tk.TclError:
             pass
-        tb.pack(side="bottom", fill="x")
         canvas.get_tk_widget().pack(fill="both", expand=True)
         slot["canvas"] = canvas
         # 貼り直しのたびに増えないよう、今ある枠ぶんだけを持ち直す
@@ -1146,17 +1195,45 @@ class App(tk.Tk):
                 APP_NAME,
                 "焦点距離とセンサー横幅 [mm] を入れてください。\n"
                 "例: 焦点距離 800、センサー横幅 7.4 (1/1.8 型)\n"
-                "分からなければ、画像 1 枚を解析すると下に「逆算した焦点距離」が出ます。")
+                "分からなければ、画像 1 枚を解析すると下に「逆算した焦点距離」が出ます。\n\n"
+                "[解析] タブで画像を選んでおくと、切り出した縦横も見て選びます。")
             return
-        fov = env.fov_arcmin(focal, sensor)
-        want = env.recommend_scales(fov)
-        have = (self.env_state or {}).get("index", {}).get("scales", [])
-        for s, var in self.scale_vars.items():
-            var.set(s in want and s not in have)
-        need = [s for s in want if s not in have]
-        mb = sum(env.SCALE_MB.get(s, 0) for s in need)
-        self.log_env(f"画角 {fov:.1f}′ → 必要な段 {want}")
+        have = list((self.env_state or {}).get("index", {}).get("scales", []))
+        path = self.image_path.get().strip()
+        self._bg(lambda: self._recommend_worker(focal, sensor, path, have),
+                 "画角を調べています...")
+
+    def _recommend_worker(self, focal, sensor, path, have):
+        """
+        必要な段を選ぶ。横幅だけでなく「短辺」も見る。
+
+        掩蔽観測では、ローリングシャッターの影響を減らしコマ落ちを避けるために
+        読み出す範囲 (特に縦) を切り詰める。すると短辺の画角だけが極端に狭くなり、
+        quad の大きさは短辺で決まるので、横幅だけで選ぶと足りない段が出る。
+        """
+        fov_w = env.fov_arcmin(focal, sensor)
+        fov_h = None
+        if path and os.path.exists(path) and self.engine.ns:
+            try:
+                ny, nx = self.engine.ns["load_image_any"](path).shape
+                fov_h = fov_w * ny / float(nx)
+                self.log_env(f"画像 {nx} x {ny} 画素 → 画角 {fov_w:.1f}′ x {fov_h:.1f}′")
+                if max(nx, ny) >= 1.8 * min(nx, ny):
+                    self.log_env("  縦横比が大きいので、短辺 "
+                                 f"{min(fov_w, fov_h):.1f}′ に合う段も入れます。")
+            except Exception as e:
+                self.log_env(f"画像の大きさを読めませんでした ({type(e).__name__})。"
+                             "横幅だけで選びます。")
+        else:
+            self.log_env(f"画角 {fov_w:.1f}′ (横幅から)。"
+                         "[解析] タブで画像を選ぶと、切り出した縦横も見ます。")
+
+        want = env.recommend_scales(fov_w, fov_h)
+        need = [x for x in want if x not in have]
+        mb = sum(env.SCALE_MB.get(x, 0) for x in need)
+        self.log_env(f"  必要な段 {want}")
         self.log_env(f"  まだ無いのは {need or 'なし'} (約 {mb/1024:.1f} GB)")
+        self._post(lambda: [v.set(k in need) for k, v in self.scale_vars.items()])
 
     def _download_index(self):
         scales = [s for s, v in self.scale_vars.items() if v.get()]
@@ -1326,6 +1403,21 @@ def selftest(image, target="UCAC4 660-021020", offline_first=True, log_out=None,
         check("画像中心などが出る", "画素スケール" in app.v_detail.get(),
               app.v_detail.get()[:70])
         check("ログが流れている", "解析結果" in app.txt_log.get("1.0", "end"))
+
+        # --- 完全ブラインド: 目標を指定せずに向きだけ求める -------------
+        app.v_mode.set("NONE")
+        app._sync_mode()
+        app.update()
+        app._start_analysis()
+        done2 = pump(app, 420, lambda: not app.busy)
+        pump(app, 3)
+        check("目標なしでも解ける", done2 and app.v_r1.get() not in ("—", ""),
+              f"{app.v_c1.get()} = {app.v_r1.get()}")
+        check("向きが数字で出る", "画像中心" in app.v_c1.get(),
+              f"{app.v_c2.get()} = {app.v_r2.get()} / "
+              f"{app.v_c3.get()} = {app.v_r3.get()}")
+        app.v_mode.set("STAR_NAME")
+        app._sync_mode()
 
     # どのタブにも、文字の見切れたボタンが無いこと
     bad = []

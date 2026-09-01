@@ -15,6 +15,12 @@ def _pick_image_path():
 
 def _resolve_target(online):
     """設定から目標の SkyCoord を作る。作れなければ None。"""
+    # 完全ブラインド: 目標を決めずに、画像がどこを向いているかだけ知りたいとき。
+    # 天体名が空のときも同じ扱いにする (打ち忘れで止まるより親切)。
+    if INPUT_MODE == 'NONE' or (INPUT_MODE == 'STAR_NAME'
+                                and not str(TARGET_STAR_NAME or '').strip()):
+        _log("  目標は指定されていません。画像がどこを向いているかだけ求めます。")
+        return None
     if INPUT_MODE == 'COORDS':
         try:
             return SkyCoord(RA_INPUT_STR, DEC_INPUT_STR, frame='icrs')

@@ -35,7 +35,7 @@ SCALE_FOV = {
 SCALE_MB = {
     4107: 158, 4108: 79, 4109: 40, 4110: 20, 4111: 10, 4112: 5, 4113: 3,
     4114: 2, 4115: 1, 4116: 1, 4117: 1, 4118: 1, 4119: 1,
-    5200: 22000, 5201: 9500, 5202: 4700, 5203: 2400, 5204: 1200,
+    5200: 15900, 5201: 9300, 5202: 4900, 5203: 2400, 5204: 1200,
     5205: 620, 5206: 320,
 }
 LITE_BASE = "https://portal.nersc.gov/project/cosmo/temp/dstn/index-5200/LITE"
@@ -288,17 +288,27 @@ def fov_arcmin(focal_mm, sensor_mm):
     return math.degrees(2 * math.atan(sensor_mm / 2.0 / focal_mm)) * 60.0
 
 
-def recommend_scales(fov):
-    """その画角を解くのに要る段。導入誤差ぶん、前後 1 段ずつ足す。"""
+def recommend_scales(fov, fov_short=None):
+    """
+    その画角を解くのに要る段。導入誤差ぶん、前後 1 段ずつ足す。
+
+    fov_short を渡すと、短辺の画角から長辺の画角までをまとめて覆う。
+    掩蔽観測では、ローリングシャッターの影響を減らしコマ落ちを避けるために
+    読み出す範囲 (特に縦) を切り詰めるので、短辺だけが極端に狭くなる。
+    quad の大きさは短いほうの辺で決まるため、横幅だけで選ぶと足りない。
+    """
     if not fov or fov <= 0:
         return []
+    lo_fov = min(fov, fov_short) if fov_short else fov
+    hi_fov = max(fov, fov_short) if fov_short else fov
     keys = sorted(SCALE_FOV)
-    hit = [s for s in keys if SCALE_FOV[s][0] <= fov <= SCALE_FOV[s][1]]
+    hit = [s for s in keys
+           if SCALE_FOV[s][1] >= lo_fov and SCALE_FOV[s][0] <= hi_fov]
     if not hit:                                   # 範囲外なら一番近い段
-        hit = [min(keys, key=lambda s: min(abs(SCALE_FOV[s][0] - fov),
-                                           abs(SCALE_FOV[s][1] - fov)))]
+        hit = [min(keys, key=lambda s: min(abs(SCALE_FOV[s][0] - lo_fov),
+                                           abs(SCALE_FOV[s][1] - hi_fov)))]
     out = set(hit)
-    for s in hit:
+    for s in (hit[0], hit[-1]):
         i = keys.index(s)
         for j in (i - 1, i + 1):
             if 0 <= j < len(keys):

@@ -399,6 +399,12 @@ def detect_sources(sub, mask, sigma, min_sources=12, max_sources=400,
     """
     しきい値を下げながら星を探す。少なくとも min_sources 個見つかるまで粘る。
     astrometry.net は 4 個で 1 quad を作るが、実用上は 10 個以上ほしい。
+
+    min_snr を 3.0 に下げると暗い画像で星は増えるが (実測 8 → 15 個)、
+    疎な星野では雑音のこぶも同じだけ増える (合成テストで純度 100% → 30%)。
+    どの値でも「本物だけ増やす」ことはできなかったので 5.0 のままにしてある。
+    星が少ない画像は、こちらの検出に頼らず solve-field 自身の抽出に任せる
+    (solve_offline が画像そのものを渡す経路を先に試す)。
     """
     if ndimage is None:
         raise RuntimeError("scipy が必要です:  pip install scipy")
@@ -798,8 +804,18 @@ def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
         return None
 
     scale, how = estimate_pixel_scale(bundle.header, focal_length_mm, bundle.shape)
+    fov_w = nx * scale / 60.0 if scale else None
+    fov_h = ny * scale / 60.0 if scale else None
+    # 掩蔽観測ではローリングシャッターの影響を減らし、コマ落ちを避けるために
+    # 読み出す範囲 (特に縦) を切り詰める。すると短辺の画角が極端に狭くなり、
+    # quad が小さくなるので、横幅だけ見ていると必要な index を見誤る。
+    thin = bool(scale) and max(nx, ny) >= 1.8 * min(nx, ny)
     if scale:
-        _log(f"  - 画素スケール {scale:.3f}″/px ({how}) → 画角 {nx * scale / 60.0:.1f}′")
+        if thin:
+            _log(f"  - 画素スケール {scale:.3f}″/px ({how}) "
+                 f"→ 画角 {fov_w:.1f}′ x {fov_h:.1f}′ (短辺 {min(fov_w, fov_h):.1f}′)")
+        else:
+            _log(f"  - 画素スケール {scale:.3f}″/px ({how}) → 画角 {fov_w:.1f}′")
     else:
         _log(f"  - 画素スケール: {how}")
 
@@ -810,9 +826,17 @@ def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
             _log(f"  - 手持ちの星図データが対応する画角: {lo:g}′ 〜 {hi:g}′"
                  f" (index ファイル {len(installed)} 個)")
             if scale:
-                ok, msgs = missing_index_advice(nx * scale / 60.0, installed)
+                ok, msgs = missing_index_advice(fov_w, installed)
                 for m in msgs:
                     _log(("  ⚠️ " if not ok else "  - ") + m)
+                if thin:
+                    short = min(fov_w, fov_h)
+                    ok2, msgs2 = missing_index_advice(short, installed)
+                    if not ok2:
+                        _log(f"  ⚠️ 縦横比が大きい画像です。短辺の画角 {short:.1f}′ に"
+                             "合う段も入れておくと確実です:")
+                        for m in msgs2[1:]:
+                            _log("     " + m)
 
     xy_path = write_xylist(sources, nx, ny,
                            os.path.join(work_dir, "zahyou_sources.xyls"))
@@ -822,8 +846,16 @@ def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
     t_short = max(30, int(timeout * 0.25))
     t_long = max(60, int(timeout * 0.5))
 
-    def base(cpu):
-        return ["--cpulimit", str(int(cpu)), "--objs", str(min(len(sources), 200))]
+    # --objs は「使う星を上位いくつに絞るか」。
+    # xylist はこちらが渡した星がすべてなので実数でよいが、画像を渡すときは
+    # solve-field 自身が星を探す。こちらの検出数で絞ってはいけない ――
+    # simplexy が 76 個見つけた画像で --objs 8 を渡していたために解けなかった
+    # (外したら 3.5 秒で解けた)。
+    OBJS_IMAGE = 200
+
+    def base(cpu, kind="xylist"):
+        n = min(len(sources), 200) if kind == "xylist" else OBJS_IMAGE
+        return ["--cpulimit", str(int(cpu)), "--objs", str(n)]
 
     hint = []
     if hint_radec is not None:
@@ -856,13 +888,29 @@ def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
                          base(t_long) + narrow, t_long))
     attempts += [
         ("xylist", xy_path, "全天 + スケール全域", base(t_long) + wide, t_long),
+    ]
+    # 星が少ないときは、こちらの検出よりも solve-field 自身の抽出のほうが
+    # 当たることがある (simplexy は淡い星も拾う)。先に試す。
+    if len(sources) < 12:
+        attempts.append(
+            ("image", img_path, "画像を直接渡す (2x 縮小)",
+             base(t_long, "image") + wide + ["--downsample", "2"], t_long))
+    attempts += [
         ("xylist", xy_path, "全天 + 歪み補正なし (星が少ない画像向け)",
          base(t_long) + wide + ["--no-tweak"], t_long),
         ("image", img_path, "画像を直接渡す (2x 縮小)",
-         base(t_long) + wide + ["--downsample", "2"], t_long),
+         base(t_long, "image") + wide + ["--downsample", "2"], t_long),
         ("image", img_path, "画像を直接渡す (4x 縮小)",
-         base(t_long) + wide + ["--downsample", "4"], t_long),
+         base(t_long, "image") + wide + ["--downsample", "4"], t_long),
     ]
+    seen = set()                       # 同じ条件を 2 度走らせない
+    uniq = []
+    for a in attempts:
+        key = (a[0], tuple(a[3]))
+        if key not in seen:
+            seen.add(key)
+            uniq.append(a)
+    attempts = uniq
 
     deadline = time.time() + timeout
     for i, (kind, path, label, opts, t) in enumerate(attempts, 1):
