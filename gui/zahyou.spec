@@ -32,8 +32,11 @@ ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))       # noqa: F821
 datas = [(os.path.join(ROOT, "zahyou_engine.py"), ".")]
 
 # --- データファイル (中身のテーブルや設定。コードではない) ------------------
+#  photutils は astroquery.astrometry_net が読み込む。__init__.py が自分の
+#  CITATION.rst を開くので、データを入れないとオンライン解析だけが
+#  FileNotFoundError で落ちる (実際に踏んだ)。
 for pkg in ("astropy", "astroquery", "astropy_iers_data", "reproject",
-            "astropy_healpix", "erfa", "matplotlib", "dask"):
+            "astropy_healpix", "erfa", "matplotlib", "dask", "photutils"):
     try:
         datas += collect_data_files(pkg)
     except Exception:
@@ -50,7 +53,7 @@ hiddenimports = [
     "astropy.utils.iers", "astropy.io.ascii", "astropy.io.votable",
     # 天体名の解決と、オンライン解析 (使うのはこの 3 つだけ)
     "astroquery", "astroquery.astrometry_net", "astroquery.vizier",
-    "astroquery.simbad",
+    "astroquery.simbad", "photutils",
     # reproject は import しただけで dask を要求する (北を上にした図で使う)
     "reproject", "reproject.interpolation", "reproject.adaptive",
     "dask", "dask.array", "cloudpickle", "toolz", "fsspec",

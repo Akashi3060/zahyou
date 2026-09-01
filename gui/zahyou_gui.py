@@ -43,12 +43,39 @@ APP_NAME = "zahyou"
 APP_VER = "v6"
 ENGINE_FILE = "zahyou_engine.py"
 
-BG = "#F4F6F8"
-INK = "#14181F"
-MUTED = "#5A6472"
-ACCENT = "#1F5C8B"
-OK_C = "#2E7D32"
-NG_C = "#C0392B"
+# ============================================================== 配色 ===
+#  暗い場所で使うことがあるので、黒基調の配色を用意してある。
+#  ttk の "vista" テーマは色を受け付けない部品が多いので、両方とも
+#  "clam" で組んで、こちらで全部の色を決める。
+THEMES = {
+    "light": dict(
+        name="light",
+        bg="#F4F6F8", panel="#FFFFFF", ink="#14181F", muted="#5A6472",
+        accent="#1F5C8B", entry="#FFFFFF", border="#C9D4DE", trough="#E4E9EE",
+        btn="#E8ECF1", btn_hi="#D6DEE6",
+        tab_bg="#DCE3EA", tab_fg="#4A5563",
+        tab_sel_bg="#FFFFFF", tab_sel_fg="#12507D", tab_line="#1F5C8B",
+        ok="#2E7D32", ng="#C0392B",
+        fig_bg="#FFFFFF", ax_bg="#FFFFFF", fig_fg="#14181F",
+    ),
+    "dark": dict(
+        name="dark",
+        bg="#15181D", panel="#1B1F26", ink="#DCE1E8", muted="#8A94A3",
+        accent="#6FB4E6", entry="#0D0F13", border="#39414D", trough="#0D0F13",
+        btn="#262C36", btn_hi="#333B47",
+        tab_bg="#0F1216", tab_fg="#8A94A3",
+        tab_sel_bg="#2B3543", tab_sel_fg="#9CD1F5", tab_line="#6FB4E6",
+        ok="#5FC96F", ng="#E5736B",
+        fig_bg="#15181D", ax_bg="#05070A", fig_fg="#DCE1E8",
+    ),
+}
+
+SOLVE_CHOICES = {
+    "自動 (インターネットがあれば使う)": "AUTO",
+    "オンラインのみ": "ONLINE",
+    "オフライン (WSL) のみ": "OFFLINE",
+}
+SOLVE_DEFAULT = "自動 (インターネットがあれば使う)"
 
 
 # ============================================================== 小道具 ===
@@ -80,6 +107,55 @@ def ui_font(size=10, bold=False):
 def mono_font(size=9):
     return (_pick_family(("HackGen Console", "HackGen", "Consolas", "MS Gothic"),
                          "TkFixedFont"), size)
+
+
+def recolor_figure(fig, th):
+    """もう描いてある図を、あとから配色だけ塗り替える。"""
+    fig.patch.set_facecolor(th["fig_bg"])
+    for ax in fig.axes:
+        try:
+            ax.set_facecolor(th["ax_bg"])
+            ax.title.set_color(th["fig_fg"])
+            for sp in ax.spines.values():
+                sp.set_color(th["fig_fg"])
+        except Exception:
+            pass
+        # 天球座標の軸 (WCSAxes) は目盛りと軸名を個別に持っている
+        for coord in getattr(ax, "coords", []):
+            try:
+                coord.set_ticklabel(color=th["fig_fg"])
+                coord.set_ticks(color=th["fig_fg"])
+                coord.set_axislabel(coord.get_axislabel(), color=th["fig_fg"])
+            except Exception:
+                pass
+
+
+def clipped_buttons(root):
+    """
+    文字が見切れているボタンを探す。
+
+    入れ物が狭いと Tk は末尾の部品の幅を削る。実際の幅が「必要な幅」より
+    狭ければ、ラベルが途中で切れている。
+
+    検出できることは確かめてある: 1 行に詰め込みすぎた状態を作ると、
+    必要 87px の「必要な段を選ぶ」が 59px に削られ、画面では
+    「必要な段を選.」と出る (この行の幅も 360 < 必要 388 になる)。
+    """
+    bad = []
+
+    def walk(w):
+        for c in w.winfo_children():
+            try:
+                if (isinstance(c, ttk.Button) and c.winfo_ismapped()
+                        and c.winfo_width() + 2 < c.winfo_reqwidth()):
+                    bad.append(f"{c.cget('text')} "
+                               f"({c.winfo_width()} < {c.winfo_reqwidth()}px)")
+            except Exception:
+                pass
+            walk(c)
+
+    walk(root)
+    return bad
 
 
 def settings_path():
@@ -193,7 +269,13 @@ class App(tk.Tk):
         self.title(f"{APP_NAME} {APP_VER} — 天体画像から目標への向きを求める")
         self.geometry("1180x780")
         self.minsize(1000, 660)
-        self.configure(bg=BG)
+        self.style = ttk.Style(self)
+        self.theme_name = "light"
+        self.th = THEMES["light"]
+        self.tk_texts = []             # ttk でない部品。塗り直しのために覚えておく
+        self.tk_canvases = []
+        self.help_text = None
+        self.btn_theme = None
 
         self.engine = Engine()
         self.engine_ready = False
@@ -207,32 +289,164 @@ class App(tk.Tk):
         # Tk の変数はメインスレッドからしか触れない。ワーカーはこちらを見る。
         self.index_dir = env.DEFAULT_INDEX_DIR
 
-        self._build_style()
         self._build_vars()
+        self._apply_theme(redraw=False)
         self._build_ui()
-        self._load_settings()
+        self._load_settings()          # 記憶していた配色もここで反映する
+        self._apply_theme(redraw=False)
 
         self.after(60, self._pump)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._bg(self._load_engine, label="エンジンを読み込んでいます...")
 
     # ---------------------------------------------------------- 見た目 ---
-    def _build_style(self):
-        st = ttk.Style(self)
+    def _apply_theme(self, name=None, redraw=True):
+        """明るい配色 / 暗い配色 を入れ替える。"""
+        if name:
+            self.theme_name = name
+        th = self.th = THEMES.get(self.theme_name, THEMES["light"])
+        st = self.style
         try:
-            st.theme_use("vista")
+            st.theme_use("clam")          # 色を自由に決められるのは clam だけ
         except tk.TclError:
             pass
-        f = ui_font(10)
-        st.configure(".", font=f)
-        st.configure("TNotebook.Tab", font=ui_font(10), padding=(16, 7))
-        st.configure("Head.TLabel", font=ui_font(11, True), foreground=ACCENT)
-        st.configure("Muted.TLabel", foreground=MUTED)
-        st.configure("Big.TLabel", font=ui_font(20, True), foreground=INK)
-        st.configure("BigCap.TLabel", font=ui_font(9), foreground=MUTED)
+
+        self.configure(bg=th["bg"])
+        st.configure(".", background=th["bg"], foreground=th["ink"],
+                     fieldbackground=th["entry"], bordercolor=th["border"],
+                     darkcolor=th["panel"], lightcolor=th["panel"],
+                     troughcolor=th["trough"], focuscolor=th["accent"],
+                     font=ui_font(10))
+        st.configure("TFrame", background=th["bg"])
+        st.configure("TLabel", background=th["bg"], foreground=th["ink"])
+        st.configure("TPanedwindow", background=th["bg"])
+        st.configure("TLabelframe", background=th["bg"], bordercolor=th["border"])
+        st.configure("TLabelframe.Label", background=th["bg"],
+                     foreground=th["accent"], font=ui_font(9, True))
+        st.configure("TButton", background=th["btn"], foreground=th["ink"],
+                     bordercolor=th["border"], padding=(10, 4))
+        st.map("TButton",
+               background=[("pressed", th["btn_hi"]), ("active", th["btn_hi"]),
+                           ("disabled", th["bg"])],
+               foreground=[("disabled", th["muted"])])
+        st.configure("TEntry", fieldbackground=th["entry"], foreground=th["ink"],
+                     insertcolor=th["ink"], bordercolor=th["border"])
+        st.map("TEntry", fieldbackground=[("disabled", th["bg"])],
+               foreground=[("disabled", th["muted"])])
+        st.configure("TCombobox", fieldbackground=th["entry"], background=th["btn"],
+                     foreground=th["ink"], arrowcolor=th["ink"])
+        st.map("TCombobox",
+               fieldbackground=[("readonly", th["entry"])],
+               foreground=[("readonly", th["ink"])],
+               selectbackground=[("readonly", th["entry"])],
+               selectforeground=[("readonly", th["ink"])])
+        for w in ("TCheckbutton", "TRadiobutton"):
+            st.configure(w, background=th["bg"], foreground=th["ink"],
+                         indicatorcolor=th["entry"], focuscolor=th["bg"])
+            st.map(w, background=[("active", th["bg"])],
+                   indicatorcolor=[("selected", th["accent"])])
+        st.configure("TProgressbar", background=th["accent"],
+                     troughcolor=th["trough"], bordercolor=th["border"])
+        st.configure("Vertical.TScrollbar", background=th["btn"],
+                     troughcolor=th["trough"], arrowcolor=th["ink"],
+                     bordercolor=th["border"])
+        st.map("Vertical.TScrollbar", background=[("active", th["btn_hi"])])
+        st.configure("Treeview", background=th["panel"], foreground=th["ink"],
+                     fieldbackground=th["panel"], bordercolor=th["border"])
+        st.configure("Treeview.Heading", background=th["tab_bg"],
+                     foreground=th["ink"], font=ui_font(9, True))
+        st.map("Treeview.Heading", background=[("active", th["btn_hi"])])
+
+        # --- タブ。選んでいるものが一目で分かるように差を大きく付ける -----
+        st.configure("TNotebook", background=th["bg"], bordercolor=th["border"],
+                     tabmargins=(3, 4, 3, 0))
+        st.configure("TNotebook.Tab", background=th["tab_bg"],
+                     foreground=th["tab_fg"], bordercolor=th["border"],
+                     padding=(22, 8), font=ui_font(10))
+        st.map("TNotebook.Tab",
+               background=[("selected", th["tab_sel_bg"]),
+                           ("active", th["btn_hi"])],
+               foreground=[("selected", th["tab_sel_fg"])],
+               font=[("selected", ui_font(10, True))],
+               # 選んでいるタブだけ縁を挿し色にして、ひと目で分かるようにする
+               bordercolor=[("selected", th["tab_line"])],
+               lightcolor=[("selected", th["tab_line"])],
+               expand=[("selected", (2, 2, 2, 0))])
+
+        st.configure("Head.TLabel", background=th["bg"], font=ui_font(11, True),
+                     foreground=th["accent"])
+        st.configure("Muted.TLabel", background=th["bg"], foreground=th["muted"])
+        st.configure("Big.TLabel", background=th["bg"], font=ui_font(20, True),
+                     foreground=th["ink"])
+        st.configure("BigCap.TLabel", background=th["bg"], font=ui_font(9),
+                     foreground=th["muted"])
         st.configure("Run.TButton", font=ui_font(11, True))
-        st.configure("OK.TLabel", foreground=OK_C)
-        st.configure("NG.TLabel", foreground=NG_C)
+
+        self._theme_widgets(th)
+        self._theme_titlebar(th["name"] == "dark")
+        self._theme_figures(th, redraw=redraw)
+
+    def _theme_titlebar(self, dark):
+        """Windows のタイトルバーも合わせる (できなければ黙って諦める)。"""
+        if os.name != "nt":
+            return
+        try:
+            import ctypes
+            self.update_idletasks()
+            hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
+            val = ctypes.c_int(1 if dark else 0)
+            for attr in (20, 19):        # 20 = 現行 / 19 = Windows 10 1809
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, attr, ctypes.byref(val), ctypes.sizeof(val))
+        except Exception:
+            pass
+
+    def _theme_widgets(self, th):
+        """ttk でない部品 (Text / Canvas) を塗り直す。"""
+        for t in getattr(self, "tk_texts", []):
+            try:
+                t.configure(bg=th["panel"], fg=th["ink"],
+                            insertbackground=th["ink"],
+                            selectbackground=th["accent"],
+                            selectforeground=th["panel"])
+            except tk.TclError:
+                pass
+        for c in getattr(self, "tk_canvases", []):
+            try:
+                c.configure(bg=th["panel"], highlightbackground=th["border"])
+            except tk.TclError:
+                pass
+        if getattr(self, "help_text", None) is not None:
+            self.help_text.tag_configure("h", foreground=th["accent"])
+            self.help_text.tag_configure("m", foreground=th["muted"])
+            self.help_text.tag_configure("link", foreground=th["accent"])
+        if getattr(self, "tv", None) is not None:
+            self.tv.tag_configure("ok", foreground=th["ok"])
+            self.tv.tag_configure("ng", foreground=th["ng"])
+        if getattr(self, "btn_theme", None) is not None:
+            self.btn_theme.configure(
+                text="☀ 明るく" if th["name"] == "dark" else "🌙 暗く")
+
+    def _toggle_theme(self):
+        self._apply_theme("light" if self.theme_name == "dark" else "dark")
+        self._save_settings()
+
+    def _theme_figures(self, th, redraw=True):
+        """図の配色。これから描くぶんと、もう出ているぶんの両方。"""
+        # rcParams は「次に描く図」に効くので、起動時にも必ず入れておくこと
+        matplotlib.rcParams.update({
+            "figure.facecolor": th["fig_bg"], "figure.edgecolor": th["fig_bg"],
+            "savefig.facecolor": th["fig_bg"], "savefig.edgecolor": th["fig_bg"],
+            "axes.facecolor": th["ax_bg"], "axes.edgecolor": th["fig_fg"],
+            "axes.labelcolor": th["fig_fg"], "text.color": th["fig_fg"],
+            "xtick.color": th["fig_fg"], "ytick.color": th["fig_fg"],
+            "grid.color": th["fig_fg"],
+        })
+        if not redraw:
+            return
+        for frame, slot in list(getattr(self, "fig_slots", {}).items()):
+            recolor_figure(slot["fig"], th)
+            self._render(frame)
 
     def _build_vars(self):
         self.v_mode = tk.StringVar(value="STAR_NAME")
@@ -240,7 +454,7 @@ class App(tk.Tk):
         self.v_ra = tk.StringVar(value="04h 07m 38.877s")
         self.v_dec = tk.StringVar(value="+41d 59m 10.512s")
         self.v_focal = tk.StringVar(value="")
-        self.v_solve = tk.StringVar(value="自動 (ネットがあれば使う)")
+        self.v_solve = tk.StringVar(value=SOLVE_DEFAULT)
         self.v_radius = tk.StringVar(value="5.0")
         self.v_hint = tk.BooleanVar(value=True)
         self.v_marks = tk.BooleanVar(value=True)
@@ -267,6 +481,8 @@ class App(tk.Tk):
         bar = ttk.Frame(self, padding=(10, 4))
         bar.pack(fill="x")
         ttk.Label(bar, textvariable=self.v_status, style="Muted.TLabel").pack(side="left")
+        self.btn_theme = ttk.Button(bar, width=10, command=self._toggle_theme)
+        self.btn_theme.pack(side="right", padx=(10, 0))
         self.prog = ttk.Progressbar(bar, mode="determinate", length=220)
         self.prog.pack(side="right")
 
@@ -332,9 +548,7 @@ class App(tk.Tk):
         g3.pack(fill="both", expand=True)
         ttk.Label(g3, text="方法").grid(row=0, column=0, sticky="w")
         cb = ttk.Combobox(g3, textvariable=self.v_solve, state="readonly",
-                          values=["自動 (ネットがあれば使う)",
-                                  "オンラインのみ",
-                                  "オフライン (WSL) のみ"])
+                          values=list(SOLVE_CHOICES))
         cb.grid(row=0, column=1, sticky="ew", pady=2)
         ttk.Label(g3, text="探索半径 [°]").grid(row=1, column=0, sticky="w")
         ttk.Entry(g3, textvariable=self.v_radius, width=8).grid(row=1, column=1,
@@ -376,7 +590,8 @@ class App(tk.Tk):
         self.out.add(self.f_log, text=" ログ ")
 
         self.txt_log = tk.Text(self.f_log, font=mono_font(9), wrap="none",
-                               bg="white", fg=INK, relief="flat")
+                               relief="flat", borderwidth=0)
+        self.tk_texts.append(self.txt_log)
         sb = ttk.Scrollbar(self.f_log, command=self.txt_log.yview)
         self.txt_log.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
@@ -420,8 +635,8 @@ class App(tk.Tk):
         self.tv.column("#0", width=170, anchor="w")
         self.tv.column("state", width=230, anchor="w")
         self.tv.pack(fill="x", pady=6)
-        self.tv.tag_configure("ok", foreground=OK_C)
-        self.tv.tag_configure("ng", foreground=NG_C)
+        self.tv.tag_configure("ok", foreground=self.th["ok"])
+        self.tv.tag_configure("ng", foreground=self.th["ng"])
         for key, name in [("wsl", "WSL"), ("solver", "astrometry.net"),
                           ("index", "星図データ"), ("cfg", "設定ファイル"),
                           ("ready", "総合")]:
@@ -475,8 +690,8 @@ class App(tk.Tk):
 
         wrap = ttk.Frame(g)
         wrap.pack(fill="both", expand=True, pady=(4, 0))
-        cv = tk.Canvas(wrap, height=150, bg="white", highlightthickness=1,
-                       highlightbackground="#C9D4DE")
+        cv = tk.Canvas(wrap, height=150, highlightthickness=1)
+        self.tk_canvases.append(cv)
         sb = ttk.Scrollbar(wrap, orient="vertical", command=cv.yview)
         inner = ttk.Frame(cv)
         inner.bind("<Configure>",
@@ -501,8 +716,9 @@ class App(tk.Tk):
 
         # --- 右: ログ ---------------------------------------------------
         ttk.Label(right, text="ログ", style="Head.TLabel").pack(anchor="w")
-        self.txt_env = tk.Text(right, font=mono_font(9), wrap="word", bg="white",
-                               fg=INK, relief="flat")
+        self.txt_env = tk.Text(right, font=mono_font(9), wrap="word",
+                               relief="flat", borderwidth=0)
+        self.tk_texts.append(self.txt_env)
         sb2 = ttk.Scrollbar(right, command=self.txt_env.yview)
         self.txt_env.configure(yscrollcommand=sb2.set)
         sb2.pack(side="right", fill="y")
@@ -510,16 +726,18 @@ class App(tk.Tk):
 
     # ============================================================ 使い方 ===
     def _build_help_tab(self):
-        t = tk.Text(self.tab_help, wrap="word", font=ui_font(10), bg="white",
-                    fg=INK, relief="flat", padx=14, pady=12)
+        t = tk.Text(self.tab_help, wrap="word", font=ui_font(10),
+                    relief="flat", borderwidth=0, padx=14, pady=12)
+        self.tk_texts.append(t)
+        self.help_text = t
         sb = ttk.Scrollbar(self.tab_help, command=t.yview)
         t.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         t.pack(fill="both", expand=True)
-        t.tag_configure("h", font=ui_font(12, True), foreground=ACCENT,
+        t.tag_configure("h", font=ui_font(12, True), foreground=self.th["accent"],
                         spacing1=10, spacing3=4)
         t.tag_configure("b", font=ui_font(10, True))
-        t.tag_configure("m", foreground=MUTED)
+        t.tag_configure("m", foreground=self.th["muted"])
 
         def add(text, tag=None):
             t.insert("end", text + "\n", tag or ())
@@ -562,7 +780,7 @@ class App(tk.Tk):
         add("")
         add(f"{APP_NAME} {APP_VER}   ノートブック版と同じ解析エンジンを使っています。", "m")
         t.insert("end", "https://github.com/Akashi3060/zahyou\n", "link")
-        t.tag_configure("link", foreground=ACCENT, underline=True)
+        t.tag_configure("link", foreground=self.th["accent"], underline=True)
         t.tag_bind("link", "<Button-1>",
                    lambda e: webbrowser.open("https://github.com/Akashi3060/zahyou"))
         t.configure(state="disabled")
@@ -709,9 +927,7 @@ class App(tk.Tk):
             except ValueError:
                 return default
 
-        mode = {"自動 (ネットがあれば使う)": "AUTO",
-                "オンラインのみ": "ONLINE",
-                "オフライン (WSL) のみ": "OFFLINE"}[self.v_solve.get()]
+        mode = SOLVE_CHOICES.get(self.v_solve.get(), "AUTO")
         return {
             "INPUT_MODE": self.v_mode.get(),
             "TARGET_STAR_NAME": self.v_name.get().strip(),
@@ -850,6 +1066,20 @@ class App(tk.Tk):
         canvas.draw()
         tb = NavigationToolbar2Tk(canvas, frame, pack_toolbar=False)
         tb.update()
+        # ツールバーは素の tk 部品なので、配色は自分で入れる
+        th = self.th
+        try:
+            tb.configure(background=th["bg"])
+            for w in tb.winfo_children():
+                try:
+                    w.configure(background=th["bg"])
+                    if isinstance(w, tk.Label):
+                        w.configure(foreground=th["muted"])
+                except tk.TclError:
+                    pass
+            canvas.get_tk_widget().configure(bg=th["bg"], highlightthickness=0)
+        except tk.TclError:
+            pass
         tb.pack(side="bottom", fill="x")
         canvas.get_tk_widget().pack(fill="both", expand=True)
         slot["canvas"] = canvas
@@ -986,7 +1216,7 @@ class App(tk.Tk):
             "sensor": self.v_sensor, "image": self.image_path,
         }.items()}
         data.update({"hint": self.v_hint.get(), "marks": self.v_marks.get(),
-                     "ignore": self.v_ignore.get()})
+                     "ignore": self.v_ignore.get(), "theme": self.theme_name})
         try:
             with io.open(settings_path(), "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=1)
@@ -1011,6 +1241,11 @@ class App(tk.Tk):
                        ("ignore", self.v_ignore)):
             if isinstance(d.get(k), bool):
                 var.set(d[k])
+        if d.get("theme") in THEMES:
+            self.theme_name = d["theme"]
+        # 古い設定には昔の文言が入っていることがある (選択肢を書き換えたため)
+        if self.v_solve.get() not in SOLVE_CHOICES:
+            self.v_solve.set(SOLVE_DEFAULT)
         self._sync_mode()
 
     def _on_close(self):
@@ -1020,7 +1255,8 @@ class App(tk.Tk):
 
 # ============================================================== 自己診断 ===
 
-def selftest(image, target="UCAC4 660-021020", offline_first=True, log_out=None):
+def selftest(image, target="UCAC4 660-021020", offline_first=True, log_out=None,
+             force=None):
     """
     画面を組み立てて解析を 1 回通し、結果を [(項目, 可否, 補足)] で返す。
 
@@ -1069,15 +1305,18 @@ def selftest(image, target="UCAC4 660-021020", offline_first=True, log_out=None)
     app.image_path.set(image)
     app.v_mode.set("STAR_NAME")
     app.v_name.set(target)
-    app.v_solve.set("オフライン (WSL) のみ" if offline else "自動 (ネットがあれば使う)")
+    if force:                                   # --online / --offline で強制
+        app.v_solve.set(next(k for k, v in SOLVE_CHOICES.items() if v == force))
+    else:
+        app.v_solve.set("オフライン (WSL) のみ" if offline else SOLVE_DEFAULT)
     app._sync_mode()
     app.update()
 
     t0 = time.time()
     app._start_analysis()
     done = pump(app, 420, lambda: not app.busy)
-    check("解析が終わる", done, f"{time.time() - t0:.1f} 秒 / "
-          f"{'オフライン' if offline else '自動'}")
+    check("解析が終わる", done,
+          f"{time.time() - t0:.1f} 秒 / {app.v_solve.get()}")
     if done:
         pump(app, 3)
         check("距離が出る", app.v_r1.get() not in ("—", ""), app.v_r1.get())
@@ -1087,6 +1326,25 @@ def selftest(image, target="UCAC4 660-021020", offline_first=True, log_out=None)
         check("画像中心などが出る", "画素スケール" in app.v_detail.get(),
               app.v_detail.get()[:70])
         check("ログが流れている", "解析結果" in app.txt_log.get("1.0", "end"))
+
+    # どのタブにも、文字の見切れたボタンが無いこと
+    bad = []
+    for tab in (app.tab_run, app.tab_env, app.tab_help):
+        app.nb.select(tab)
+        pump(app, 0.8)
+        bad += clipped_buttons(tab)
+    app.nb.select(app.tab_run)
+    check("ボタンが見切れていない", not bad, " / ".join(bad)[:90])
+
+    # 明→暗→明 と切り替えても壊れないこと
+    try:
+        for name in ("dark", "light", app.theme_name):
+            app._apply_theme(name)
+            pump(app, 0.4)
+        check("配色を切り替えられる", True, f"最後は {app.theme_name}")
+    except Exception as e:
+        check("配色を切り替えられる", False, f"{type(e).__name__}: {e}")
+
     if log_out is not None:                     # 失敗したとき中身を見るため
         log_out.append(app.txt_log.get("1.0", "end"))
     app.destroy()
@@ -1096,8 +1354,10 @@ def selftest(image, target="UCAC4 660-021020", offline_first=True, log_out=None)
 def _run_selftest(argv):
     image = argv[argv.index("--selftest") + 1]
     out_path = argv[argv.index("--out") + 1] if "--out" in argv else None
+    force = ("ONLINE" if "--online" in argv else
+             "OFFLINE" if "--offline" in argv else None)
     log_out = []
-    rows = selftest(image, log_out=log_out)
+    rows = selftest(image, log_out=log_out, force=force)
     width = max([len(r[0]) for r in rows] or [1])
     lines = [f"  {'PASS' if ok else 'FAIL'}  {name.ljust(width)}  {msg}"
              for name, ok, msg in rows]

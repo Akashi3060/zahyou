@@ -25,7 +25,13 @@ gui/
 **赤緯方向**。その下のタブで「撮影時の向き」「北が上」の図と、解析ログを見られます。
 図は matplotlib のツールバーで拡大・移動・保存ができます。
 
-設定 (目標・焦点距離・解析方法など) は `%LOCALAPPDATA%\zahyou\gui.json` に
+### 暗いところで使う
+
+右下の **「🌙 暗く」** を押すと、黒基調の配色に切り替わります。
+画面・タイトルバー・**図の中まで**まとめて暗くなるので、観測中に目が眩みません。
+もう一度押すと戻ります。選んだ配色は次に開いたときも残ります。
+
+設定 (目標・焦点距離・解析方法・配色) は `%LOCALAPPDATA%\zahyou\gui.json` に
 覚えるので、次に開いたときは前回のままです。
 
 ## 使うだけの人へ
@@ -67,6 +73,10 @@ powershell -ExecutionPolicy Bypass -File build_exe.ps1 -Test
   (`ModuleNotFoundError: No module named 'astropy.tests.runner'`)。
 - **`reproject` は import しただけで `dask` を要求する。** 「北が上」の図で使うので、
   dask を外すと解析は成功するのに図だけ出ない、という分かりにくい壊れ方をする。
+- **`photutils` はデータファイルまで入れる。** `astroquery.astrometry_net` が
+  読み込み、`photutils/__init__.py` が自分の `CITATION.rst` を開くので、
+  `.py` だけ入れると **オンライン解析だけが** `FileNotFoundError` で落ちる
+  (オフラインへ勝手に切り替わるので、動いているように見えてしまう)。
 - **エンジンは実行時に `exec` で読む**ので、PyInstaller の静的解析からは
   中の import が見えない。`zahyou.spec` の `hiddenimports` が命綱。
 - **Tk の変数 (`StringVar` など) をワーカースレッドから読んではいけない。**
@@ -89,26 +99,36 @@ zahyou.exe --selftest "画像パス" --out selftest.txt            # 解析ま�
 
 ```powershell
 python test_gui.py                    # ソースのまま
-dist\onefile\zahyou.exe --selftest "画像パス" --out selftest.txt   # 固めたあと
+dist\onefile\zahyou.exe --selftest "画像パス" --out selftest.txt            # 固めたあと
+dist\onefile\zahyou.exe --selftest "画像パス" --out selftest.txt --online   # 経路を指定
 ```
 
 どちらも同じ `zahyou_gui.selftest()` を呼びます (exe には test_gui.py が
-入らないので、本体側に置いてあります)。実測 10/10:
+入らないので、本体側に置いてあります)。`--online` / `--offline` で解析の経路を
+指定できます。固めた exe での実測 12/12:
 
 ```
   PASS  画面が組み立てられる
   PASS  エンジンを読み込める
-  PASS  環境を調べられる    Ubuntu 26.04 LTS
-  PASS  解析が終わる      9.7 秒 / オフライン
-  PASS  距離が出る       1.583′
-  PASS  赤経方向が出る     0.918′ 東
-  PASS  赤緯方向が出る     1.290′ 北
-  PASS  図が 2 枚貼られる  2 枚
-  PASS  画像中心などが出る   画素スケール 1.4616″/px  視野 23.58′ × 13.35′
+  PASS  環境を調べられる     Ubuntu 26.04 LTS
+  PASS  解析が終わる       8.8 秒 / オフライン (WSL) のみ
+  PASS  距離が出る        1.583′
+  PASS  赤経方向が出る      0.918′ 東
+  PASS  赤緯方向が出る      1.290′ 北
+  PASS  図が 2 枚貼られる   2 枚
+  PASS  画像中心などが出る    画素スケール 1.4616″/px  視野 23.58′ × 13.35′
   PASS  ログが流れている
+  PASS  ボタンが見切れていない
+  PASS  配色を切り替えられる   最後は light
 ```
 
-ノートブック版・オンライン解析と同じ答えです。
+オンライン経路 (`--online`) でも 13.6 秒で同じ答えでした。
+ノートブック版とも一致します。
+
+「ボタンが見切れていない」は、入れ物が狭くて Tk がラベルを削っていないかを
+`winfo_width()` と `winfo_reqwidth()` の差で見ています
+(**画面を見ないと気づけない類の不具合なので機械で見る**。
+実際に「必要な段を選ぶ」が「必要な段を選.」になっていた)。
 
 ## 星図データについて
 
