@@ -36,7 +36,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # テストごとに真っさらな状態から始めたいので、記憶ファイルを専用のものにする
 os.environ["ZAHYOU_CACHE"] = os.path.join(HERE, "tcase", "sim_cache.json")
 os.makedirs(os.path.join(HERE, "tcase"), exist_ok=True)
-TRUTH_WCS = os.path.join(HERE, "..", "work", "xyls", "solution.wcs")
+# スタブが「解けた」ときに置く .wcs。無ければその場で作る
+# (以前は手元の作業ディレクトリを指していたので、他の PC では動かなかった)
+TRUTH_WCS = os.path.join(HERE, "tcase", "truth.wcs")
 TEST_IMAGE = r"C:\Users\yoshi\Downloads\Capture_00001 00_10_33.fits"
 
 TRUE_SCALE = 1.4616           # arcsec/px  (nova の解から)
@@ -251,7 +253,29 @@ INDEX_WITH_FINE = INDEX_LIST + [f"index-52{s}-{n:02d}.fits"
 NARROW_SCALE = 0.30
 
 
+def ensure_truth_wcs():
+    """
+    スタブが返す .wcs を用意する。中身は「解けたときに出てくるはずの WCS」で、
+    nova の解 (TRUE_RA / TRUE_DEC / TRUE_SCALE) から組み立てる。
+    実機の solve-field は要らない。
+    """
+    if os.path.exists(TRUTH_WCS):
+        return
+    from astropy.wcs import WCS
+    w = WCS(naxis=2)
+    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    w.wcs.crval = [TRUE_RA, TRUE_DEC]
+    w.wcs.crpix = [968 / 2.0, 548 / 2.0]
+    d = TRUE_SCALE / 3600.0
+    w.wcs.cd = np.array([[-d, 0.0], [0.0, d]])
+    h = w.to_header()
+    h["IMAGEW"], h["IMAGEH"] = 968, 548
+    os.makedirs(os.path.dirname(TRUTH_WCS), exist_ok=True)
+    fits.PrimaryHDU(header=h).writeto(TRUTH_WCS, overwrite=True)
+
+
 def main():
+    ensure_truth_wcs()
     common = {"IMAGE_PATH": TEST_IMAGE, "SOLVE_MODE": "OFFLINE",
               "INPUT_MODE": "COORDS", "OFFLINE_TIMEOUT": 300}
     blind = dict(common, RA_INPUT_STR="", DEC_INPUT_STR="",
