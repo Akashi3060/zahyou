@@ -256,3 +256,135 @@ class FoldHint(Flowable):
                      "※ 変わるのは見た目だけです。畳んだまま実行しても、"
                      "動くのは中身の全部です。もう一度押すと開きます。")
         c.restoreState()
+
+
+class AppWindow(Flowable):
+    """デスクトップ版の画面。どこに何があるかを一目で示す。"""
+
+    def __init__(self, width):
+        super().__init__()
+        self.width = width
+        self.height = 78 * mm
+
+    def _tab(self, c, x, y, w, h, text, on):
+        c.setStrokeColor(ACCENT if on else RULE)
+        c.setFillColor(colors.white if on else colors.HexColor("#E8EDF2"))
+        c.setLineWidth(1.2 if on else 0.7)
+        c.roundRect(x, y, w, h, 1.2 * mm, stroke=1, fill=1)
+        c.setFont(JPB if on else JP, 8)
+        c.setFillColor(ACCENT if on else MUTED)
+        c.drawCentredString(x + w / 2, y + h / 2 - 1.2 * mm, text)
+
+    def _box(self, c, x, y, w, h, label=None, fill=None):
+        c.setStrokeColor(RULE)
+        c.setFillColor(fill or colors.white)
+        c.setLineWidth(0.7)
+        c.roundRect(x, y, w, h, 1 * mm, stroke=1, fill=1)
+        if label:
+            c.setFont(JP, 7.2)
+            c.setFillColor(MUTED)
+            c.drawString(x + 1.6 * mm, y + h / 2 - 1 * mm, label)
+
+    def draw(self):
+        c = self.canv
+        c.saveState()
+        w, h = self.width, self.height
+
+        # --- 窓 ---------------------------------------------------------
+        c.setStrokeColor(colors.HexColor("#9AA7B4"))
+        c.setFillColor(colors.HexColor("#F4F6F8"))
+        c.setLineWidth(1.0)
+        c.roundRect(0, 0, w, h, 2 * mm, stroke=1, fill=1)
+        c.setFillColor(colors.HexColor("#E4E9EE"))
+        c.rect(0.4, h - 7 * mm, w - 0.8, 7 * mm - 0.4, stroke=0, fill=1)
+        c.setFont(JP, 7.6)
+        c.setFillColor(MUTED)
+        c.drawString(3 * mm, h - 4.8 * mm, "zahyou v6 — 天体画像から目標への向きを求める")
+
+        # --- タブ -------------------------------------------------------
+        ty = h - 14.5 * mm
+        for i, (t, on) in enumerate((("解析", True), ("準備", False),
+                                     ("使い方", False))):
+            self._tab(c, 3 * mm + i * 20 * mm, ty, 18 * mm, 6.5 * mm, t, on)
+
+        # --- 上の行: 画像 ------------------------------------------------
+        y = h - 23 * mm
+        c.setFont(JP, 7.4)
+        c.setFillColor(INK)
+        c.drawString(3 * mm, y + 1.6 * mm, "画像")
+        self._box(c, 11 * mm, y, w - 66 * mm, 5.5 * mm, "…\\Capture_00001.fits")
+        self._box(c, w - 53 * mm, y, 14 * mm, 5.5 * mm, None,
+                  colors.HexColor("#E8ECF1"))
+        c.setFont(JP, 7.2)
+        c.setFillColor(INK)
+        c.drawCentredString(w - 46 * mm, y + 1.7 * mm, "参照...")
+        c.setStrokeColor(ACCENT)
+        c.setFillColor(colors.HexColor("#DCEBF7"))
+        c.setLineWidth(1.1)
+        c.roundRect(w - 37 * mm, y, 24 * mm, 5.5 * mm, 1 * mm, stroke=1, fill=1)
+        c.setFont(JPB, 7.6)
+        c.setFillColor(ACCENT)
+        c.drawCentredString(w - 25 * mm, y + 1.7 * mm, "解析を実行")
+
+        # --- 左: 目標 ---------------------------------------------------
+        lx, lw = 3 * mm, 46 * mm
+        by = 6 * mm
+        bh = y - 3 * mm - by
+        self._box(c, lx, by, lw, bh)
+        c.setFont(JPB, 7.4)
+        c.setFillColor(ACCENT)
+        c.drawString(lx + 2 * mm, by + bh - 5 * mm, "目標")
+        opts = ("天体名で指定", "赤経・赤緯で指定", "指定しない (ブラインド)")
+        for i, t in enumerate(opts):
+            oy = by + bh - 10 * mm - i * 5.2 * mm
+            c.setStrokeColor(ACCENT if i == 0 else RULE)
+            c.setFillColor(ACCENT if i == 0 else colors.white)
+            c.circle(lx + 3.4 * mm, oy + 1 * mm, 1.1 * mm,
+                     stroke=1, fill=1 if i == 0 else 0)
+            c.setFont(JP, 7.2)
+            c.setFillColor(INK if i == 0 else MUTED)
+            c.drawString(lx + 6 * mm, oy, t)
+        self._box(c, lx + 2 * mm, by + bh - 30 * mm, lw - 4 * mm, 5 * mm,
+                  "UCAC4 660-021020")
+        c.setFont(JP, 7.2)
+        c.setFillColor(MUTED)
+        c.drawString(lx + 2 * mm, by + bh - 37 * mm, "焦点距離・解析の方法なども")
+        c.drawString(lx + 2 * mm, by + bh - 41 * mm, "この列にまとまっています")
+
+        # --- 右上: 大きな数字 -------------------------------------------
+        rx = lx + lw + 4 * mm
+        rw = w - rx - 3 * mm
+        ny = y - 14 * mm
+        for i, (cap, val) in enumerate((("画像中心から目標までの距離", "1.583′"),
+                                        ("赤経 (RA) 方向", "0.918′ 東"),
+                                        ("赤緯 (Dec) 方向", "1.290′ 北"))):
+            cx = rx + i * (rw / 3.0)
+            c.setFont(JP, 6.4)
+            c.setFillColor(MUTED)
+            c.drawString(cx, ny + 6.5 * mm, cap)
+            c.setFont(JPB, 11)
+            c.setFillColor(INK)
+            c.drawString(cx, ny + 1 * mm, val)
+
+        # --- 右下: 図のタブ ---------------------------------------------
+        gy = by
+        gh = ny - 3 * mm - gy
+        for i, (t, on) in enumerate((("撮影時の向き", True), ("北が上", False),
+                                     ("ログ", False))):
+            self._tab(c, rx + i * 21 * mm, gy + gh - 5.5 * mm, 20 * mm,
+                      5.5 * mm, t, on)
+        self._box(c, rx, gy, rw, gh - 5.5 * mm)
+        c.setFont(JP, 7.4)
+        c.setFillColor(MUTED)
+        c.drawCentredString(rx + rw / 2, gy + gh / 2 - 4 * mm,
+                            "ここに図が出ます (拡大・保存もできます)")
+
+        # --- 右下すみ: 配色ボタン ---------------------------------------
+        c.setStrokeColor(RULE)
+        c.setFillColor(colors.HexColor("#E8ECF1"))
+        c.roundRect(w - 21 * mm, 1.2 * mm, 18 * mm, 4.4 * mm, 1 * mm,
+                    stroke=1, fill=1)
+        c.setFont(JP, 6.8)
+        c.setFillColor(INK)
+        c.drawCentredString(w - 12 * mm, 2.5 * mm, "暗く")
+        c.restoreState()
