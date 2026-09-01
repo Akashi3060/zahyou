@@ -857,6 +857,12 @@ def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
 
     t_short = max(30, int(timeout * 0.25))
     t_long = max(60, int(timeout * 0.5))
+    # 星が少ないときは、こちらの星リストで粘っても当たりにくい。長く回しても
+    # 無駄なので短く切り上げ、時間は solve-field 自身に画像を探させる試行へ回す。
+    # (星 8 個の画像で、1 つ目の試行が 150 秒使い切ってから 2 つ目が 4 秒で
+    #  解けていた = 待ち時間のほとんどが無駄だった)
+    few = len(sources) < 12
+    t_xy = t_short if few else t_long
 
     # --objs は「使う星を上位いくつに絞るか」。
     # xylist はこちらが渡した星がすべてなので実数でよいが、画像を渡すときは
@@ -889,6 +895,14 @@ def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
              f"(画角 {wlo * nx / 60:.1f}′〜{whi * nx / 60:.0f}′ 相当)")
 
     attempts = []
+    # 星が少ないときは、こちらの星リストより solve-field 自身の抽出のほうが
+    # 当たりやすい (simplexy は淡い星も拾う)。いちばん先に試す。
+    # 実測: 星 8 個の画像で、星リストの試行が 150 秒粘ってから画像の試行が
+    # 4 秒で解けていた。順番を入れ替えるだけで 154 秒 → 20 秒になった。
+    if few:
+        attempts.append(("image", img_path, "画像を直接渡す (2x 縮小)",
+                         base(t_short, "image") + hint + (narrow or wide)
+                         + ["--downsample", "2"], t_short))
     if hint and narrow:
         attempts.append(("xylist", xy_path, "座標ヒント + スケール既知",
                          base(t_short) + hint + narrow, t_short))
@@ -897,19 +911,13 @@ def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
                          base(t_short) + hint + wide, t_short))
     if narrow:
         attempts.append(("xylist", xy_path, "全天 + スケール既知",
-                         base(t_long) + narrow, t_long))
+                         base(t_xy) + narrow, t_xy))
     attempts += [
-        ("xylist", xy_path, "全天 + スケール全域", base(t_long) + wide, t_long),
+        ("xylist", xy_path, "全天 + スケール全域", base(t_xy) + wide, t_xy),
     ]
-    # 星が少ないときは、こちらの検出よりも solve-field 自身の抽出のほうが
-    # 当たることがある (simplexy は淡い星も拾う)。先に試す。
-    if len(sources) < 12:
-        attempts.append(
-            ("image", img_path, "画像を直接渡す (2x 縮小)",
-             base(t_long, "image") + wide + ["--downsample", "2"], t_long))
     attempts += [
         ("xylist", xy_path, "全天 + 歪み補正なし (星が少ない画像向け)",
-         base(t_long) + wide + ["--no-tweak"], t_long),
+         base(t_xy) + wide + ["--no-tweak"], t_xy),
         ("image", img_path, "画像を直接渡す (2x 縮小)",
          base(t_long, "image") + wide + ["--downsample", "2"], t_long),
         ("image", img_path, "画像を直接渡す (4x 縮小)",
