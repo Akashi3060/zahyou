@@ -1044,10 +1044,32 @@ def solve_online(image_path, api_key, sources=None, shape=None, timeout=120,
 # ============================================================== 目標の座標 ===
 
 def _cache_path():
-    """目標の座標と機材ごとの画素スケールを覚えておくファイル。"""
-    return os.environ.get(
-        "ZAHYOU_CACHE",
-        os.path.join(tempfile.gettempdir(), "zahyou_cache.json"))
+    """
+    目標の座標と機材ごとの画素スケールを覚えておくファイル。
+
+    以前は Temp に置いていたが、そこは Windows の「ディスクの クリーンアップ」や
+    ストレージセンサーが消しにいく場所だった。覚えた座標は
+    「一度オンラインで引いた天体名を、山の中でもそのまま使う」ための命綱なので、
+    消えない場所 (%LOCALAPPDATA%\zahyou) へ移した。
+    前の場所にファイルが残っていれば、一度だけ引き継ぐ。
+    """
+    override = os.environ.get("ZAHYOU_CACHE")
+    if override:
+        return override
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    old_path = os.path.join(tempfile.gettempdir(), "zahyou_cache.json")
+    try:
+        d = os.path.join(base, "zahyou")
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        return old_path
+    new_path = os.path.join(d, "cache.json")
+    if not os.path.exists(new_path) and os.path.exists(old_path):
+        try:
+            shutil.copyfile(old_path, new_path)
+        except OSError:
+            return old_path
+    return new_path
 
 
 def _cache_load():

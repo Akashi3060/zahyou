@@ -286,6 +286,7 @@ class App(tk.Tk):
         self.canvases = []
         self.fig_slots = {}                # 図を貼る枠 -> 図。窓の伸縮で貼り直す
         self.env_state = None
+        self._log_target = None     # いま動いている処理のログの書き先
         self.image_path = tk.StringVar(value="")
         # Tk の変数はメインスレッドからしか触れない。ワーカーはこちらを見る。
         self.index_dir = env.DEFAULT_INDEX_DIR
@@ -668,13 +669,16 @@ class App(tk.Tk):
         row2.pack(fill="x")
         ttk.Label(row2, text="個別に:", style="Muted.TLabel").pack(side="left")
         ttk.Button(row2, text="WSL", width=7,
-                   command=lambda: self._step(env.install_wsl)).pack(side="left", padx=2)
+                   command=lambda: self._step(env.install_wsl, "WSL を入れる")
+                   ).pack(side="left", padx=2)
         ttk.Button(row2, text="astrometry.net", width=15,
-                   command=lambda: self._step(env.install_astrometry)).pack(side="left",
-                                                                           padx=2)
+                   command=lambda: self._step(env.install_astrometry,
+                                              "astrometry.net を入れる")
+                   ).pack(side="left", padx=2)
         ttk.Button(row2, text="設定ファイル", width=13,
                    command=lambda: self._step(
-                       lambda log: env.write_cfg(self.index_dir, log))
+                       lambda log: env.write_cfg(self.index_dir, log),
+                       "設定ファイルを書く")
                    ).pack(side="left", padx=2)
 
         # --- 星図データ -------------------------------------------------
@@ -817,14 +821,20 @@ class App(tk.Tk):
     def _post(self, fn):
         self.jobs.put(fn)
 
-    def _bg(self, fn, label=""):
-        """重い処理をワーカーへ。二重に走らせない。"""
+    def _bg(self, fn, label="", log=None):
+        """
+        重い処理をワーカーへ。二重に走らせない。
+
+        log は失敗したときの書き先。[準備] タブの操作が失敗したのに
+        [解析] タブのログへ出ていたので、押した場所に出すようにした。
+        """
         if self.busy:
             messagebox.showinfo(APP_NAME, "いま別の処理が動いています。")
             return
         self.busy = True
         self.cancel_flag = False
         self._final_msg = ""
+        self._log_target = log or self.log_run
         self._set_busy(True, label)
 
         def wrap():
@@ -836,6 +846,7 @@ class App(tk.Tk):
                 msg = f"{type(exc).__name__}: {exc}"
                 tb = traceback.format_exc()
                 self._post(lambda m=msg, t=tb: self._fail(m, t))
+                self._final_msg = "失敗しました。ログを見てください。"
             finally:
                 # 終わったあとも、何が起きたのかを状態バーに残す
                 self._post(lambda: self._set_busy(False, self._final_msg))
@@ -857,15 +868,18 @@ class App(tk.Tk):
             self.prog.configure(mode="determinate", value=0)
 
     def _fail(self, msg, tb):
-        self.log_run(f"\n❌ {msg}")
+        log = getattr(self, "_log_target", None) or self.log_run
+        log(f"\n❌ {msg}")
         for line in tb.splitlines()[-12:]:
-            self.log_run("   " + line)
+            log("   " + line)
         self._final_msg = "失敗しました。ログを見てください。"
         self.v_status.set(self._final_msg)
 
     def _cancel(self):
         self.cancel_flag = True
         self.v_status.set("中止しています...")
+        log = getattr(self, "_log_target", None) or self.log_run
+        log("\n■ 中止します (動いている solve-field も止めます)...")
         # WSL 側で走っている solve-field を止める (これをしないと粘り続ける)
         threading.Thread(target=self._kill_solver, daemon=True).start()
 
@@ -905,12 +919,24 @@ class App(tk.Tk):
         threading.Thread(target=self._survey_quiet, daemon=True).start()
 
     def _survey_quiet(self):
+        """起動したついでの確認。[準備] タブが空のままにならないよう 1 行残す。"""
         try:
             st = env.survey(self.index_dir)
         except Exception:
             self.log_env("環境の確認に失敗しました:\n" + traceback.format_exc())
             return
         self.env_state = st
+        idx = st["index"]
+        if st["ready"]:
+            self.log_env(f"✅ オフライン解析できます "
+                         f"({st['distro']} / 星図データ {idx['files']} ファイル"
+                         + (f" / 画角 {idx['fov'][0]:g}′〜{idx['fov'][1]:g}′"
+                            if idx["fov"] else "") + ")")
+        else:
+            self.log_env("❌ オフライン解析はまだ使えません。")
+            for m in st["notes"]:
+                self.log_env("  ⚠️ " + m)
+            self.log_env("「まとめて準備する」を押すと用意します。")
         self._post(lambda: self._show_env(st))
 
     # ============================================================ 解析 ===
@@ -924,6 +950,12 @@ class App(tk.Tk):
                        ("すべて", "*.*")])
         if p:
             self.image_path.set(p)
+            try:
+                mb = os.path.getsize(p) / 1024 / 1024
+                self.log_run(f"画像を選びました: {os.path.basename(p)}  "
+                             f"({mb:.1f} MB)")
+            except OSError:
+                pass
 
     def _sync_mode(self):
         mode = self.v_mode.get()
@@ -1145,9 +1177,11 @@ class App(tk.Tk):
         d = filedialog.askdirectory(title="星図データの置き場所")
         if d:
             self.v_indexdir.set(os.path.normpath(d))
+            self.log_env(f"星図データの置き場所: {os.path.normpath(d)}")
+            self.log_env("  「状態を確認」を押すと、この場所で調べ直します。")
 
     def _survey(self):
-        self._bg(self._survey_worker, "環境を調べています...")
+        self._bg(self._survey_worker, "環境を調べています...", log=self.log_env)
 
     def _survey_worker(self):
         """
@@ -1208,16 +1242,29 @@ class App(tk.Tk):
             if s in idx["scales"]:
                 var.set(False)
 
-    def _step(self, fn):
-        """個別ボタン。fn(log) を呼ぶだけ。"""
+    def _step(self, fn, title):
+        """
+        個別ボタン。見出しと結論で挟んで fn(log) を呼ぶ。
+
+        中身によっては 1 行しか出ないことがあり
+        (「既に入っています」など)、押せたのかどうか分からなかった。
+        """
         def work():
+            self.log_env("=" * 56)
+            self.log_env(f"{title}")
             fn(self.log_env)
             st = env.survey(self.index_dir)
             self.env_state = st
-            self._final_msg = ("オフライン解析できます。" if st["ready"]
-                               else "まだ準備が要ります。")
+            if st["ready"]:
+                self.log_env("✅ オフライン解析できます。")
+                self._final_msg = "オフライン解析できます。"
+            else:
+                self.log_env("残っているもの:")
+                for m in st["notes"] or ["(なし)"]:
+                    self.log_env("  ⚠️ " + m)
+                self._final_msg = "まだ準備が要ります。"
             self._post(lambda: self._show_env(st))
-        self._bg(work, "実行しています...")
+        self._bg(work, f"{title} を実行しています...", log=self.log_env)
 
     def _recommend(self):
         try:
@@ -1234,7 +1281,7 @@ class App(tk.Tk):
         have = list((self.env_state or {}).get("index", {}).get("scales", []))
         path = self.image_path.get().strip()
         self._bg(lambda: self._recommend_worker(focal, sensor, path, have),
-                 "画角を調べています...")
+                 "画角を調べています...", log=self.log_env)
 
     def _recommend_worker(self, focal, sensor, path, have):
         """
@@ -1267,6 +1314,8 @@ class App(tk.Tk):
         mb = sum(env.SCALE_MB.get(x, 0) for x in need)
         self.log_env(f"  必要な段 {want}")
         self.log_env(f"  まだ無いのは {need or 'なし'} (約 {mb/1024:.1f} GB)")
+        self._final_msg = (f"{len(need)} 段に印を付けました (約 {mb/1024:.1f} GB)"
+                           if need else "必要な段はすべてそろっています。")
         self._post(lambda: [v.set(k in need) for k, v in self.scale_vars.items()])
 
     def _download_index(self):
@@ -1281,12 +1330,20 @@ class App(tk.Tk):
                 f"{self.v_indexdir.get()} へ落とします。よろしいですか?\n\n"
                 "途中で中止しても、次に押せば続きから再開します。"):
             return
-        self._bg(lambda: self._download_worker(scales), "星図データを落としています...")
+        self._bg(lambda: self._download_worker(scales),
+                 "星図データを落としています...", log=self.log_env)
 
     def _download_worker(self, scales):
-        env.fetch_index(scales, self.index_dir, self.log_env,
-                        progress=self._progress,
-                        stop=lambda: self.cancel_flag)
+        ok = env.fetch_index(scales, self.index_dir, self.log_env,
+                             progress=self._progress,
+                             stop=lambda: self.cancel_flag)
+        if not ok and self.cancel_flag:
+            self.log_env("中止したので、設定ファイルは書き換えません。")
+            self._final_msg = "中止しました。"
+            st = env.survey(self.index_dir)
+            self.env_state = st
+            self._post(lambda: self._show_env(st))
+            return
         env.write_cfg(self.index_dir, self.log_env)
         st = env.survey(self.index_dir)
         self.env_state = st
@@ -1313,7 +1370,8 @@ class App(tk.Tk):
                     "WSL と astrometry.net の準備だけ進めますか?\n\n"
                     "(段は下のチェックか「必要な段を選ぶ」で指定できます)"):
                 return
-        self._bg(lambda: self._prepare_worker(scales), "準備しています...")
+        self._bg(lambda: self._prepare_worker(scales), "準備しています...",
+                 log=self.log_env)
 
     def _prepare_worker(self, scales):
         st = env.prepare_all(self.index_dir, scales, self.log_env,

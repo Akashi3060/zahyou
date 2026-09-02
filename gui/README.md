@@ -61,6 +61,17 @@ WSL から星図データの設定まで、足りないものを順に用意し�
 （Windows の機能としての WSL が入っていない PC では、
 UAC と再起動が 1 回だけ要ります）。
 
+## 入れ替える / やめる
+
+新しい版は **`zahyou.exe` を上書きするだけ**。設定 (`%LOCALAPPDATA%\zahyou`) も
+覚えた座標もそのまま引き継がれる。WSL と星図データは作り直さなくてよい。
+
+やめるときに消すのは 4 か所 ― `zahyou.exe` /
+`%LOCALAPPDATA%\zahyou` (設定と記憶) / `C:\AstrometryData` (星図データ) /
+WSL の中の astrometry.net (`sudo apt remove --purge astrometry.net`、
+設定は `/etc/astrometry.cfg.bak-zahyou` から戻せる)。
+WSL 自体はほかの用事にも使うので、消す前に確かめること。
+
 ## 建て方
 
 ```powershell
