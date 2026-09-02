@@ -294,6 +294,9 @@ def build(out_path):
         "Get-FileHash .\\zahyou.exe -Algorithm SHA256",
     ], st))
 
+    add(Paragraph("新しい版が出たときの入れ替え方と、やめるときの消し方は "
+                  "<b>9 章</b>にあります。", st.small))
+
     ext(h2("使い方 — 4 つだけ", st, "2.2"))
     ext(steps([
         "<b>［解析］</b>タブの「参照...」を押して、天体画像を選びます。",
@@ -786,6 +789,80 @@ def build(out_path):
          "日本語フォントが見つかっていません。ふつうの Windows なら起きませんが、"
          "起きた場合はセル A の出力に「日本語フォントなし」と表示されます。"],
     ], st, widths=[52 * mm, CONTENT_W - 52 * mm]))
+
+    add(PageBreak())
+
+    # ================================================ 9. 入れ替え・削除 ===
+    ext(h1("新しい版に入れ替える / やめる", st, "9"))
+
+    ext(h2("新しい版に入れ替える", st, "9.1"))
+    add(Paragraph("<b>デスクトップ版は、新しい zahyou.exe を上書きするだけ</b>です。"
+                  "インストールしていないので、消したり入れ直したりは要りません。",
+                  st.body))
+    ext(steps([
+        "zahyou.exe を閉じます。",
+        "配布ページ（付録 B）から新しい zahyou.exe をダウンロードします。",
+        "古い zahyou.exe に上書きします。",
+    ], st))
+    add(Paragraph("設定（目標・焦点距離・配色）も、覚えた座標や画素スケールも"
+                  "そのまま引き継がれます。<b>WSL・星図データ・設定ファイルは"
+                  "そのままで構いません</b>（作り直す必要はありません）。",
+                  st.body))
+    add(Paragraph("いま使っている版は、<b>ウィンドウの題</b>で分かります"
+                  "（「zahyou v6 — …」）。", st.body))
+    ext(callout("ノートブック版は 2 つとも入れ替えてください", [
+        "<b>zahyou_v6.ipynb</b> と <b>zahyou_engine.py</b> は組で動きます。"
+        "片方だけ新しくすると、設定の名前が食い違って動かなくなることがあります。",
+        "入れ替えたあとは、ノートブックを開き直して"
+        "<b>セル A からやり直して</b>ください"
+        "（開いたままだと、古いエンジンが読み込まれたまま残ります）。",
+    ], st))
+
+    ext(h2("やめる（消す）", st, "9.2"))
+    add(Paragraph("zahyou はインストールしないので、<b>置いたものを消すだけ</b>です。"
+                  "使った場所は次の 4 つです。上から順に、消しても差し支えのない"
+                  "ものから並べてあります。", st.body))
+    ext(table([
+        ["消すもの", "場所", "大きさ", "備考"],
+        ["本体", "zahyou.exe を置いた場所", "102 MB", "削除するだけ"],
+        ["設定と記憶", "%LOCALAPPDATA%\\zahyou", "数 KB",
+         "設定と、覚えた座標"],
+        ["星図データ", "C:\\AstrometryData", "数 GB",
+         "オフラインで使った人だけ"],
+        ["解析エンジン", "WSL（Ubuntu）の中", "約 200 MB",
+         "下の手順で消します"],
+    ], st, widths=[24 * mm, 46 * mm, 18 * mm, CONTENT_W - 88 * mm]))
+    add(Paragraph("<b>%LOCALAPPDATA% はエクスプローラーのアドレス欄に"
+                  "そのまま貼り付けられます</b>"
+                  "（C:\\Users\\（名前）\\AppData\\Local のことです）。", st.small))
+
+    add(Paragraph("WSL の中の解析エンジンと設定を戻すには、"
+                  "Ubuntu のターミナルで次を打ちます。", st.body))
+    ext(code_block([
+        "sudo apt remove --purge astrometry.net",
+        "sudo cp /etc/astrometry.cfg.bak-zahyou /etc/astrometry.cfg",
+    ], st))
+    add(Paragraph("2 行目は、zahyou が書き換える前の設定ファイルを戻すものです"
+                  "（書き換えるときに自動で退避してあります）。"
+                  "退避が無い場合は、この行は要りません。", st.small))
+
+    ext(callout("WSL 自体を消すかどうかは、よく確かめてから", [
+        "WSL は zahyou 専用のものではありません。"
+        "ほかの用事にも使っているなら、<b>消さないでください</b>。",
+        "zahyou のためだけに入れたのであれば、"
+        "PowerShell で次のように消せます。"
+        "<b>1 行目は Ubuntu の中身をすべて消します（戻せません）。</b>",
+    ], st))
+    ext(code_block([
+        "wsl --unregister Ubuntu",
+        "wsl --uninstall",
+    ], st))
+    add(Paragraph("2 行目は Windows から WSL そのものを外します。"
+                  "1 行目だけなら、あとで <font face=\'HackGen\'>wsl --install</font> "
+                  "で入れ直せます。", st.small))
+    add(Paragraph("ノートブック版を使っていた場合は、Python と VS Code も"
+                  "「アプリと機能」から普通にアンインストールできます"
+                  "（ほかで使っていないときだけ）。", st.body))
 
     add(PageBreak())
 

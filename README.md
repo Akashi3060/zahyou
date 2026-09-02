@@ -295,6 +295,49 @@ wsl -u root bash -c "printf 'inparallel\ncpulimit 300\nautoindex\nadd_path /mnt/
 
 ---
 
+## 新しい版に入れ替える / やめる
+
+### 入れ替える
+
+**新しい `zahyou.exe` を上書きするだけ**です。
+
+1. `zahyou.exe` を閉じる
+2. [Releases](https://github.com/Akashi3060/zahyou/releases/latest) から新しい `zahyou.exe` を落とす
+3. 古いものに上書きする
+
+設定（目標・焦点距離・配色）も、覚えた座標もそのまま引き継がれます。
+WSL・星図データ・設定ファイルは**そのままで構いません**。
+いま使っている版はウィンドウの題（`zahyou v6 — …`）で分かります。
+
+ノートブック版は `zahyou_v6.ipynb` と `zahyou_engine.py` の**両方**を入れ替えて、
+ノートブックを開き直してセル A からやり直してください（組で動くため）。
+
+### やめる（アンインストール）
+
+インストールしていないので、**置いたものを消すだけ**です。
+
+| 消すもの | 場所 | 大きさ |
+|---|---|---|
+| 本体 | `zahyou.exe` を置いた場所 | 102 MB |
+| 設定と記憶 | `%LOCALAPPDATA%\zahyou` | 数 KB |
+| 星図データ | `C:\AstrometryData` | 数 GB |
+| 解析エンジン | WSL（Ubuntu）の中 | 約 200 MB |
+
+WSL の中を戻すには、Ubuntu のターミナルで:
+
+```bash
+sudo apt remove --purge astrometry.net
+sudo cp /etc/astrometry.cfg.bak-zahyou /etc/astrometry.cfg
+```
+
+2 行目は zahyou が書き換える前の設定を戻すものです（自動で退避してあります）。
+
+**WSL 自体はほかの用事にも使うので、消す前によく確かめてください。**
+zahyou のためだけに入れたのなら `wsl --unregister Ubuntu`（中身が全部消えます・
+戻せません）、Windows から WSL ごと外すなら `wsl --uninstall` です。
+
+---
+
 ## 中身に興味がある方へ
 
 - [`CODE_REVIEW_v5.md`](CODE_REVIEW_v5.md) — v5 で何が壊れていたか、v6 で何を直したか
