@@ -281,6 +281,7 @@ class App(tk.Tk):
         self.engine_ready = False
         self.busy = False
         self.cancel_flag = False
+        self._final_msg = ""       # 処理が終わったときに状態バーへ残す一言
         self.jobs = queue.Queue()          # ワーカー → 画面 の受け渡し
         self.canvases = []
         self.fig_slots = {}                # 図を貼る枠 -> 図。窓の伸縮で貼り直す
@@ -823,6 +824,7 @@ class App(tk.Tk):
             return
         self.busy = True
         self.cancel_flag = False
+        self._final_msg = ""
         self._set_busy(True, label)
 
         def wrap():
@@ -835,7 +837,8 @@ class App(tk.Tk):
                 tb = traceback.format_exc()
                 self._post(lambda m=msg, t=tb: self._fail(m, t))
             finally:
-                self._post(lambda: self._set_busy(False, ""))
+                # 終わったあとも、何が起きたのかを状態バーに残す
+                self._post(lambda: self._set_busy(False, self._final_msg))
         threading.Thread(target=wrap, daemon=True).start()
 
     def _set_busy(self, busy, label):
@@ -857,7 +860,8 @@ class App(tk.Tk):
         self.log_run(f"\n❌ {msg}")
         for line in tb.splitlines()[-12:]:
             self.log_run("   " + line)
-        self.v_status.set("失敗しました。ログを見てください。")
+        self._final_msg = "失敗しました。ログを見てください。"
+        self.v_status.set(self._final_msg)
 
     def _cancel(self):
         self.cancel_flag = True
@@ -1003,11 +1007,11 @@ class App(tk.Tk):
     def _show_result(self, res):
         if self.cancel_flag:
             self.v_detail.set("中止しました。")
-            self.v_status.set("中止しました。")
+            self._final_msg = "中止しました。"
             return
         if res.get("wcs") is None:
             self.v_detail.set("解けませんでした。ログを見てください。")
-            self.v_status.set("解けませんでした。")
+            self._final_msg = "解けませんでした。ログを見てください。"
             return
 
         s = res.get("summary") or {}
@@ -1039,7 +1043,7 @@ class App(tk.Tk):
                 f"画素スケール {s['scale']:.4f}″/px   "
                 f"視野 {s['fov_x']:.2f}′ × {s['fov_y']:.2f}′   "
                 f"所要 {res['seconds']:.1f} 秒")
-        self.v_status.set("解析できました。")
+        self._final_msg = f"解析できました ({res['seconds']:.1f} 秒)。"
 
         figs = res.get("figures") or []
         for fig, frame in zip(figs, (self.f_fig1, self.f_fig2)):
@@ -1146,11 +1150,38 @@ class App(tk.Tk):
         self._bg(self._survey_worker, "環境を調べています...")
 
     def _survey_worker(self):
+        """
+        調べた結果をログにも書く。
+
+        以前は「状態を確認しています...」の 1 行だけで、
+        結果は表にしか出さなかった。押しても何も起きていないように見える。
+        """
+        self.log_env("=" * 56)
         self.log_env("状態を確認しています...")
         st = env.survey(self.index_dir)
         self.env_state = st
+        idx = st["index"]
+        self.log_env(f"  WSL            : {st['distro'] or '使えません'}")
+        self.log_env(f"  astrometry.net : {st['solver'] or '入っていません'}")
+        self.log_env(f"  星図データ      : "
+                     + (f"{idx['files']} ファイル / {env.human(idx['bytes'])}"
+                        f"  ({idx['dir']})" if idx["ok"]
+                        else f"ありません  ({idx['dir']})"))
+        self.log_env(f"  設定ファイル    : "
+                     + (", ".join(st["cfg_paths"]) or "書かれていません"))
+        if st["visible"]:
+            self.log_env(f"  WSL から見えている: {st['visible']} ファイル")
+        if idx["fov"]:
+            self.log_env(f"  解ける画角      : "
+                         f"{idx['fov'][0]:g}′ 〜 {idx['fov'][1]:g}′")
         for m in st["notes"]:
             self.log_env("  ⚠️ " + m)
+        if st["ready"]:
+            self.log_env("✅ オフライン解析できます。")
+            self._final_msg = "オフライン解析できます。"
+        else:
+            self.log_env("❌ まだ足りません。「まとめて準備する」を押してください。")
+            self._final_msg = "まだ準備が要ります。"
         self._post(lambda: self._show_env(st))
 
     def _show_env(self, st):
@@ -1183,6 +1214,8 @@ class App(tk.Tk):
             fn(self.log_env)
             st = env.survey(self.index_dir)
             self.env_state = st
+            self._final_msg = ("オフライン解析できます。" if st["ready"]
+                               else "まだ準備が要ります。")
             self._post(lambda: self._show_env(st))
         self._bg(work, "実行しています...")
 
@@ -1257,6 +1290,8 @@ class App(tk.Tk):
         env.write_cfg(self.index_dir, self.log_env)
         st = env.survey(self.index_dir)
         self.env_state = st
+        self._final_msg = ("星図データを入れました。" if st["ready"]
+                           else "落とし終えましたが、まだ足りません。")
         self._post(lambda: self._show_env(st))
 
     def _progress(self, done, total):
@@ -1285,6 +1320,8 @@ class App(tk.Tk):
                              progress=self._progress,
                              stop=lambda: self.cancel_flag)
         self.env_state = st
+        self._final_msg = ("準備できました。オフライン解析できます。"
+                           if st["ready"] else "まだ足りません。ログを見てください。")
         self._post(lambda: self._show_env(st))
 
     # ============================================================ 設定保存 ===
@@ -1407,6 +1444,10 @@ def selftest(image, target="UCAC4 660-021020", offline_first=True, log_out=None,
         check("画像中心などが出る", "画素スケール" in app.v_detail.get(),
               app.v_detail.get()[:70])
         check("ログが流れている", "解析結果" in app.txt_log.get("1.0", "end"))
+        # 処理が終わったあと、状態バーが空になっていないこと
+        # (押しても何も起きていないように見える、という不具合の再発防止)
+        check("結果が状態バーに残る", "解析できました" in app.v_status.get(),
+              repr(app.v_status.get()))
 
         # --- 完全ブラインド: 目標を指定せずに向きだけ求める -------------
         app.v_mode.set("NONE")
