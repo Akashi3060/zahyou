@@ -1262,8 +1262,11 @@ class App(tk.Tk):
     def _progress(self, done, total):
         def set_it():
             self.prog.stop()
-            self.prog.configure(mode="determinate", maximum=max(total, 1), value=done)
-            self.v_status.set(f"{env.human(done)} / {env.human(total)}")
+            self.prog.configure(mode="determinate", maximum=max(total, 1),
+                                value=min(done, total))
+            pct = 100.0 * done / total if total else 0.0
+            self.v_status.set(f"{env.human(done)} / {env.human(total)}"
+                              f"  ({pct:.0f}%)")
         self._post(set_it)
 
     def _prepare_all(self):
