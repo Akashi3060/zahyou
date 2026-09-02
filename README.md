@@ -319,9 +319,25 @@ WSL・星図データ・設定ファイルは**そのままで構いません**�
 | 消すもの | 場所 | 大きさ |
 |---|---|---|
 | 本体 | `zahyou.exe` を置いた場所 | 102 MB |
-| 設定と記憶 | `%LOCALAPPDATA%\zahyou` | 数 KB |
+| 設定と記憶 | `%LOCALAPPDATA%\zahyou`（下で説明します） | 数 KB |
 | 星図データ | `C:\AstrometryData` | 数 GB |
 | 解析エンジン | WSL（Ubuntu）の中 | 約 200 MB |
+
+`%LOCALAPPDATA%` は Windows の書き方で、実際にはこういう場所です。
+
+```
+%LOCALAPPDATA%\zahyou
+
+  ↓ Windows に taro という名前で入っているなら
+
+C:\Users\taro\AppData\Local\zahyou
+```
+
+**`AppData` は隠しフォルダー**なので、`C:\Users\（名前）` を
+開いてもたどれません。エクスプローラーの**アドレス欄**に
+`%LOCALAPPDATA%\zahyou` と打つか、**Windows キー + R** で
+同じものを打つと一発で開きます。
+自分の名前が分からないときは `C:\Users` を開いてください。
 
 WSL の中を戻すには、Ubuntu のターミナルで:
 

@@ -825,16 +825,36 @@ def build(out_path):
     ext(table([
         ["消すもの", "場所", "大きさ", "備考"],
         ["本体", "zahyou.exe を置いた場所", "102 MB", "削除するだけ"],
-        ["設定と記憶", "%LOCALAPPDATA%\\zahyou", "数 KB",
+        ["設定と記憶", "%LOCALAPPDATA%\\zahyou<br/>"
+         "（下の説明を見てください）", "数 KB",
          "設定と、覚えた座標"],
         ["星図データ", "C:\\AstrometryData", "数 GB",
          "オフラインで使った人だけ"],
         ["解析エンジン", "WSL（Ubuntu）の中", "約 200 MB",
          "下の手順で消します"],
     ], st, widths=[24 * mm, 46 * mm, 18 * mm, CONTENT_W - 88 * mm]))
-    add(Paragraph("<b>%LOCALAPPDATA% はエクスプローラーのアドレス欄に"
-                  "そのまま貼り付けられます</b>"
-                  "（C:\\Users\\（名前）\\AppData\\Local のことです）。", st.small))
+    add(Paragraph("<b>%LOCALAPPDATA% は、Windows が「この PC の"
+                  "この人の設定置き場」を表すために使う書き方</b>です。"
+                  "実際には、次の場所を指しています。", st.body))
+    ext(code_block([
+        "%LOCALAPPDATA%\\zahyou",
+        "",
+        "  ↓ Windows に taro という名前で入っているなら",
+        "",
+        "C:\\Users\\taro\\AppData\\Local\\zahyou",
+    ], st))
+    ext(callout("フォルダーをたどっても見つかりません", [
+        "<b>AppData は隠しフォルダー</b>なので、C:\\Users\\（名前）を"
+        "開いても出てきません。次のどちらかで一発で開けます。",
+        "① エクスプローラーの<b>アドレス欄</b>（いまの場所が出ている欄）を"
+        "クリックして、<b>%LOCALAPPDATA%\\zahyou</b> と打って Enter。",
+        "② <b>Windows キーを押しながら R</b> を押し、出てきた欄に"
+        "同じものを打って Enter。",
+        "自分の名前が分からないときは、エクスプローラーで C:\\Users を"
+        "開いてください。並んでいるフォルダー名がそれです。",
+        "デスクトップ版の［使い方］タブには、<b>その PC での実際の場所</b>が"
+        "出ています。",
+    ], st, kind="note"))
 
     add(Paragraph("WSL の中の解析エンジンと設定を戻すには、"
                   "Ubuntu のターミナルで次を打ちます。", st.body))

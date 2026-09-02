@@ -37,6 +37,11 @@ gui/
 
 設定 (目標・焦点距離・解析方法・配色) は `%LOCALAPPDATA%\zahyou\gui.json` に
 覚えるので、次に開いたときは前回のままです。
+`%LOCALAPPDATA%` は `C:\Users\（ログイン名）\AppData\Local` のこと
+(例: `C:\Users\taro\AppData\Local\zahyou\gui.json`)。
+`AppData` は隠しフォルダーなので、エクスプローラーのアドレス欄に
+`%LOCALAPPDATA%\zahyou` と打つのが早いです。
+[使い方] タブには、その PC での実際の場所が出ます。
 
 ## 使うだけの人へ
 

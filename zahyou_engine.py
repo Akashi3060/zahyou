@@ -1050,7 +1050,7 @@ def _cache_path():
     以前は Temp に置いていたが、そこは Windows の「ディスクの クリーンアップ」や
     ストレージセンサーが消しにいく場所だった。覚えた座標は
     「一度オンラインで引いた天体名を、山の中でもそのまま使う」ための命綱なので、
-    消えない場所 (%LOCALAPPDATA%\zahyou) へ移した。
+    消えない場所 (%LOCALAPPDATA%\\zahyou) へ移した。
     前の場所にファイルが残っていれば、一度だけ引き継ぐ。
     """
     override = os.environ.get("ZAHYOU_CACHE")
