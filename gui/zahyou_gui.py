@@ -289,6 +289,12 @@ class App(tk.Tk):
         self.env_state = None
         self._log_target = None     # いま動いている処理のログの書き先
         self.update_auto = True     # Tk 変数はワーカーから読めないので写しを持つ
+        # 結果をどの表示で出すか。初めては「撮影時の向き」(回転させていない元の絵)
+        self.result_tab = "orig"
+        # 起動の途中でも <<NotebookTabChanged>> は飛んでくる。そのまま覚えると
+        # 「いちばん左のタブ」で上書きされ、記憶が毎回消える (実際に踏んだ)。
+        # 組み立てが済むまでは覚えない。
+        self._auto_tab = True
         self.image_path = tk.StringVar(value="")
         # Tk の変数はメインスレッドからしか触れない。ワーカーはこちらを見る。
         self.index_dir = env.DEFAULT_INDEX_DIR
@@ -300,6 +306,7 @@ class App(tk.Tk):
         self._apply_theme(redraw=False)
 
         self.after(60, self._pump)
+        self.after(700, lambda: setattr(self, "_auto_tab", False))
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._bg(self._load_engine, label="エンジンを読み込んでいます...")
 
@@ -683,6 +690,7 @@ class App(tk.Tk):
         self.out.add(self.f_fig1, text=" 撮影時の向き ")
         self.out.add(self.f_fig2, text=" 北が上 ")
         self.out.add(self.f_log, text=" ログ ")
+        self.out.bind("<<NotebookTabChanged>>", self._on_out_tab)
 
         self.txt_log = tk.Text(self.f_log, font=mono_font(9), wrap="none",
                                relief="flat", borderwidth=0)
@@ -691,6 +699,28 @@ class App(tk.Tk):
         self.txt_log.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         self.txt_log.pack(fill="both", expand=True)
+
+    def _select_out(self, frame):
+        """こちらから表示を切り替える (ユーザーの好みとしては覚えない)。"""
+        self._auto_tab = True
+        try:
+            self.out.select(frame)
+        finally:
+            self.after(80, lambda: setattr(self, "_auto_tab", False))
+
+    def _on_out_tab(self, _event=None):
+        """ユーザーが表示を切り替えたら、それを次からの既定にする。"""
+        if self._auto_tab:
+            return
+        try:
+            cur = self.out.select()
+        except tk.TclError:
+            return
+        name = {str(self.f_fig1): "orig", str(self.f_fig2): "northup",
+                str(self.f_log): "log"}.get(cur)
+        if name and name != self.result_tab:
+            self.result_tab = name
+            self._save_settings()
 
     def _build_result_head(self, parent):
         box = ttk.Frame(parent)
@@ -1135,7 +1165,7 @@ class App(tk.Tk):
         for v in (self.v_r1, self.v_r2, self.v_r3):
             v.set("—")
         self.v_detail.set("解析しています...")
-        self.out.select(self.f_log)
+        self._select_out(self.f_log)
         params = self._params()
         self._save_settings()
         self._bg(lambda: self._analysis_worker(params), "解析しています...")
@@ -1204,7 +1234,13 @@ class App(tk.Tk):
         figs = res.get("figures") or []
         for fig, frame in zip(figs, (self.f_fig1, self.f_fig2)):
             self._embed(fig, frame)
-        self.out.select(self.f_fig2 if len(figs) > 1 else self.f_fig1)
+        # 前に見ていた表示に戻す。初めては「撮影時の向き」= 撮ったままの絵。
+        want = {"orig": self.f_fig1, "northup": self.f_fig2,
+                "log": self.f_log}.get(self.result_tab, self.f_fig1)
+        if want in (self.f_fig1, self.f_fig2) and want not in self.fig_slots:
+            # 目標を指定していないときは「北が上」の図が無い
+            want = self.f_fig1 if self.f_fig1 in self.fig_slots else self.f_log
+        self._select_out(want)
 
     def _embed(self, fig, frame):
         """図を 1 枚貼る。窓の幅が変わったら貼り直す。"""
@@ -1517,7 +1553,8 @@ class App(tk.Tk):
         }.items()}
         data.update({"hint": self.v_hint.get(), "marks": self.v_marks.get(),
                      "ignore": self.v_ignore.get(), "theme": self.theme_name,
-                     "update_auto": self.v_update_auto.get()})
+                     "update_auto": self.v_update_auto.get(),
+                     "result_tab": self.result_tab})
         try:
             with io.open(settings_path(), "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=1)
@@ -1545,6 +1582,8 @@ class App(tk.Tk):
                 var.set(d[k])
         if d.get("theme") in THEMES:
             self.theme_name = d["theme"]
+        if d.get("result_tab") in ("orig", "northup", "log"):
+            self.result_tab = d["result_tab"]
         # 古い設定には昔の文言が入っていることがある (選択肢を書き換えたため)
         if self.v_solve.get() not in SOLVE_CHOICES:
             self.v_solve.set(SOLVE_DEFAULT)
