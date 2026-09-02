@@ -14,6 +14,7 @@ Python に置き換えてある。
 from __future__ import annotations
 
 import base64
+import concurrent.futures
 import math
 import os
 import re
@@ -408,15 +409,38 @@ def _download(url, path, log, on_bytes=None, stop=None, retries=5):
 
 
 def plan_size(scales, dest):
-    """まだ落ちていないぶんの、おおよその容量 [byte]。"""
+    """まだ落ちていないぶんの、おおよその容量 [byte]。確認画面の目安用。"""
     need = 0
     for s in scales:
         per = SCALE_MB.get(s, 100) * 1024 * 1024 / len(index_names(s))
         for name in index_names(s):
-            path = os.path.join(dest, name)
-            if not os.path.exists(path):
+            if not os.path.exists(os.path.join(dest, name)):
                 need += per
     return int(need)
+
+
+def remote_sizes(jobs, log=None, stop=None, workers=8):
+    """
+    落とす予定のファイルの実サイズを HEAD で調べる。{名前: byte or None}
+
+    表に持っている目安 (SCALE_MB) は 6% ほどずれていて、進み具合が
+    100% に届かなかったり超えたりする。実物を聞いてから始める。
+    """
+    out = {}
+
+    def one(job):
+        s, tile, name = job
+        try:
+            return name, _remote_size(index_url(s, tile))
+        except Exception:
+            return name, None
+
+    with concurrent.futures.ThreadPoolExecutor(workers) as ex:
+        for name, size in ex.map(one, jobs):
+            if stop is not None and stop():
+                break
+            out[name] = size
+    return out
 
 
 def fetch_index(scales, dest, log, progress=None, stop=None):
@@ -424,19 +448,50 @@ def fetch_index(scales, dest, log, progress=None, stop=None):
     選んだ段の index ファイルを dest へ落とす。
 
     progress(done, total) が呼ばれる (byte)。stop() が True を返したら止める。
+
+    数え方をひとつに揃えてある ―― 見出しの「N ファイル」、途中の [i/N]、
+    最後の「完了 M/N」は、すべて<b>これから落とすぶん</b>の数。
+    既にあるファイルを混ぜて数えると、表示がとびとびになって合わなくなる。
     """
     os.makedirs(dest, exist_ok=True)
     jobs = []
     for s in sorted(scales):
         for i, name in enumerate(index_names(s)):
             jobs.append((s, i if s >= 5200 else None, name))
-    todo = [j for j in jobs if not os.path.exists(os.path.join(dest, j[2]))]
-    if not todo:
-        log("  すべて落ちています。")
-        return True
 
-    total = plan_size(scales, dest)
-    log(f"  {len(todo)} ファイル / 約 {human(total)} を {dest} へ落とします。")
+    log("  必要な容量を調べています...")
+    sizes = remote_sizes(jobs, log, stop)
+    if stop is not None and stop():
+        log("  中止しました。")
+        return False
+
+    todo, total, already = [], 0, 0
+    for s, tile, name in jobs:
+        path = os.path.join(dest, name)
+        got = os.path.getsize(path) if os.path.exists(path) else 0
+        want = sizes.get(name)
+        if want is None:                    # 大きさを聞けなかった
+            if got:                         # あるなら完成しているとみなす
+                already += 1
+                continue
+            todo.append((s, tile, name))
+            total += int(SCALE_MB.get(s, 100) * 1024 * 1024
+                         / len(index_names(s)))
+            continue
+        if got >= want:
+            already += 1
+            continue
+        todo.append((s, tile, name))
+        total += want - got                 # 途中まで落ちているぶんは引く
+
+    if not todo:
+        log(f"  すべて落ちています ({already} ファイル)。")
+        return True
+    msg = f"  {len(todo)} ファイル / {human(total)} を {dest} へ落とします。"
+    if already:
+        msg += f"  (既にある {already} ファイルは飛ばします)"
+    log(msg)
+
     done = [0]
 
     def on_bytes(n):
@@ -445,22 +500,20 @@ def fetch_index(scales, dest, log, progress=None, stop=None):
             progress(done[0], total)
 
     ok = 0
-    for n, (s, tile, name) in enumerate(jobs, 1):
+    for i, (s, tile, name) in enumerate(todo, 1):
         if stop is not None and stop():
             log("  中止しました。")
             return False
         path = os.path.join(dest, name)
-        fresh = not os.path.exists(path)
         if _download(index_url(s, tile), path, log, on_bytes, stop):
             ok += 1
-            if fresh:
-                log(f"    [{n}/{len(jobs)}] {name}  "
-                    f"{human(os.path.getsize(path))}")
+            log(f"    [{i}/{len(todo)}] {name}  "
+                f"{human(os.path.getsize(path))}")
         elif stop is not None and stop():
             log("  中止しました。")
             return False
-    log(f"  完了: {ok}/{len(jobs)} ファイル")
-    return ok == len(jobs)
+    log(f"  完了: {ok}/{len(todo)} ファイル")
+    return ok == len(todo)
 
 
 # ============================================================== まとめて ===
