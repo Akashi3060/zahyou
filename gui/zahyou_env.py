@@ -99,9 +99,19 @@ def wsl(command, as_root=False, timeout=600):
     return p.returncode, ((p.stdout or "") + (p.stderr or "")).strip()
 
 
-def wsl_stream(command, log, as_root=False, timeout=3600):
-    """出力を 1 行ずつ log に流しながら回す。apt のような長い処理向け。"""
-    if os.name != "nt":
+def wsl_stream(command, log, as_root=False, timeout=3600, raw=False):
+    """
+    出力を 1 行ずつ log に流しながら回す。apt のような長い処理向け。
+
+    raw=True のときは command を「wsl.exe 自身への引数」として渡す
+    (--install など、Linux の中で動かすのではない用事)。
+    """
+    if raw:
+        if os.name != "nt":
+            log("Windows ではないので何もしません。")
+            return 1
+        args = ["wsl.exe"] + command.split()
+    elif os.name != "nt":
         args = ["sh", "-c", command]
     else:
         args = (["wsl.exe"] + (["-u", "root"] if as_root else [])
@@ -215,13 +225,24 @@ def survey(index_dir=None):
 
 def install_wsl(log):
     """
-    `wsl --install` は管理者権限が要るので、UAC を出して PowerShell に任せる。
-    終わったら Windows の再起動が必要。
+    WSL を入れる。
+
+    まず管理者権限なしで試す ―― Windows の機能としての WSL が既に入っていて
+    ディストリビューションだけ無い場合は、これで通る (実測 40 秒・UAC 無し)。
+    通らなければ UAC を出して管理者で実行し、再起動をお願いする。
     """
     if os.name != "nt":
         log("Windows ではないので何もしません。")
         return False
-    log("WSL を入れます。UAC (管理者の確認) が出たら「はい」を押してください。")
+
+    log("WSL を入れます (回線しだいで数分かかります)...")
+    rc = wsl_stream("--install --no-launch", log, raw=True, timeout=1800)
+    if rc == 0 and wsl("echo ok", timeout=120)[0] == 0:
+        log("  入りました。再起動は要りません。")
+        return True
+
+    log("  管理者の権限が要るようです。")
+    log("  UAC (管理者の確認) が出たら「はい」を押してください。")
     ps = ('Start-Process -FilePath wsl.exe '
           '-ArgumentList "--install","--no-launch" -Verb RunAs -Wait')
     p = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy",
@@ -432,8 +453,14 @@ def prepare_all(index_dir, scales, log, progress=None, stop=None):
     log("1. WSL")
     st = survey(index_dir)
     if not st["wsl"]:
-        install_wsl(log)
-        return survey(index_dir)
+        if not install_wsl(log):
+            return survey(index_dir)
+        st = survey(index_dir)
+        if not st["wsl"]:
+            # 管理者で入れた直後は再起動が要る。ここで止めて案内する。
+            log("  Windows を再起動してから、もう一度押してください。")
+            return st
+        log("  そのまま続けます。")
     log(f"  OK  {st['distro']}")
 
     log("=" * 56)
