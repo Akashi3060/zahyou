@@ -341,6 +341,24 @@ def case_spaces_in_name():
     check("31 空白・日本語入りファイル名", p, 25, pl)
 
 
+def case_star_chart():
+    """星図 (白地に黒い星)。明暗が逆なので、そのままでは 1 つも拾えない。"""
+    img, pl = make_field()
+    v = (img - img.min()) / max(float(np.ptp(img)), 1e-6)
+    inv = ((1.0 - v) * 255.0).astype(np.uint8)          # 白地に黒い星
+    p2 = os.path.join(TMP, "starchart.png")
+    Image.fromarray(inv).save(p2)
+    check("32 星図 (白地に黒い星)", p2, 25, pl)
+
+
+def case_real_star_chart():
+    """実物の星図 (Occult などが描くもの)。手元にあるときだけ。"""
+    p2 = (r"C:\Users\yoshi\Downloads"
+          r"\20261031 3200 Phaethon StarChart 40arcmin.png")
+    if os.path.exists(p2):
+        check("33 実物の星図 (40 分角)", p2, expect_sources=50)
+
+
 def main():
     for fn in sorted(k for k in globals() if k.startswith("case_")):
         globals()[fn]()
