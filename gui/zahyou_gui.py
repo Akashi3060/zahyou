@@ -1225,8 +1225,9 @@ class App(tk.Tk):
                 self.log_env(f"画像の大きさを読めませんでした ({type(e).__name__})。"
                              "横幅だけで選びます。")
         else:
-            self.log_env(f"画角 {fov_w:.1f}′ (横幅から)。"
-                         "[解析] タブで画像を選ぶと、切り出した縦横も見ます。")
+            self.log_env(f"⚠️ 横幅の画角 {fov_w:.1f}′ だけで選びます。"
+                         "必要な段は短いほうの辺で決まるので、"
+                         "[解析] タブで画像を選んでから押し直してください。")
 
         want = env.recommend_scales(fov_w, fov_h)
         need = [x for x in want if x not in have]

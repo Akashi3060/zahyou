@@ -806,16 +806,15 @@ def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
     scale, how = estimate_pixel_scale(bundle.header, focal_length_mm, bundle.shape)
     fov_w = nx * scale / 60.0 if scale else None
     fov_h = ny * scale / 60.0 if scale else None
-    # 掩蔽観測ではローリングシャッターの影響を減らし、コマ落ちを避けるために
-    # 読み出す範囲 (特に縦) を切り詰める。すると短辺の画角が極端に狭くなり、
-    # quad が小さくなるので、横幅だけ見ていると必要な index を見誤る。
-    thin = bool(scale) and max(nx, ny) >= 1.8 * min(nx, ny)
+    fov_short = min(fov_w, fov_h) if scale else None
+    # 星の並び (quad) は「短いほうの辺」に収まる大きさまでしか作れないので、
+    # 必要な index は短辺で決まる。横幅だけ見ていると足りない段を見落とす。
+    #   実測: 23.6′ x 13.4′ の画像 (ごく普通の 16:9) で、横幅に合う 22′〜30′ の
+    #   段だけでは 120 秒かけても解けず、短辺に合う 11′〜16′ を足したら 10 秒で
+    #   解けた。掩蔽観測のように縦を切り詰めるとこの差はさらに開く。
     if scale:
-        if thin:
-            _log(f"  - 画素スケール {scale:.3f}″/px ({how}) "
-                 f"→ 画角 {fov_w:.1f}′ x {fov_h:.1f}′ (短辺 {min(fov_w, fov_h):.1f}′)")
-        else:
-            _log(f"  - 画素スケール {scale:.3f}″/px ({how}) → 画角 {fov_w:.1f}′")
+        _log(f"  - 画素スケール {scale:.3f}″/px ({how}) "
+             f"→ 画角 {fov_w:.1f}′ x {fov_h:.1f}′ (短辺 {fov_short:.1f}′)")
     else:
         _log(f"  - 画素スケール: {how}")
 
@@ -826,17 +825,13 @@ def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
             _log(f"  - 手持ちの星図データが対応する画角: {lo:g}′ 〜 {hi:g}′"
                  f" (index ファイル {len(installed)} 個)")
             if scale:
-                ok, msgs = missing_index_advice(fov_w, installed)
+                # 判定は短辺で行う (上のコメント参照)
+                ok, msgs = missing_index_advice(fov_short, installed)
                 for m in msgs:
                     _log(("  ⚠️ " if not ok else "  - ") + m)
-                if thin:
-                    short = min(fov_w, fov_h)
-                    ok2, msgs2 = missing_index_advice(short, installed)
-                    if not ok2:
-                        _log(f"  ⚠️ 縦横比が大きい画像です。短辺の画角 {short:.1f}′ に"
-                             "合う段も入れておくと確実です:")
-                        for m in msgs2[1:]:
-                            _log("     " + m)
+                if not ok:
+                    _log(f"     ※ 必要な段は横幅 {fov_w:.1f}′ ではなく"
+                         f"短辺 {fov_short:.1f}′ で決まります。")
 
     xy_path = write_xylist(sources, nx, ny,
                            os.path.join(work_dir, "zahyou_sources.xyls"))
@@ -940,10 +935,17 @@ def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
              "露出を伸ばすか、複数フレームを重ねてください。")
     lo_fov, hi_fov = index_coverage(installed)
     if lo_fov is not None:
-        _log(f"     ・手持ちの星図データは画角 {lo_fov:g}′〜{hi_fov:g}′ しか解けません。"
-             "これより狭い(長焦点)画像なら、細かい index が必要です:")
-        _log(f"         python dev/fetch_index.py 5204 5203 5202"
-             f"   ({'4′' if lo_fov <= 4 else '4′'}まで対応)")
+        _log(f"     ・手持ちの星図データは画角 {lo_fov:g}′〜{hi_fov:g}′ しか解けません。")
+        if fov_short:
+            ok2, msgs2 = missing_index_advice(fov_short, installed)
+            if not ok2:
+                _log(f"       この画像は短辺が {fov_short:.1f}′ です"
+                     f"(横幅 {fov_w:.1f}′)。星の並びは短いほうの辺で決まるので:")
+                for m in msgs2:
+                    _log("         " + m)
+        else:
+            _log("       画角が分かれば、足りない段を名指しできます。"
+                 "FOCAL_LENGTH_MM を書いてもう一度試してください。")
     if not scale:
         _log("     ・FOCAL_LENGTH_MM に焦点距離を書くと画角が確定し、"
              "総当たりをやめるので格段に速く・確実になります。")

@@ -79,6 +79,22 @@ def _env():
     return e
 
 
+def _decode(b):
+    """
+    wsl.exe の出力を文字にする。
+
+    WSL_UTF8=1 を渡していても、<b>WSL 自体が入っていないとき</b>の
+    「インストールされていません」という案内は System32 のスタブが出すので
+    UTF-16LE のままくる。ここを UTF-8 として読むと文字化けし、
+    いちばん読んでほしい場面で意味が伝わらない (実際に踏んだ)。
+    """
+    if not b:
+        return ""
+    if b.count(b"\x00") > len(b) // 4:
+        return b.decode("utf-16-le", "replace")
+    return b.decode("utf-8", "replace")
+
+
 def wsl(command, as_root=False, timeout=600):
     """WSL の中で sh -c を回す。戻り値 (returncode, 出力)"""
     if os.name != "nt":
@@ -89,14 +105,13 @@ def wsl(command, as_root=False, timeout=600):
     args = (["wsl.exe"] + (["-u", "root"] if as_root else [])
             + ["-e", "sh", "-c", command])
     try:
-        p = subprocess.run(args, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=timeout,
+        p = subprocess.run(args, capture_output=True, timeout=timeout,
                            env=_env(), creationflags=_NO_WINDOW)
     except FileNotFoundError:
         return 127, "wsl.exe がありません"
     except subprocess.TimeoutExpired:
         return 124, f"{timeout} 秒で応答がありませんでした"
-    return p.returncode, ((p.stdout or "") + (p.stderr or "")).strip()
+    return p.returncode, (_decode(p.stdout) + _decode(p.stderr)).strip()
 
 
 def wsl_stream(command, log, as_root=False, timeout=3600, raw=False):
@@ -118,16 +133,15 @@ def wsl_stream(command, log, as_root=False, timeout=3600, raw=False):
                 + ["-e", "sh", "-c", command])
     try:
         p = subprocess.Popen(args, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, text=True,
-                             encoding="utf-8", errors="replace",
+                             stderr=subprocess.STDOUT,
                              env=_env() if os.name == "nt" else None,
                              creationflags=_NO_WINDOW)
     except FileNotFoundError:
         log("wsl.exe がありません。")
         return 127
     t0 = time.time()
-    for line in p.stdout:
-        line = line.rstrip()
+    for raw in p.stdout:
+        line = _decode(raw).replace("\r", "").rstrip()
         if line:
             log("    " + line)
         if time.time() - t0 > timeout:
@@ -254,6 +268,12 @@ def install_wsl(log):
         log("  管理者の PowerShell で  wsl --install  を実行してください。")
         return False
     log("  インストールを実行しました。")
+    # 再起動が要るかどうかは、実際に動かしてみないと分からない。
+    # 先に「再起動してください」と出してしまうと、続けられる場合に
+    # 矛盾したことを言うことになる (実測で踏んだ)。
+    if wsl("echo ok", timeout=240)[0] == 0:
+        log("  入りました。再起動は要りません。")
+        return True
     log("  ★ Windows を再起動してから、もう一度「状態を確認」を押してください。")
     return True
 
