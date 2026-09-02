@@ -59,7 +59,8 @@ def main():
 
     # --- ボタンを集める ----------------------------------------------
     buttons = []
-    for tab, tab_name in ((app.tab_run, "解析"), (app.tab_env, "準備")):
+    for tab, tab_name in ((app.tab_run, "解析"), (app.tab_env, "準備"),
+                          (app.tab_help, "使い方")):
         app.nb.select(tab)
         app.update()
 
@@ -74,8 +75,9 @@ def main():
         walk(tab)
     buttons.append(("下のバー", app.btn_theme.cget("text"), app.btn_theme, None))
 
-    # 「解析を実行」は別のテスト (test_gui.py) で見ているので、ここでは飛ばす
-    skip = {"解析を実行"}
+    # 「解析を実行」は別のテスト (test_gui.py) で見ている。
+    # 「更新する」は押すと本当に落として入れ替えるので、ここでは押さない。
+    skip = {"解析を実行", "更新する"}
 
     rows = []
     for tab_name, text, btn, tab in buttons:

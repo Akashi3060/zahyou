@@ -38,6 +38,7 @@ from matplotlib.backends.backend_tkagg import (        # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import zahyou_env as env                 # noqa: E402
+import zahyou_update as upd              # noqa: E402
 
 APP_NAME = "zahyou"
 APP_VER = "v6"
@@ -287,6 +288,7 @@ class App(tk.Tk):
         self.fig_slots = {}                # 図を貼る枠 -> 図。窓の伸縮で貼り直す
         self.env_state = None
         self._log_target = None     # いま動いている処理のログの書き先
+        self.update_auto = True     # Tk 変数はワーカーから読めないので写しを持つ
         self.image_path = tk.StringVar(value="")
         # Tk の変数はメインスレッドからしか触れない。ワーカーはこちらを見る。
         self.index_dir = env.DEFAULT_INDEX_DIR
@@ -429,6 +431,82 @@ class App(tk.Tk):
             self.btn_theme.configure(
                 text="☀ 明るく" if th["name"] == "dark" else "🌙 暗く")
 
+    # ============================================================ 更新 ===
+    def _check_update(self):
+        self.v_update_msg.set("確認しています...")
+        self._bg(self._check_update_worker, "更新を確認しています...")
+
+    def _check_update_worker(self):
+        st = upd.check(stop=lambda: self.cancel_flag)
+        self._update_state = st
+        self._final_msg = st["message"]
+        self._post(lambda: self._show_update(st))
+
+    def _show_update(self, st):
+        self.v_update_msg.set(st["message"])
+        can = st["state"] == "available"
+        self.btn_update_apply.configure(state="normal" if can else "disabled")
+        if can:
+            exe = upd.running_exe()
+            if exe and not upd.writable(exe):
+                self.v_update_msg.set(
+                    st["message"] + "  ただし " + os.path.dirname(exe)
+                    + " に書き込めないので、この場所では入れ替えられません。"
+                      "書ける場所へ移してから、もう一度お試しください。")
+                self.btn_update_apply.configure(state="disabled")
+
+    def _apply_update(self):
+        st = getattr(self, "_update_state", None)
+        if not st or st.get("state") != "available":
+            messagebox.showinfo(APP_NAME, "先に「更新を確認」を押してください。")
+            return
+        if not messagebox.askokcancel(
+                APP_NAME,
+                f"{st['tag']}（{st['updated']} 版）に入れ替えます。\n\n"
+                f"  1. 新しい zahyou.exe を落とします（{st['size'] / 1e6:.0f} MB）\n"
+                "  2. 中身を確かめます（SHA256）\n"
+                "  3. zahyou を閉じて入れ替え、起動し直します\n\n"
+                "いまの版は zahyou.exe.bak として残します。\n"
+                "設定と、覚えた座標はそのまま引き継がれます。"):
+            return
+        self.nb.select(self.tab_run)
+        self.out.select(self.f_log)
+        self._bg(lambda: self._update_worker(st), "更新しています...")
+
+    def _update_worker(self, st):
+        self.log_run("=" * 56)
+        self.log_run(f"更新: {st['tag']} ({st['updated']} 版)")
+        new = upd.download(st, self.log_run, progress=self._progress,
+                           stop=lambda: self.cancel_flag)
+        if not new:
+            self._final_msg = "更新をやめました。"
+            return
+        if not upd.apply_update(new, self.log_run):
+            self._final_msg = "入れ替えられませんでした。"
+            return
+        self._final_msg = "入れ替えています..."
+        self._post(self._quit_for_update)
+
+    def _quit_for_update(self):
+        self._save_settings()
+        self.after(400, self.destroy)
+
+    def _update_quiet(self):
+        """起動したついでの確認。新しい版があるときだけ知らせる。"""
+        if not self.update_auto:
+            return
+        try:
+            st = upd.check(timeout=15)
+        except Exception:
+            return
+        self._update_state = st
+        if st["state"] == "available":
+            self._post(lambda: self._show_update(st))
+            self._post(lambda: self.v_status.set(
+                st["message"] + "  ［使い方］タブから更新できます。"))
+        else:
+            self._post(lambda: self.v_update_msg.set(st["message"]))
+
     def _toggle_theme(self):
         self._apply_theme("light" if self.theme_name == "dark" else "dark")
         self._save_settings()
@@ -463,6 +541,11 @@ class App(tk.Tk):
         self.v_ignore = tk.BooleanVar(value=True)
         self.v_t_online = tk.StringVar(value="120")
         self.v_t_offline = tk.StringVar(value="300")
+        self.v_update_msg = tk.StringVar(value="")
+        self.v_update_auto = tk.BooleanVar(value=True)
+        self.v_update_auto.trace_add(
+            "write", lambda *_: setattr(self, "update_auto",
+                                        self.v_update_auto.get()))
         self.v_indexdir = tk.StringVar(value=env.DEFAULT_INDEX_DIR)
         self.v_indexdir.trace_add(
             "write", lambda *_: setattr(self, "index_dir", self.v_indexdir.get()))
@@ -571,15 +654,18 @@ class App(tk.Tk):
         ttk.Checkbutton(g3, text="画像に入っている座標情報を無視する",
                         variable=self.v_ignore).grid(row=4, column=0, columnspan=2,
                                                      sticky="w")
-        ttk.Label(g3, text="打ち切り [秒]  オンライン").grid(row=5, column=0,
-                                                            sticky="w", pady=(8, 0))
-        ttk.Entry(g3, textvariable=self.v_t_online, width=8).grid(row=5, column=1,
-                                                                  sticky="w",
-                                                                  pady=(8, 0))
-        ttk.Label(g3, text="                オフライン").grid(row=6, column=0,
-                                                              sticky="w")
-        ttk.Entry(g3, textvariable=self.v_t_offline, width=8).grid(row=6, column=1,
-                                                                   sticky="w")
+        # 「オンライン」「オフライン」を全角スペースで寄せていたので、
+        # フォントによってずれた。1 行にまとめて、素直に並べる。
+        ttk.Label(g3, text="打ち切り [秒]").grid(row=5, column=0, sticky="w",
+                                                pady=(8, 0))
+        lim = ttk.Frame(g3)
+        lim.grid(row=5, column=1, sticky="w", pady=(8, 0))
+        ttk.Label(lim, text="オンライン").pack(side="left")
+        ttk.Entry(lim, textvariable=self.v_t_online,
+                  width=6).pack(side="left", padx=(4, 10))
+        ttk.Label(lim, text="オフライン").pack(side="left")
+        ttk.Entry(lim, textvariable=self.v_t_offline,
+                  width=6).pack(side="left", padx=(4, 0))
         g3.columnconfigure(1, weight=1)
         self.lbl_env = ttk.Label(g3, text="", style="Muted.TLabel", wraplength=310)
         self.lbl_env.grid(row=7, column=0, columnspan=2, sticky="sw", pady=(10, 0))
@@ -741,6 +827,27 @@ class App(tk.Tk):
 
     # ============================================================ 使い方 ===
     def _build_help_tab(self):
+        # --- 更新 -------------------------------------------------------
+        box = ttk.LabelFrame(self.tab_help, text=" 更新 ", padding=8)
+        box.pack(fill="x", pady=(0, 8))
+        row = ttk.Frame(box)
+        row.pack(fill="x")
+        ttk.Label(row, text=f"いまの版: {APP_NAME} {APP_VER}",
+                  style="Head.TLabel").pack(side="left")
+        self.btn_update_apply = ttk.Button(row, text="更新する",
+                                           state="disabled",
+                                           command=self._apply_update)
+        self.btn_update_apply.pack(side="right")
+        self.btn_update_check = ttk.Button(row, text="更新を確認",
+                                           command=self._check_update)
+        self.btn_update_check.pack(side="right", padx=6)
+        ttk.Label(box, textvariable=self.v_update_msg, style="Muted.TLabel",
+                  wraplength=760).pack(anchor="w", pady=(4, 0))
+        ttk.Checkbutton(box, text="起動したときに確認する（GitHub に問い合わせます）",
+                        variable=self.v_update_auto,
+                        command=self._save_settings).pack(anchor="w",
+                                                          pady=(2, 0))
+
         t = tk.Text(self.tab_help, wrap="word", font=ui_font(10),
                     relief="flat", borderwidth=0, padx=14, pady=12)
         self.tk_texts.append(t)
@@ -931,8 +1038,9 @@ class App(tk.Tk):
             f"準備できました ({el:.1f} 秒 / 図のフォント: "
             f"{self.engine.font or '日本語フォントなし'})"))
         self.log_run(f"エンジン: {self.engine.path}")
-        # 起動ついでに環境も見ておく (画面はふさがない)
+        # 起動ついでに環境と更新も見ておく (画面はふさがない)
         threading.Thread(target=self._survey_quiet, daemon=True).start()
+        threading.Thread(target=self._update_quiet, daemon=True).start()
 
     def _survey_quiet(self):
         """起動したついでの確認。[準備] タブが空のままにならないよう 1 行残す。"""
@@ -1408,7 +1516,8 @@ class App(tk.Tk):
             "sensor": self.v_sensor, "image": self.image_path,
         }.items()}
         data.update({"hint": self.v_hint.get(), "marks": self.v_marks.get(),
-                     "ignore": self.v_ignore.get(), "theme": self.theme_name})
+                     "ignore": self.v_ignore.get(), "theme": self.theme_name,
+                     "update_auto": self.v_update_auto.get()})
         try:
             with io.open(settings_path(), "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=1)
@@ -1430,7 +1539,8 @@ class App(tk.Tk):
             if isinstance(d.get(k), str) and d[k]:
                 var.set(d[k])
         for k, var in (("hint", self.v_hint), ("marks", self.v_marks),
-                       ("ignore", self.v_ignore)):
+                       ("ignore", self.v_ignore),
+                       ("update_auto", self.v_update_auto)):
             if isinstance(d.get(k), bool):
                 var.set(d[k])
         if d.get("theme") in THEMES:
@@ -1614,7 +1724,44 @@ def _engine_check(argv):
     return code
 
 
+def _update_cli(argv):
+    """
+    画面を出さずに更新のしくみだけ動かす (動作確認用)。
+
+      zahyou.exe --update-check              調べるだけ
+      zahyou.exe --update-apply              落として入れ替える (起動し直さない)
+    """
+    out = []
+
+    def log(m):
+        out.append(str(m))
+        print(m, flush=True)
+
+    st = upd.check()
+    log(f"state   : {st['state']}")
+    log(f"message : {st['message']}")
+    for k in ("tag", "updated", "size", "sha256", "here_sha256"):
+        if k in st:
+            log(f"{k:8s}: {st[k]}")
+    code = 0 if st["state"] in ("up_to_date", "available") else 1
+    if "--update-apply" in argv and st["state"] == "available":
+        new = upd.download(st, log)
+        if not new:
+            code = 1
+        elif not upd.apply_update(new, log, relaunch=False):
+            code = 1
+        else:
+            log("入れ替えを始めました (このプロセスは終わります)")
+    if "--out" in argv:
+        with io.open(argv[argv.index("--out") + 1], "w",
+                     encoding="utf-8") as f:
+            f.write("\n".join(out) + "\n")
+    return code
+
+
 def main():
+    if "--update-check" in sys.argv or "--update-apply" in sys.argv:
+        return _update_cli(sys.argv)
     if "--engine-check" in sys.argv:
         return _engine_check(sys.argv)
     if "--selftest" in sys.argv:

@@ -184,6 +184,31 @@ def _load_pil(path):
     return data, fits.Header(), notes, True     # 画像ファイルは 1 行目が上
 
 
+def looks_inverted(data):
+    """
+    白地に黒い星 (星図・ネガ) かどうか。
+
+    見るのは「背景 (中央値) が、明るさの幅のどのあたりに居るか」。
+      ふつうの天体写真 … 背景は下のほう。上へ大きく伸びる (星・月)
+      星図            … 背景がいちばん明るい。下へ大きく伸びる (星・文字)
+
+    裾の「太さ」(パーセンタイル) では測れない。星図に描かれた星は
+    画素数でいえばごく一部なので、0.5 パーセンタイルでも背景のままになる
+    (合成した星図で実際に見落とした)。端の値との距離で測る。
+
+    逆に、周辺減光やケラレで隅が真っ黒な写真は「下へ長い裾」を持つが、
+    背景の上にはもっと長い裾 (星) があるので取り違えない
+    (これも実際に取り違えたので、比を 5% と厳しくしてある)。
+    """
+    v = data[np.isfinite(data)]
+    if v.size == 0:
+        return False
+    med = float(np.median(v))
+    up = float(v.max()) - med
+    down = med - float(v.min())
+    return down > 0 and up <= down * 0.05
+
+
 def load_image_any(path):
     """FITS / PNG / JPEG / TIFF / キューブ を読み、2 次元 float32 にして返す。"""
     lower = str(path).lower()
@@ -222,6 +247,13 @@ def load_image_any(path):
 
     if float(np.ptp(data)) <= 0:
         raise ValueError("画像が一様です (全画素が同じ値)。露出やファイルを確認してください。")
+
+    # 星図 (白地に黒い星) は明暗が逆。検出も solve-field も「明るい点」を
+    # 探すので、そのままでは 1 つも拾えない。検出に使う面だけ反転する。
+    # 表示は元のまま (白地の星図は白地で見せたほうが自然)。
+    if looks_inverted(data):
+        data = float(np.nanmax(data)) - data
+        notes.append("白地に黒い星 (星図) とみて明暗を反転")
 
     return SolveInput(data, header, " / ".join(notes), display, flip_y)
 
@@ -583,9 +615,16 @@ def implied_focal_length(header, scale_arcsec):
 
 # ================================================================ WSL 実行 ===
 
+# Windows で wsl.exe をそのまま呼ぶと、1 回ごとに黒いコンソール窓が開いて消える。
+# オフライン解析は solve-field を何度も呼ぶので画面がちかちか点滅して驚かせる。
+# CREATE_NO_WINDOW を渡すと窓を作らない (出力は今までどおり受け取れる)。
+_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+
+
 def _run(cmd, timeout):
     return subprocess.run(cmd, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=timeout)
+                          encoding="utf-8", errors="replace", timeout=timeout,
+                          creationflags=_NO_WINDOW)
 
 
 def _bash(command, timeout):
