@@ -330,6 +330,23 @@ def fov_arcmin(focal_mm, sensor_mm):
     return math.degrees(2 * math.atan(sensor_mm / 2.0 / focal_mm)) * 60.0
 
 
+# 焦点距離が分からない人向けの「おすすめ」= 画角 4′ 以上をぜんぶ。
+# 2′〜4′ の 5200 / 5201 は 2 段で 25 GB あり、掩蔽観測で画面を大きく
+# 切り出す人しか使わないので入れていない。
+RECOMMENDED_MIN_FOV = 4.0
+
+
+def recommended_scales():
+    """おすすめの段 (画角 4′ 以上)。焦点距離を聞かずに決められる。"""
+    return sorted(s for s, (lo, _hi) in SCALE_FOV.items()
+                  if lo >= RECOMMENDED_MIN_FOV)
+
+
+def scales_mb(scales):
+    """その段ぜんぶで何 MB になるか。"""
+    return sum(SCALE_MB.get(s, 0) for s in scales)
+
+
 def recommend_scales(fov, fov_short=None):
     """
     その画角を解くのに要る段。導入誤差ぶん、前後 1 段ずつ足す。
@@ -338,12 +355,17 @@ def recommend_scales(fov, fov_short=None):
     掩蔽観測では、ローリングシャッターの影響を減らしコマ落ちを避けるために
     読み出す範囲 (特に縦) を切り詰めるので、短辺だけが極端に狭くなる。
     quad の大きさは短いほうの辺で決まるため、横幅だけで選ぶと足りない。
+
+    「前後 1 段」は画角の順で数える。段の番号順ではない。
+    4100 系 (22′〜2000′) と 5200 系 (2′〜22′) は別のはしごなので、
+    番号で並べると 4119 (1400′〜2000′) の隣が 5200 (2′〜2.8′) になってしまう。
+    実際、35mm レンズ (画角 54°) で 15.9 GB の 5200 を勧めていた。
     """
     if not fov or fov <= 0:
         return []
     lo_fov = min(fov, fov_short) if fov_short else fov
     hi_fov = max(fov, fov_short) if fov_short else fov
-    keys = sorted(SCALE_FOV)
+    keys = sorted(SCALE_FOV, key=lambda s: SCALE_FOV[s])
     hit = [s for s in keys
            if SCALE_FOV[s][1] >= lo_fov and SCALE_FOV[s][0] <= hi_fov]
     if not hit:                                   # 範囲外なら一番近い段
