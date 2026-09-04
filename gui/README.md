@@ -10,7 +10,10 @@ gui/
 ├── zahyou_env.py    WSL / astrometry.net / 星図データ の確認と導入
 ├── zahyou.spec      PyInstaller の設定
 ├── build_exe.ps1    exe を建てるスクリプト
-└── test_gui.py      画面を組み立てて解析を 1 回通すテスト
+├── test_gui.py      画面を組み立てて解析を 1 回通すテスト
+├── test_buttons.py  押せるボタンを全部押して、反応が返るか見る
+├── test_result_tab.py  図の表示を覚えているか
+└── test_recommend.py   「おすすめをまとめて落とす」の段の選び方
 ```
 
 ## 画面
@@ -161,10 +164,19 @@ zahyou.exe --selftest "画像パス" --out selftest.txt            # 解析ま�
 ## テスト
 
 ```powershell
-python test_gui.py                    # ソースのまま
+python test_gui.py                    # 画面と解析 1 回      15
+python test_buttons.py                # ボタンの手応え        14
+python test_result_tab.py             # 図の表示の記憶         6
+python test_recommend.py              # おすすめの段の選び方   20
 dist\onefile\zahyou.exe --selftest "画像パス" --out selftest.txt            # 固めたあと
 dist\onefile\zahyou.exe --selftest "画像パス" --out selftest.txt --online   # 経路を指定
 ```
+
+`test_recommend.py` は段の選び方そのものも見ています。段の「隣」を
+**番号順ではなく画角の順**で数えているか、が要点 —— 4100 系 (22′〜2000′) と
+5200 系 (2′〜22′) は別のはしごなので、番号で並べると 4119 (1400′〜2000′) の
+隣が 5200 (2′〜2.8′) になります。実際、35mm レンズの画角 (54°) に対して
+15.9 GB の 5200 を勧めていました。
 
 どちらも同じ `zahyou_gui.selftest()` を呼びます (exe には test_gui.py が
 入らないので、本体側に置いてあります)。`--online` / `--offline` で解析の経路を

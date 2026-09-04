@@ -807,8 +807,25 @@ class App(tk.Tk):
                                                         expand=True, padx=4)
         ttk.Button(r, text="...", width=3, command=self._choose_indexdir).pack(side="left")
 
+        rec_gb = env.scales_mb(env.recommended_scales()) / 1024.0
+        r1b = ttk.Frame(g)
+        r1b.pack(fill="x", pady=(6, 0))
+        self.btn_recommended = ttk.Button(
+            r1b, text=f"おすすめをまとめて落とす (約 {rec_gb:.1f} GB)",
+            command=self._download_recommended)
+        self.btn_recommended.pack(side="left")
+        ttk.Label(g, text="焦点距離が分からなければ、こちら",
+                  style="Muted.TLabel").pack(anchor="w")
+        ttk.Label(g, text=f"画角 {env.RECOMMENDED_MIN_FOV:g}′ 以上をぜんぶ入れます。"
+                          "たいていの望遠鏡はこれで足ります",
+                  style="Muted.TLabel").pack(anchor="w")
+
+        ttk.Separator(g, orient="horizontal").pack(fill="x", pady=8)
+
+        ttk.Label(g, text="焦点距離が分かるなら、要る段だけに絞れます",
+                  style="Muted.TLabel").pack(anchor="w")
         r2 = ttk.Frame(g)
-        r2.pack(fill="x", pady=(6, 0))
+        r2.pack(fill="x", pady=(2, 0))
         ttk.Label(r2, text="焦点距離 [mm]").pack(side="left")
         ttk.Entry(r2, textvariable=self.v_focal, width=8).pack(side="left", padx=(4, 12))
         ttk.Label(r2, text="センサー横幅 [mm]").pack(side="left")
@@ -833,14 +850,18 @@ class App(tk.Tk):
         cv.configure(yscrollcommand=sb.set)
         cv.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
-        for s in sorted(env.SCALE_FOV):
+        # 番号順ではなく画角の順に並べる。番号で並べると 4100 系 (22′〜2000′) の
+        # あとに 5200 系 (2′〜22′) が来て、はしごが途中で切れて見える。
+        rec = set(env.recommended_scales())
+        for s in sorted(env.SCALE_FOV, key=lambda k: env.SCALE_FOV[k]):
             lo, hi = env.SCALE_FOV[s]
             mb = env.SCALE_MB.get(s, 0)
             size = f"{mb/1024:.1f} GB" if mb >= 1024 else f"{mb} MB"
             var = tk.BooleanVar(value=False)
             self.scale_vars[s] = var
+            mark = "" if s in rec else "   (おすすめ外)"
             ttk.Checkbutton(inner, variable=var,
-                            text=f"index-{s}   画角 {lo:g}′〜{hi:g}′   {size}"
+                            text=f"index-{s}   画角 {lo:g}′〜{hi:g}′   {size}{mark}"
                             ).pack(anchor="w")
         ttk.Button(g, text="選んだ段を落とす",
                    command=self._download_index).pack(anchor="w", pady=(6, 0))
@@ -914,8 +935,11 @@ class App(tk.Tk):
         add("  ・星図データ (画角ごとに分かれた index ファイル)")
         add("  ・/etc/astrometry.cfg (星図データの場所を教える設定)")
         add("WSL を入れた直後だけ Windows の再起動が要ります。", "b")
-        add("星図データは大きいので、焦点距離とセンサー横幅を入れて")
-        add("「必要な段を選ぶ」を押し、必要な段だけ落とすのがおすすめです。")
+        add("星図データは、望遠鏡の画角に合った段だけあれば足ります。")
+        add("  ・機材の数値が分からない  → 「おすすめをまとめて落とす」")
+        add("      画角 4' 以上をぜんぶ (約 9.5 GB)。たいていはこれで足ります。")
+        add("  ・焦点距離が分かる        → 入れてから「必要な段を選ぶ」")
+        add("      要る段だけに絞れるので、ずっと小さく済みます。")
         add("途中で止めても、次に押せば続きから落とし直します。", "m")
         add("")
         add("天体名はオフラインでも使えます (2 回目から)", "h")
@@ -1477,6 +1501,39 @@ class App(tk.Tk):
         self._final_msg = (f"{len(need)} 段に印を付けました (約 {mb/1024:.1f} GB)"
                            if need else "必要な段はすべてそろっています。")
         self._post(lambda: [v.set(k in need) for k, v in self.scale_vars.items()])
+
+    def _download_recommended(self):
+        """
+        焦点距離を聞かずに、おすすめの段 (画角 4′ 以上) をまとめて落とす。
+
+        機材の数値を入れなくても、押せば準備が終わるようにするためのボタン。
+        すでに持っている段は外すので、途中まで入れてある人が押しても
+        入っていないぶんだけを落とす。
+        """
+        want = env.recommended_scales()
+        have = list((self.env_state or {}).get("index", {}).get("scales", []))
+        need = [s for s in want if s not in have]
+        for scale, var in self.scale_vars.items():
+            var.set(scale in need)
+        if not need:
+            self.log_env(f"おすすめの段 (画角 {env.RECOMMENDED_MIN_FOV:g}′ 以上) は"
+                         "すべてそろっています。")
+            self.v_status.set("おすすめの段はすべてそろっています。")
+            return
+        mb = env.scales_mb(need)
+        self.log_env(f"おすすめの段 {want}")
+        self.log_env(f"  まだ無いのは {need} (約 {mb/1024:.1f} GB)")
+        if not messagebox.askokcancel(
+                APP_NAME,
+                f"画角 {env.RECOMMENDED_MIN_FOV:g}′ 以上をぜんぶそろえます。\n"
+                f"足りない {len(need)} 段 / 約 {mb/1024:.1f} GB を\n"
+                f"{self.v_indexdir.get()} へ落とします。よろしいですか?\n\n"
+                "回線にもよりますが、数十分かかります。\n"
+                "途中で中止しても、次に押せば続きから再開します。"):
+            self.v_status.set("やめました。")
+            return
+        self._bg(lambda: self._download_worker(need),
+                 "星図データを落としています...", log=self.log_env)
 
     def _download_index(self):
         scales = [s for s, v in self.scale_vars.items() if v.get()]
