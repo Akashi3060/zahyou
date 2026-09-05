@@ -20,7 +20,7 @@ from reportlab.platypus import (BaseDocTemplate, Frame, Image, KeepTogether,
 from reportlab.platypus.tableofcontents import TableOfContents
 
 import manual_style as ms
-from manual_figures import AppWindow, ArrowLegend, FoldHint, NotebookLayout
+from manual_figures import ArrowLegend, FoldHint, NotebookLayout
 from manual_style import (ACCENT, CONTENT_W, HRule, INK, JP, JPB, MARGIN,
                           MUTED, PAGE_H, PAGE_W, RULE, S, TocMark, bullets,
                           callout, code_block, h1, h2, steps, table)
@@ -388,20 +388,35 @@ def build(out_path):
         "画面の上に出る<b>3 つの数字</b>が答えです。"
         "赤経・赤緯それぞれに何分角動かせばよいかを表しています。",
     ], st))
-    add(AppWindow(CONTENT_W))
-    add(Paragraph("図 9　デスクトップ版の画面。ふだん触るのは左の列と"
-                  "「解析を実行」だけです。", st.cap))
-    add(Spacer(1, 3))
+    ext(fig("app-analyze.png", 150,
+            "図 9　解析が終わったところ。ふだん触るのは左の列と"
+            "「解析を実行」だけです。", st))
     add(Paragraph("インターネットにつながっていれば、ここまでで動きます。"
                   "設定（目標・焦点距離・配色など）は次に開いたときも残ります。",
                   st.body))
-    add(Paragraph("図は 2 枚出ます。<b>はじめて使うときは「撮影時の向き」</b>"
-                  "（撮ったままの向き）が開きます。"
-                  "「北が上」やログに切り替えると、<b>次からはその表示で出ます</b>。",
-                  st.body))
-    add(Paragraph("図の下には<b>全体 / 戻る / 進む / 移動 / 拡大 / 画像を保存</b>"
-                  "が並んでいます。拡大して星の位置を確かめたり、"
-                  "図を PNG で保存したりできます。", st.body))
+
+    add(Paragraph("出た数字の読み方", st.h3))
+    ext(fig("app-numbers.png", 150,
+            "図 10　この 3 つが答え。下の細い行は画像中心の座標・"
+            "画素スケール・視野・かかった時間。", st))
+    add(Paragraph("いま向いている点（画像の中心）から目標まで、"
+                  "<b>赤経方向に 0.918′ 東へ、赤緯方向に 1.290′ 北へ</b>"
+                  "動かせばよい、という意味です。"
+                  "左端の「距離」は、その 2 つを合わせた実際のずれです。", st.body))
+
+    add(Paragraph("図は 2 枚出ます", st.h3))
+    add(Paragraph("<b>「撮影時の向き」</b>は撮ったままの向き、"
+                  "<b>「北が上」</b>は北を上・東を左にそろえたものです。"
+                  "赤道儀の軸操作と向きが揃うので、こちらが読みやすい人もいます。"
+                  "<b>はじめて使うときは「撮影時の向き」</b>が開き、"
+                  "切り替えると<b>次からはその表示で出ます</b>。", st.body))
+    ext(fig("app-northup.png", 118,
+            "図 11　「北が上」に切り替えたところ。水色の × が画像の中心、"
+            "黄色の ○ が目標、赤い矢印が動かす向き。", st))
+    add(Paragraph("図の下のボタンで、拡大して星の位置を確かめたり、"
+                  "PNG で保存したりできます。", st.body))
+    ext(fig("app-toolbar.png", 120,
+            "図 12　図の下のボタン。", st))
 
     ext(h2("ネットの無いところで使う — ［準備］タブ", st, "2.4"))
     add(Paragraph("<b>「まとめて準備する」を押すだけです。</b>"
@@ -417,8 +432,14 @@ def build(out_path):
     ], st))
     add(Paragraph("一覧表の「総合」が<b>「オフライン解析できます」</b>になれば完了です。",
                   st.body))
+    ext(fig("app-prepare.png", 150,
+            "図 13　用意できたところ。5 つとも OK になれば、"
+            "ネットの無い場所でも解けます。", st))
 
     add(Paragraph("星図データの選び方 — ボタンは 2 つ", st.h3))
+    ext(fig("app-index.png", 82,
+            "図 14　星図データの枠。上のボタンが「おすすめ」、"
+            "下が焦点距離から絞るほう。", st))
     ext(table([
         ["ボタン", "入るもの", "こんなとき"],
         ["<b>おすすめをまとめて落とす</b>",
@@ -460,14 +481,21 @@ def build(out_path):
                   "観測中に目が眩みません。もう一度押すと戻ります。", st.body))
     add(Paragraph("この配色は次に開いたときも残ります。"
                   "現地に着いてから押し直す必要はありません。", st.small))
+    ext(fig("app-dark.png", 150,
+            "図 15　暗い配色にしたところ。図の中まで黒基調になります。", st))
 
     ext(h2("目標が分からないとき — 完全ブラインド", st, "2.6"))
     add(Paragraph("目標に<b>「指定しない（完全ブラインド）」</b>を選ぶと、"
                   "目標を決めずに<b>「この画像はどこを向いているか」だけ</b>を"
                   "求めます。矢印は出ません。", st.body))
+    ext(fig("app-target.png", 62,
+            "図 16　目標の枠。いちばん下がブラインド。", st))
     add(Paragraph("上の 3 つの数字は、<b>画像中心の赤経・赤緯・画素スケール</b>に"
                   "変わります。目標が画面の外にあるのか分からないときは、"
                   "まずこれで向きを確かめてください。", st.body))
+    ext(fig("app-blind-numbers.png", 150,
+            "図 17　ブラインドのときの 3 つ。目標を指定したときとは"
+            "中身が変わります。", st))
     add(Paragraph("画素スケールが出れば、そこから焦点距離を逆算できます"
                   "（式は 6.1）。機材の数値が分からないときにも使えます。",
                   st.small))
@@ -1035,6 +1063,8 @@ def build(out_path):
     add(Paragraph("<b>［使い方］タブの「更新を確認」→「更新する」を押すだけ</b>です。"
                   "新しい版があるかを GitHub に聞き、あれば落として入れ替え、"
                   "起動し直します。", st.body))
+    ext(fig("app-help.png", 150,
+            "図 18　［使い方］タブ。更新のボタンは右上にあります。", st))
     ext(steps([
         "<b>［使い方］</b>タブを開き、<b>「更新を確認」</b>を押します。",
         "新しい版があれば、その版と大きさが出て"

@@ -397,11 +397,24 @@ class App(tk.Tk):
                foreground=[("readonly", th["ink"])],
                selectbackground=[("readonly", th["entry"])],
                selectforeground=[("readonly", th["ink"])])
+        # clam のチェック/ラジオの丸は indicatorbackground (地) と
+        # indicatorforeground (印) で描かれる。indicatorcolor という
+        # オプションは無いので、そちらを指定しても何も起きず、
+        # 暗い配色でも clam 既定の白い丸のまま残っていた。
+        # 選んでいないほうが白く塗りつぶされて見え、逆に読めてしまう。
         for w in ("TCheckbutton", "TRadiobutton"):
             st.configure(w, background=th["bg"], foreground=th["ink"],
-                         indicatorcolor=th["entry"], focuscolor=th["bg"])
+                         focuscolor=th["bg"],
+                         indicatorbackground=th["entry"],
+                         indicatorforeground=th["accent"],
+                         upperbordercolor=th["border"],
+                         lowerbordercolor=th["border"])
             st.map(w, background=[("active", th["bg"])],
-                   indicatorcolor=[("selected", th["accent"])])
+                   indicatorbackground=[("disabled", th["bg"]),
+                                        ("selected", th["entry"])],
+                   indicatorforeground=[("selected", th["accent"])],
+                   upperbordercolor=[("active", th["accent"])],
+                   lowerbordercolor=[("active", th["accent"])])
         st.configure("TProgressbar", background=th["accent"],
                      troughcolor=th["trough"], bordercolor=th["border"])
         st.configure("Vertical.TScrollbar", background=th["btn"],
@@ -607,6 +620,17 @@ class App(tk.Tk):
         self.scale_vars = {}
 
     def _build_ui(self):
+        # 下のバーを先に詰める。あとにすると、窓が中身より低いときに
+        # expand=True のタブが場所を取り切ってしまい、バーごと窓の外へ
+        # 押し出される (図を出したあと「暗く」が消えて、押せなくなる)。
+        bar = ttk.Frame(self, padding=(10, 4))
+        bar.pack(side="bottom", fill="x")
+        ttk.Label(bar, textvariable=self.v_status, style="Muted.TLabel").pack(side="left")
+        self.btn_theme = ttk.Button(bar, width=10, command=self._toggle_theme)
+        self.btn_theme.pack(side="right", padx=(10, 0))
+        self.prog = ttk.Progressbar(bar, mode="determinate", length=220)
+        self.prog.pack(side="right")
+
         self.nb = ttk.Notebook(self)
         self.nb.pack(fill="both", expand=True, padx=8, pady=(8, 0))
         self.tab_run = ttk.Frame(self.nb, padding=8)
@@ -615,14 +639,6 @@ class App(tk.Tk):
         self.nb.add(self.tab_run, text="  解析  ")
         self.nb.add(self.tab_env, text="  準備  ")
         self.nb.add(self.tab_help, text="  使い方  ")
-
-        bar = ttk.Frame(self, padding=(10, 4))
-        bar.pack(fill="x")
-        ttk.Label(bar, textvariable=self.v_status, style="Muted.TLabel").pack(side="left")
-        self.btn_theme = ttk.Button(bar, width=10, command=self._toggle_theme)
-        self.btn_theme.pack(side="right", padx=(10, 0))
-        self.prog = ttk.Progressbar(bar, mode="determinate", length=220)
-        self.prog.pack(side="right")
 
         self._build_run_tab()
         self._build_env_tab()
@@ -1816,6 +1832,23 @@ def selftest(image, target="UCAC4 660-021020", offline_first=True, log_out=None,
     app.nb.select(app.tab_run)
     check("ボタンが見切れていない", not bad, " / ".join(bad)[:90])
     check("枠からはみ出た部品が無い", not over, " / ".join(over)[:90])
+
+    # 図を 2 枚出したあとでも、下のバーが窓の中にいること。
+    # タブを先に詰めていたころは、ここで窓の外へ押し出されて
+    # 「暗く」が押せなくなっていた (画面が短い PC で起きる)。
+    #
+    # 効くのは winfo_ismapped()。入りきらないと Tk はその部品を
+    # 「置かない」ので 0 になる。座標のほうは当てにならない —— 置かれて
+    # いないぶん古い値が残り、窓の中を指したままになる (実測: 下端 82 /
+    # 窓 241 で、見えていないのに「中にある」と読めてしまう)。
+    b = app.btn_theme
+    inside = (b.winfo_ismapped()
+              and b.winfo_rooty() + b.winfo_height()
+              <= app.winfo_rooty() + app.winfo_height())
+    check("下のバーが窓の中にある", inside,
+          "置かれていない" if not b.winfo_ismapped() else
+          f"ボタン下端 {b.winfo_rooty() + b.winfo_height()} / "
+          f"窓 {app.winfo_rooty() + app.winfo_height()}")
 
     # 明→暗→明 と切り替えても壊れないこと
     try:
