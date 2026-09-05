@@ -159,6 +159,52 @@ def clipped_buttons(root):
     return bad
 
 
+def overflowing(root):
+    """
+    枠からはみ出している部品を探す。
+
+    clipped_buttons とは別の壊れ方。部品そのものは必要な幅を持っていても、
+    親の枠の右端より外に置かれると、そこから先は描かれない。
+
+    実際に踏んだ: 「打ち切り [秒] オンライン [120] オフライン [300]」を
+    1 行に並べていたら、DPI の高い環境で右端の入力欄が枠の外に出て
+    「30」までしか見えなかった。幅は足りているので上の検出には掛からない。
+
+    検出できることは確かめてある: 左の枠の仕切りを 150px まで寄せると
+    「PY_VAR5 (右端 483 > 枠 402)」を報告し、ふつうの幅では何も出ない。
+    """
+    bad = []
+    leaves = (ttk.Button, ttk.Entry, ttk.Checkbutton, ttk.Radiobutton,
+              ttk.Combobox)
+
+    def box(w):
+        return (w.winfo_rootx(), w.winfo_rootx() + w.winfo_width())
+
+    def walk(w, frame):
+        for c in w.winfo_children():
+            f = frame
+            if isinstance(c, ttk.LabelFrame) and c.winfo_ismapped():
+                f = c
+            try:
+                if isinstance(c, leaves) and c.winfo_ismapped() and f is not None:
+                    _, x1 = box(c)
+                    fx0, fx1 = box(f)
+                    if x1 > fx1 + 1 or c.winfo_rootx() < fx0 - 1:
+                        label = ""
+                        try:
+                            label = c.cget("text")
+                        except Exception:
+                            pass
+                        bad.append(f"{label or c.winfo_class()} "
+                                   f"(右端 {x1} > 枠 {fx1})")
+            except Exception:
+                pass
+            walk(c, f)
+
+    walk(root, None)
+    return bad
+
+
 def settings_path():
     base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
     d = os.path.join(base, "zahyou")
@@ -662,14 +708,16 @@ class App(tk.Tk):
                         variable=self.v_ignore).grid(row=4, column=0, columnspan=2,
                                                      sticky="w")
         # 「オンライン」「オフライン」を全角スペースで寄せていたので、
-        # フォントによってずれた。1 行にまとめて、素直に並べる。
-        ttk.Label(g3, text="打ち切り [秒]").grid(row=5, column=0, sticky="w",
-                                                pady=(8, 0))
+        # フォントによってずれた。ラベルの下に 1 行で並べる。
+        # 同じ行に「打ち切り [秒]」まで置くと、DPI が高い環境で
+        # 右の入力欄が枠からはみ出して見えなくなる。
+        ttk.Label(g3, text="打ち切り [秒]").grid(row=5, column=0, columnspan=2,
+                                                sticky="w", pady=(8, 0))
         lim = ttk.Frame(g3)
-        lim.grid(row=5, column=1, sticky="w", pady=(8, 0))
+        lim.grid(row=6, column=0, columnspan=2, sticky="w", pady=(2, 0))
         ttk.Label(lim, text="オンライン").pack(side="left")
         ttk.Entry(lim, textvariable=self.v_t_online,
-                  width=6).pack(side="left", padx=(4, 10))
+                  width=6).pack(side="left", padx=(4, 12))
         ttk.Label(lim, text="オフライン").pack(side="left")
         ttk.Entry(lim, textvariable=self.v_t_offline,
                   width=6).pack(side="left", padx=(4, 0))
@@ -814,16 +862,24 @@ class App(tk.Tk):
             r1b, text=f"おすすめをまとめて落とす (約 {rec_gb:.1f} GB)",
             command=self._download_recommended)
         self.btn_recommended.pack(side="left")
-        ttk.Label(g, text="焦点距離が分からなければ、こちら",
-                  style="Muted.TLabel").pack(anchor="w")
-        ttk.Label(g, text=f"画角 {env.RECOMMENDED_MIN_FOV:g}′ 以上をぜんぶ入れます。"
-                          "たいていの望遠鏡はこれで足ります",
-                  style="Muted.TLabel").pack(anchor="w")
+
+        # 説明の 1 行は、画面の横幅や DPI によっては入りきらない。
+        # 折り返し幅を枠の実寸に合わせておくと、どの環境でも切れない。
+        hints = []
+
+        def hint(text):
+            lb = ttk.Label(g, text=text, style="Muted.TLabel", justify="left")
+            lb.pack(anchor="w", fill="x")
+            hints.append(lb)
+            return lb
+
+        hint("焦点距離が分からなければ、こちら。"
+             f"画角 {env.RECOMMENDED_MIN_FOV:g}′ 以上をぜんぶ入れます"
+             "（たいていの望遠鏡はこれで足ります）")
 
         ttk.Separator(g, orient="horizontal").pack(fill="x", pady=8)
 
-        ttk.Label(g, text="焦点距離が分かるなら、要る段だけに絞れます",
-                  style="Muted.TLabel").pack(anchor="w")
+        hint("焦点距離が分かるなら、要る段だけに絞れます")
         r2 = ttk.Frame(g)
         r2.pack(fill="x", pady=(2, 0))
         ttk.Label(r2, text="焦点距離 [mm]").pack(side="left")
@@ -833,8 +889,13 @@ class App(tk.Tk):
         r3 = ttk.Frame(g)
         r3.pack(fill="x", pady=(4, 2))
         ttk.Button(r3, text="必要な段を選ぶ", command=self._recommend).pack(side="left")
-        ttk.Label(r3, text="この 2 つから画角を出して、要る段だけに印を付けます",
-                  style="Muted.TLabel").pack(side="left", padx=8)
+        hint("この 2 つから画角を出して、要る段だけに印を付けます")
+
+        def rewrap(ev):
+            for lb in hints:
+                lb.configure(wraplength=max(ev.width - 24, 120))
+
+        g.bind("<Configure>", rewrap)
 
         wrap = ttk.Frame(g)
         wrap.pack(fill="both", expand=True, pady=(4, 0))
@@ -859,9 +920,9 @@ class App(tk.Tk):
             size = f"{mb/1024:.1f} GB" if mb >= 1024 else f"{mb} MB"
             var = tk.BooleanVar(value=False)
             self.scale_vars[s] = var
-            mark = "" if s in rec else "   (おすすめ外)"
+            mark = "" if s in rec else " (おすすめ外)"
             ttk.Checkbutton(inner, variable=var,
-                            text=f"index-{s}   画角 {lo:g}′〜{hi:g}′   {size}{mark}"
+                            text=f"index-{s}  画角 {lo:g}′〜{hi:g}′  {size}{mark}"
                             ).pack(anchor="w")
         ttk.Button(g, text="選んだ段を落とす",
                    command=self._download_index).pack(anchor="w", pady=(6, 0))
@@ -1746,12 +1807,15 @@ def selftest(image, target="UCAC4 660-021020", offline_first=True, log_out=None,
 
     # どのタブにも、文字の見切れたボタンが無いこと
     bad = []
+    over = []
     for tab in (app.tab_run, app.tab_env, app.tab_help):
         app.nb.select(tab)
         pump(app, 0.8)
         bad += clipped_buttons(tab)
+        over += overflowing(tab)
     app.nb.select(app.tab_run)
     check("ボタンが見切れていない", not bad, " / ".join(bad)[:90])
+    check("枠からはみ出た部品が無い", not over, " / ".join(over)[:90])
 
     # 明→暗→明 と切り替えても壊れないこと
     try:
