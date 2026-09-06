@@ -82,6 +82,13 @@ excludes = [
     "matplotlib.backends.backend_qtagg", "matplotlib.backends.backend_qt5agg",
     "matplotlib.backends.backend_webagg", "matplotlib.backends.backend_wx",
     "matplotlib.tests", "numpy.tests", "scipy.tests",
+    # crc32c は LGPL-2.1-or-later。ここだけコピーレフトが混ざるので外す。
+    #   zarr が numcodecs[crc32c] を、reproject が zarr を要求する連鎖で
+    #   入ってきていた。zarr は小分け再投影の中間ファイルに使うだけで、
+    #   チェックサムの符号化器までは要らない。
+    #   外しても reproject_interp(block_size=...) は通ることを確認済み
+    #   (出力の平均も有効画素数も変わらない)。
+    "crc32c",
     # astropy.tests は外さないこと。astropy/__init__.py が
     # astropy.tests.runner を import するので、無いと astropy ごと落ちる。
 ]
