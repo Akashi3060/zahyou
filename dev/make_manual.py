@@ -1203,9 +1203,31 @@ def build(out_path):
         "SciPy / NumPy / matplotlib / Pillow / reproject",
         "SIMBAD・VizieR（CDS, ストラスブール）— 天体名から座標を引くのに使用",
     ], st))
+
+    add(Paragraph("ライセンス", st.h3))
+    add(Paragraph("<b>zahyou 自身は MIT ライセンス</b>です。"
+                  "自由に使って、書き換えて、配ってかまいません。"
+                  "著作権表示だけ残してください。", st.body))
+    ext(table([
+        ["", "扱い"],
+        ["zahyou のコード", "MIT"],
+        ["zahyou.exe に同梱したライブラリ（76 個）",
+         "BSD / MIT / Apache-2.0 / PSF など。<b>GPL・LGPL は含みません</b>"],
+        ["astrometry.net",
+         "GPL-3.0-or-later。<b>同梱していません</b> —— ［準備］タブが WSL へ入れ、"
+         "別のプロセスとして呼びます"],
+        ["星図データ（index ファイル）",
+         "<b>同梱していません</b>。実行時に原典から取得します。"
+         "Tycho-2 / Gaia DR2 由来"],
+    ], st, widths=[62 * mm, CONTENT_W - 62 * mm]))
+    add(Paragraph("全文は配布ページの <b>LICENSE</b> と "
+                  "<b>THIRD-PARTY-NOTICES.md</b> にあります。"
+                  "後者は、出来上がった実行ファイルの中身から機械的に作っている"
+                  "ので、版ごとに実物と一致します。", st.small))
+
     add(HRule(CONTENT_W))
-    add(Paragraph("このマニュアルの本文は Noto Sans JP（SIL Open Font License 1.1）"
-                  "で組んでいます。", st.small))
+    add(Paragraph("このマニュアルの本文は Noto Sans JP（SIL Open Font License 1.1）、"
+                  "コマンドの部分は HackGen で組んでいます。", st.small))
 
     doc.multiBuild(f)
     return out_path

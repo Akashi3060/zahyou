@@ -600,10 +600,30 @@ powershell -File gui/build_exe.ps1 -Test    # exe を建てて自己診断まで
 
 ---
 
+## ライセンス
+
+zahyou 自身のソースコードは **MIT ライセンス**です（[LICENSE](LICENSE)）。
+自由に使って、書き換えて、配ってかまいません。著作権表示だけ残してください。
+
+**同梱物・外部データはこの限りではありません。**
+`zahyou.exe` に入っている第三者ライブラリの一覧と、同梱していないもの
+（astrometry.net・星図データ・星表）の扱いは
+**[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)** にまとめてあります。
+
+| | |
+|---|---|
+| zahyou のコード | MIT |
+| `zahyou.exe` に同梱した 76 のライブラリ | BSD / MIT / Apache-2.0 / PSF ほか（**GPL・LGPL は含みません**） |
+| astrometry.net | GPL-3.0-or-later。**同梱していません**。［準備］タブが WSL へ入れ、別プロセスとして呼びます |
+| 星図データ（index ファイル） | **同梱していません**。実行時に原典から取得します。Tycho-2 / Gaia DR2 由来 |
+
 ## 出典
 
 - 解析エンジン: [Astrometry.net](https://astrometry.net/)（Lang et al. 2010, AJ 139, 1782）
 - 星図データ: [5200 シリーズ LITE](https://portal.nersc.gov/project/cosmo/temp/dstn/index-5200/LITE/)
-  ／ [4100 シリーズ](https://data.astrometry.net/4100/)
+  （Tycho-2 + Gaia DR2）／ [4100 シリーズ](https://data.astrometry.net/4100/)（Tycho-2）
 - 天体名から座標: SIMBAD・VizieR（CDS, ストラスブール）
 - Astropy / SciPy / NumPy / matplotlib / Pillow / reproject
+
+> This research has made use of the SIMBAD database and the VizieR catalogue
+> access tool, operated at CDS, Strasbourg, France.
