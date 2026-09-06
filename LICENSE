@@ -20,19 +20,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-This license covers the source code of zahyou itself:
-
-    zahyou_engine.py, zahyou.ipynb, zahyou_v6.ipynb,
-    gui/, dev/, docs/
-
-It does NOT cover the third-party libraries bundled into the released
-zahyou.exe, nor astrometry.net, nor the star index files, nor the star
-catalogues they are derived from. See THIRD-PARTY-NOTICES.md.
-
-このライセンスが及ぶのは zahyou 自身のソースコードだけです。
-zahyou.exe に同梱した第三者のライブラリ、astrometry.net、星図データ
-(index ファイル)とその元になった星表は含みません。
-THIRD-PARTY-NOTICES.md をご覧ください。
