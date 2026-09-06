@@ -1208,6 +1208,10 @@ def build(out_path):
     add(Paragraph("<b>zahyou 自身は MIT ライセンス</b>です。"
                   "自由に使って、書き換えて、配ってかまいません。"
                   "著作権表示だけ残してください。", st.body))
+    ext(code_block([
+        "Copyright (c) 2025-2026 Yoshitaka Fujikawa / AstroKIT,",
+        "                        Kyushu Institute of Technology",
+    ], st))
     ext(table([
         ["", "扱い"],
         ["zahyou のコード", "MIT"],

@@ -605,6 +605,9 @@ powershell -File gui/build_exe.ps1 -Test    # exe を建てて自己診断まで
 zahyou 自身のソースコードは **MIT ライセンス**です（[LICENSE](LICENSE)）。
 自由に使って、書き換えて、配ってかまいません。著作権表示だけ残してください。
 
+> Copyright (c) 2025-2026 藤川 至誠（Yoshitaka Fujikawa）/
+> AstroKIT, 九州工業大学
+
 **同梱物・外部データはこの限りではありません。**
 `zahyou.exe` に入っている第三者ライブラリの一覧と、同梱していないもの
 （astrometry.net・星図データ・星表）の扱いは
