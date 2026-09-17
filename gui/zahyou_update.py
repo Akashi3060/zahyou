@@ -36,6 +36,30 @@ UA = {"User-Agent": "zahyou-updater", "Accept": "application/vnd.github+json"}
 
 _NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
+# PyInstaller が「二段目の自分」に渡す目印。子プロセスへ引き継がせない。
+_PYI_MARKS = ("_PYI_", "_MEIPASS2")
+
+
+def child_env():
+    """
+    PyInstaller の目印を落とした環境を返す。入れ替えの要。
+
+    1 ファイル版の exe は二段構えで動く。一段目が中身を一時フォルダーへ
+    展開し、そこから<b>自分自身をもう一度起動する</b>。二段目であることは
+    _PYI_PARENT_PROCESS_LEVEL などの環境変数で伝わる。
+
+    この環境をそのまま PowerShell に渡すと、PowerShell が起動する
+    <b>新しい exe まで「自分は二段目だ」と思い込む</b>。二段目は親が
+    自分と同じ実行ファイルかを確かめるので、親である powershell.exe を見て
+
+        Security validation failure: parent process has different executable!
+
+    を出して起動できない。入れ替えそのものは済んでいるので手で起動し直せば
+    新しい版が上がるが、それでは「更新したらエラーが出た」ようにしか見えない。
+    """
+    return {k: v for k, v in os.environ.items()
+            if not k.startswith(_PYI_MARKS)}
+
 
 def running_exe():
     """動いている exe。ソースから動かしているときは None。"""
@@ -237,7 +261,7 @@ def apply_update(new_file, log, relaunch=True):
         subprocess.Popen(
             ["powershell.exe", "-NoProfile", "-WindowStyle", "Hidden",
              "-ExecutionPolicy", "Bypass", "-File", path],
-            creationflags=_NO_WINDOW)
+            creationflags=_NO_WINDOW, env=child_env())
     except Exception as e:
         log(f"入れ替えを始められませんでした: {type(e).__name__}: {e}")
         return False
