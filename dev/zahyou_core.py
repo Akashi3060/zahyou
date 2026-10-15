@@ -2,7 +2,9 @@
 #  zahyou  解析エンジン
 #
 #  役割 : どんな天体画像 (FITS / PNG / JPEG / TIFF / 動画キューブ) が来ても
-#         「星の座標リスト」を作り、Astrometry.net に確実に解かせる。
+#         「星の座標リスト」を作り、自前の解析エンジン (solver_*.py) で確実に解く。
+#         WSL も astrometry.net の実行ファイルも使わない。星図データ (index-*.fits)
+#         だけを読む。
 # ==============================================================================
 
 from __future__ import annotations
@@ -10,9 +12,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import os
-import shlex
 import shutil
-import subprocess
 import tempfile
 import time
 
@@ -25,6 +25,17 @@ try:
     from scipy import ndimage
 except ImportError:                                   # pragma: no cover
     ndimage = None
+
+# 自前の解析エンジン (sv_solve / SvIndexCatalog / SvCancelled)。
+# zahyou_engine.py に組み立てるときはこの import ごと消え、同じ名前空間に入った
+# solver_*.py の中身をそのまま使う。ここが効くのは、このファイルを単体で import
+# したとき (dev/test_robust.py など) だけ。読み込み・検出だけの試験は solver_*.py が
+# 無くても動くよう、solver そのものが無いときだけは黙って先へ進む。
+try:
+    from solver_core import *                         # noqa: F401,F403
+except ModuleNotFoundError as _e:                     # pragma: no cover
+    if _e.name not in ("solver_core", "solver_index", "solver_wcs"):
+        raise
 
 
 def _log(msg=""):
@@ -236,8 +247,14 @@ def load_image_any(path):
 
     pat = _bayer_pattern(header)
     if pat and ndimage is not None:
-        data = ndimage.uniform_filter(data, size=2, mode="nearest")
-        notes.append(f"ベイヤー配列 ({pat}) を 2x2 平均で平滑化")
+        # 2x2 の平均 (v6 まで) は窓が片側に寄るので、星の位置が x・y とも +0.5 px
+        # ずれていた。対称な 3x3 の二項カーネル [1,2,1]⊗[1,2,1]/16 ならずれない。
+        # どの画素を中心にしても R:G:B = 1:2:1 の重みになるので、2x2 の平均と
+        # 同じく市松模様も消える。
+        k = np.array([0.25, 0.5, 0.25], dtype=np.float32)
+        data = ndimage.correlate1d(data, k, axis=0, mode="nearest")
+        data = ndimage.correlate1d(data, k, axis=1, mode="nearest")
+        notes.append(f"ベイヤー配列 ({pat}) を 3x3 の二項フィルターで平滑化")
 
     bad = ~np.isfinite(data)
     if bad.any():
@@ -248,7 +265,7 @@ def load_image_any(path):
     if float(np.ptp(data)) <= 0:
         raise ValueError("画像が一様です (全画素が同じ値)。露出やファイルを確認してください。")
 
-    # 星図 (白地に黒い星) は明暗が逆。検出も solve-field も「明るい点」を
+    # 星図 (白地に黒い星) は明暗が逆。星の検出は「明るい点」を
     # 探すので、そのままでは 1 つも拾えない。検出に使う面だけ反転する。
     # 表示は元のまま (白地の星図は白地で見せたほうが自然)。
     if looks_inverted(data):
@@ -430,13 +447,14 @@ def detect_sources(sub, mask, sigma, min_sources=12, max_sources=400,
                    max_elongation=4.0, min_area=3, min_snr=5.0):
     """
     しきい値を下げながら星を探す。少なくとも min_sources 個見つかるまで粘る。
-    astrometry.net は 4 個で 1 quad を作るが、実用上は 10 個以上ほしい。
+    解析エンジンは 4 個で 1 quad を作るが、実用上は 10 個以上ほしい。
+    run() は min_sources=60 で呼ぶ (自前のソルバーは星が多いほど quad を選べる)。
 
     min_snr を 3.0 に下げると暗い画像で星は増えるが (実測 8 → 15 個)、
     疎な星野では雑音のこぶも同じだけ増える (合成テストで純度 100% → 30%)。
     どの値でも「本物だけ増やす」ことはできなかったので 5.0 のままにしてある。
-    星が少ない画像は、こちらの検出に頼らず solve-field 自身の抽出に任せる
-    (solve_offline が画像そのものを渡す経路を先に試す)。
+    星が少ない画像は、画像を 2x2 にまとめてから検出し直す「深い検出」に任せる
+    (solve_offline がその試行を先に回す)。
     """
     if ndimage is None:
         raise RuntimeError("scipy が必要です:  pip install scipy")
@@ -482,29 +500,36 @@ def detect_sources(sub, mask, sigma, min_sources=12, max_sources=400,
     return best[:max_sources], used
 
 
-def write_xylist(sources, width, height, path):
-    """solve-field に渡す xylist。FITS 規約なので座標は 1 始まりで書く。"""
-    x = np.array([s["x"] for s in sources], dtype=np.float32) + 1.0
-    y = np.array([s["y"] for s in sources], dtype=np.float32) + 1.0
-    flux = np.array([s["flux"] for s in sources], dtype=np.float32)
-    hdu = fits.BinTableHDU.from_columns(fits.ColDefs([
-        fits.Column(name="X", format="E", array=x),
-        fits.Column(name="Y", format="E", array=y),
-        fits.Column(name="FLUX", format="E", array=flux),
-    ]))
-    hdu.header["IMAGEW"] = int(width)
-    hdu.header["IMAGEH"] = int(height)
-    fits.HDUList([fits.PrimaryHDU(), hdu]).writeto(path, overwrite=True)
-    return path
+def detect_sources_deep(sub, mask, sigma):
+    """
+    深い検出。画像を 2x2 にまとめてから同じ detect_sources をかけ、座標を元の画素へ戻す。
 
-
-def write_solver_fits(data, path):
-    """solve-field にそのまま渡せる素直な 2 次元 float32 FITS。"""
-    arr = np.asarray(data, dtype=np.float32)
-    if not np.isfinite(arr).all():
-        arr = np.nan_to_num(arr, nan=float(np.nanmedian(arr)), posinf=0.0, neginf=0.0)
-    fits.PrimaryHDU(arr).writeto(path, overwrite=True)
-    return path
+    4 画素を足すと星の光は 4 倍、白色雑音は 2 倍なので、SNR が 2 倍になって
+    暗い星まで拾える (solve-field の --downsample 2 の代わり)。星が数個しか
+    写っていない画像 (3I など) を解くための経路。
+    まとめた画素 (bx, by) は元の画素 2bx, 2bx+1 の真ん中なので、戻すと (2bx+0.5, 2by+0.5)。
+    戻り値は detect_sources と同じ (星のリスト, しきい値)。
+    """
+    ny, nx = sub.shape
+    h, w = ny // 2 * 2, nx // 2 * 2              # 奇数の端の 1 行・1 列は捨てる
+    if h < 16 or w < 16:
+        return [], None
+    s2 = np.asarray(sub[:h, :w], dtype=np.float32).reshape(
+        h // 2, 2, w // 2, 2).sum(axis=(1, 3))
+    m2 = np.asarray(mask[:h, :w]).reshape(h // 2, 2, w // 2, 2).any(axis=(1, 3))
+    # 雑音は測り直す。ベイヤーの平滑化などで隣どうしの雑音がそろっていると、
+    # まとめた後の雑音は 2σ より大きくなる (2σ と決め打ちすると偽の星が増える)。
+    ref = s2[~m2] if (~m2).any() else s2
+    sigma2 = float(sigma_clipped_stats(ref, sigma=3.0)[2])
+    if not np.isfinite(sigma2) or sigma2 <= 0:
+        sigma2 = 2.0 * float(sigma)
+    found, thr = detect_sources(s2, m2, sigma2, min_sources=60)
+    for c in found:
+        c["x"] = 2.0 * c["x"] + 0.5
+        c["y"] = 2.0 * c["y"] + 0.5
+        c["fwhm"] *= 2.0
+        c["area"] *= 4
+    return found, thr
 
 
 # ============================================================ スケール推定 ===
@@ -613,52 +638,12 @@ def implied_focal_length(header, scale_arcsec):
     return 206.264806 * pix / scale_arcsec
 
 
-# ================================================================ WSL 実行 ===
+# ============================================================== 星図データ ===
 
-# Windows で wsl.exe をそのまま呼ぶと、1 回ごとに黒いコンソール窓が開いて消える。
-# オフライン解析は solve-field を何度も呼ぶので画面がちかちか点滅して驚かせる。
-# CREATE_NO_WINDOW を渡すと窓を作らない (出力は今までどおり受け取れる)。
-_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
-
-
-def _run(cmd, timeout):
-    return subprocess.run(cmd, capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=timeout,
-                          creationflags=_NO_WINDOW)
-
-
-def _bash(command, timeout):
-    """Windows なら WSL 経由、Linux/macOS ならそのまま bash に渡す。"""
-    if os.name == "nt":
-        return _run(["wsl.exe", "-e", "bash", "-lc", command], timeout=timeout)
-    return _run(["bash", "-lc", command], timeout=timeout)
-
-
-def wsl_available():
-    if os.name != "nt":
-        return shutil.which("solve-field") is not None
-    if not (shutil.which("wsl") or shutil.which("wsl.exe")):
-        return False
-    try:
-        p = _bash("echo ok", timeout=45)
-        return p.returncode == 0 and "ok" in (p.stdout or "")
-    except Exception:
-        return False
-
-
-def to_solver_path(win_path):
-    """Windows パス → WSL パス。wslpath に任せるので空白も日本語も安全。"""
-    if os.name != "nt":
-        return win_path
-    try:
-        p = _run(["wsl.exe", "-e", "wslpath", "-a", "-u", win_path], timeout=60)
-        if p.returncode == 0 and p.stdout.strip():
-            return p.stdout.strip()
-    except Exception:
-        pass
-    drive, rest = os.path.splitdrive(os.path.abspath(win_path))
-    return "/mnt/" + drive[0].lower() + rest.replace("\\", "/")
-
+# 星図データ (astrometry.net 形式の index-*.fits) の既定の置き場所。
+# GUI は［準備］タブの欄、ノートブックはセル C の INDEX_DIR で変えられる。
+DEFAULT_INDEX_DIR = (r"C:\AstrometryData" if os.name == "nt"
+                     else "/usr/share/astrometry")
 
 # --- インデックスがカバーする画角 (arcmin)。astrometry.net の付番規則 ---------
 _INDEX_SCALES = {
@@ -690,7 +675,7 @@ def index_coverage(index_names):
 
 def blind_scale_bounds(width_px, index_names=None):
     """
-    画角が全く分からないときに使う --scale-low/--scale-high。
+    画角が全く分からないときに探す画素スケールの範囲 [arcsec/px]。
 
     手持ちの index が扱える画角から逆算するので、
     「絶対に当たらない範囲」を探索しない = 総当たりでも無駄がない。
@@ -718,129 +703,222 @@ def missing_index_advice(fov_arcmin, index_names):
                 have.add(int(num[-2:]))
     need = [k for k, (lo, hi) in _INDEX_SCALES.items() if lo <= fov_arcmin < hi]
     if not need:
-        return False, [f"画角 {fov_arcmin:.1f}′ は astrometry.net が配布する星図データの範囲 "
-                       "(2′〜2000′) の外です。ビニングやモザイクで画角を稼ぐか、"
-                       "build-astrometry-index で自作する必要があります。"]
+        return False, [f"画角 {fov_arcmin:.1f}′ は星図データの範囲 (2′〜2000′) の外なので、"
+                       "この画角のままでは解けません。"]
     if need[0] in have:
         return True, []
     lo, hi = _INDEX_SCALES[need[0]]
-    files = f"index-52{need[0]:02d}-00〜47.fits" if need[0] <= 6 else f"index-41{need[0]:02d}.fits"
-    msgs = [
+    series = (5200 if need[0] <= 6 else 4100) + need[0]
+    files = f"index-{series}-00〜47.fits" if need[0] <= 6 else f"index-{series}.fits"
+    return False, [
         f"画角 {fov_arcmin:.1f}′ に対応する星図データ ({lo:g}′〜{hi:g}′ 段) がありません。",
         f"必要なファイル: {files}",
+        f"取得: ［準備］タブの段の一覧で index-{series} に印を付け、"
+        "「選んだ段を落とす」を押してください。",
     ]
-    if need[0] <= 6:
-        msgs.append(f"取得: python dev/fetch_index.py 52{need[0]:02d}")
-    return False, msgs
 
 
-def solver_diagnostics():
-    """solve-field と星図データが本当に使えるかを事前に確認する。"""
-    rep = {"ok": False, "messages": [], "indexes": [], "cfg": "", "paths": []}
-    if not wsl_available():
+# 星図データの目録 (SvIndexCatalog) を覚えておく。作るときにヘッダーを 1 本ずつ
+# 検査するので、置き場所と中身が前回と同じなら解析のたびに作り直さない。
+_INDEX_CATALOG = {"key": None, "catalog": None}
+
+
+def _index_dir_key(index_dir):
+    """置き場所の「中身の目印」: フォルダーの更新時刻と、索引ファイルの名前・大きさ・更新時刻。"""
+    d = os.path.abspath(index_dir)
+    try:
+        dir_mtime = os.stat(d).st_mtime_ns
+        files = []
+        with os.scandir(d) as it:
+            for e in it:
+                if e.name.startswith("index-") and e.name.endswith(".fits"):
+                    s = e.stat()
+                    files.append((e.name, s.st_size, s.st_mtime_ns))
+    except OSError:
+        return None
+    return os.path.normcase(d), dir_mtime, tuple(sorted(files))
+
+
+def index_catalog(index_dir=None):
+    """星図データの目録 (SvIndexCatalog) を返す。置き場所と中身が前回と同じなら使い回す。"""
+    index_dir = index_dir or DEFAULT_INDEX_DIR
+    key = _index_dir_key(index_dir)
+    if (key is not None and key == _INDEX_CATALOG["key"]
+            and _INDEX_CATALOG["catalog"] is not None):
+        return _INDEX_CATALOG["catalog"]
+    release_index_catalog()
+    catalog = SvIndexCatalog(index_dir)
+    _INDEX_CATALOG.update(key=key, catalog=catalog)
+    return catalog
+
+
+def release_index_catalog():
+    """
+    覚えている目録を手放す (索引ファイルの mmap を閉じる)。
+
+    Windows では mmap 中のファイルを消したり置き換えたりできない。
+    GUI は星図データを落とし直す前にこれを呼ぶ。
+    """
+    catalog = _INDEX_CATALOG["catalog"]
+    _INDEX_CATALOG.update(key=None, catalog=None)
+    close = getattr(catalog, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            pass
+
+
+def _catalog_names(catalog):
+    """目録に入っている (検査に通った) 索引ファイルの名前の一覧。"""
+    names = set()
+    for f in getattr(catalog, "files", None) or []:
+        names.add(os.path.basename(str(getattr(f, "path", f))))
+    return sorted(names)
+
+
+def _problem_text(p):
+    """目録が読み飛ばしたファイル 1 つぶんの説明。(パス, 理由) でも文字列でも受ける。"""
+    if isinstance(p, (tuple, list)) and len(p) >= 2:
+        return f"{os.path.basename(str(p[0]))}: {p[1]}"
+    return str(p)
+
+
+def solver_diagnostics(index_dir=None):
+    """
+    星図データが本当に使えるかを事前に確かめる。置き場所を走査し、ヘッダーを検査する。
+
+    戻り値の形は v6 (WSL 版) と同じ {"ok", "messages", "indexes", "cfg", "paths"}。
+    indexes は検査に通ったファイルの名前、cfg は空、paths は置き場所だけ。
+    """
+    index_dir = index_dir or DEFAULT_INDEX_DIR
+    rep = {"ok": False, "messages": [], "indexes": [], "cfg": "", "paths": [index_dir]}
+    if not os.path.isdir(index_dir):
         rep["messages"].append(
-            "WSL (または solve-field) が使えません。マニュアル 2.1〜2.2 のとおり "
-            "`wsl --install` と `sudo apt install astrometry.net -y` を実行してください。")
+            f"星図データの置き場所 {index_dir} がありません。"
+            "［準備］タブで星図データを落とすか、置き場所を指定し直してください。")
+        return rep
+    try:
+        catalog = index_catalog(index_dir)
+    except Exception as e:
+        rep["messages"].append(
+            f"星図データを読めませんでした ({type(e).__name__}: {e})。")
         return rep
 
-    p = _bash("command -v solve-field", timeout=60)
-    if p.returncode != 0 or not p.stdout.strip():
+    rep["indexes"] = _catalog_names(catalog)
+    problems = list(getattr(catalog, "problems", None) or [])
+    if problems:
         rep["messages"].append(
-            "WSL の中に solve-field がありません。WSL のターミナルで "
-            "`sudo apt update && sudo apt install astrometry.net -y` を実行してください。")
-        return rep
-
-    cfg = _bash("cat /etc/astrometry.cfg 2>/dev/null", timeout=60)
-    rep["cfg"] = cfg.stdout or ""
-    paths = [ln.split(None, 1)[1].strip()
-             for ln in rep["cfg"].splitlines()
-             if ln.strip().startswith("add_path") and len(ln.split(None, 1)) > 1]
-    paths += ["/usr/share/astrometry", "/usr/local/astrometry/data"]
-    rep["paths"] = paths
-
-    listing = _bash(
-        "for d in %s; do ls -1 \"$d\"/index-*.fits 2>/dev/null; done"
-        % " ".join(shlex.quote(x) for x in paths), timeout=240)
-    rep["indexes"] = sorted({os.path.basename(x)
-                             for x in listing.stdout.split() if x.strip()})
+            f"使えない星図データが {len(problems)} 個あるので読み飛ばします。"
+            "［準備］タブで落とし直してください。")
+        for p in problems[:5]:
+            rep["messages"].append("  " + _problem_text(p))
+        if len(problems) > 5:
+            rep["messages"].append(f"  ほか {len(problems) - 5} 個")
     if not rep["indexes"]:
         rep["messages"].append(
-            "星図データ (index-*.fits) が 1 つも見つかりません。C:\\AstrometryData に "
-            "展開されているか、/etc/astrometry.cfg の add_path が正しいかを確認してください。")
+            f"使える星図データ (index-*.fits) が {index_dir} に 1 つもありません。"
+            "［準備］タブで落としてください。")
         return rep
 
     rep["ok"] = True
     return rep
 
 
-# ============================================================== solve-field ===
+# ================================================================ オフライン解析 ===
 
-def _wcs_from_dir(out_dir_win):
-    for name in sorted(os.listdir(out_dir_win)):
-        if not name.endswith(".wcs"):
+def _cancel_checker(cancel):
+    """中止の合図を「呼ぶと True/False を返す関数」にそろえる (threading.Event でも関数でも受ける)。"""
+    if cancel is None:
+        return lambda: False
+    if callable(getattr(cancel, "is_set", None)):
+        return cancel.is_set
+    return lambda: bool(cancel())
+
+
+def _solution_comments(sol):
+    """ヘッダーの COMMENT に残す解の素性 (FITS のカードは ASCII だけなので英語で書く)。"""
+    def num(attr, fmt):
+        v = getattr(sol, attr, None)
+        try:
+            return fmt.format(v) if v is not None else "?"
+        except (TypeError, ValueError):
+            return "?"
+    return ["Solved by the zahyou native solver (after Lang et al. 2010, AJ 139, 1782).",
+            f"index {getattr(sol, 'index_name', '?')}, "
+            f"log-odds {num('logodds', '{:.2f}')}, matched {num('nmatch', '{:d}')} stars, "
+            f"{num('quads_tried', '{:d}')} quads tried"]
+
+
+def _solution_header(sol, width, height):
+    """
+    sv_solve の解 (SvSolution) を astropy で読める FITS ヘッダーにする。
+
+    カードは SvWcs.to_header_cards が作る ([(キー, 値, 注記)]。CRPIX はそこで 1 始まりになる)。
+    ソルバー側は astropy を使わない約束なので、fits.Header にするのはこちらの仕事。
+    """
+    cards = sol.wcs.to_header_cards(int(width), int(height),
+                                    comments=_solution_comments(sol))
+    h = fits.Header()
+    for key, value, comment in cards:
+        if key == "COMMENT":
+            h.add_comment(str(value))
+        elif key == "HISTORY":
+            h.add_history(str(value))
+        else:
+            h[key] = (value, comment or "")
+    if not WCS(h).is_celestial:
+        raise ValueError("天球座標の WCS になっていません")
+    return h
+
+
+def _solution_note(sol):
+    """解の中身を 1 行に (索引・一致した星・対数オッズ・試した quad・時間)。"""
+    parts = []
+    name = getattr(sol, "index_name", None)
+    if name:
+        parts.append(f"索引 {name}")
+    for attr, fmt in (("nmatch", "一致 {:d} 個"), ("logodds", "対数オッズ {:.1f}"),
+                      ("quads_tried", "quad {:,d} 個"), ("seconds", "{:.1f} 秒")):
+        v = getattr(sol, attr, None)
+        if v is None:
             continue
         try:
-            hdr = fits.getheader(os.path.join(out_dir_win, name))
-            if WCS(hdr).is_celestial:
-                return hdr
-        except Exception:
+            parts.append(fmt.format(int(v) if "d}" in fmt else float(v)))
+        except (TypeError, ValueError):
             continue
-    return None
-
-
-def _clean_outputs(out_dir_win):
-    for name in os.listdir(out_dir_win):
-        if name.endswith((".wcs", ".corr", ".axy", ".solved", ".rdls", ".match")):
-            try:
-                os.remove(os.path.join(out_dir_win, name))
-            except OSError:
-                pass
-
-
-def run_solve_field(file_win, kind, out_dir_win, width, height, opts,
-                    timeout, verbose=True):
-    """solve-field を 1 回だけ動かす。成功したら WCS ヘッダ、失敗したら None。"""
-    _clean_outputs(out_dir_win)
-    args = ["solve-field", to_solver_path(file_win),
-            "--overwrite", "--no-plots",
-            "--dir", to_solver_path(out_dir_win),
-            "--new-fits", "none", "--rdls", "none",
-            "--match", "none", "--solved", "none", "--index-xyls", "none"]
-    if kind == "xylist":
-        args += ["--width", str(int(width)), "--height", str(int(height)),
-                 "--x-column", "X", "--y-column", "Y", "--sort-column", "FLUX"]
-    args += list(opts)
-    command = " ".join(shlex.quote(a) for a in args)
-    if verbose:
-        _log(f"    $ {command}")
-    try:
-        p = _bash(command, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        if verbose:
-            _log("      ! 制限時間内に終わりませんでした")
-        return None
-
-    hdr = _wcs_from_dir(out_dir_win)
-    if hdr is None and verbose:
-        for line in (p.stdout or "").splitlines():
-            if "simplexy: found" in line or "Field center" in line:
-                _log(f"      · {line.strip()}")
-        for line in (p.stderr or "").strip().splitlines()[-6:]:
-            _log(f"      ! {line}")
-    return hdr
+    return " / ".join(parts)
 
 
 def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
                   hint_radec=None, hint_radius_deg=5.0, verbose=True,
-                  diagnostics=None):
+                  diagnostics=None, index_dir=None, prep=None, cancel=None):
     """
-    オフライン (WSL の astrometry.net) で解く。条件を変えながら粘り強く挑む。
-    戻り値: WCS ヘッダ or None
+    オフライン (zahyou 自前の解析エンジン sv_solve) で解く。条件を変えながら粘り強く挑む。
+    戻り値: WCS ヘッダ (CRPIX は 1 始まり) or None。
+
+    例外は投げない (中止したときも None)。全体の締め切りは timeout 秒の壁時計で、
+    試行ごとに残り時間の一部を割り当て、その締め切りを sv_solve に渡す。
+    v6 (WSL) は試行の打ち切りが --cpulimit 任せで、合計が 45 秒ほどはみ出していた。
+
+      prep   : run() が作った前処理の結果 (sub, mask, sigma)。深い検出に使う
+      cancel : 中止の合図 (threading.Event か、呼ぶと True を返す関数)
+      work_dir は使わない (v6 の引数の並びを保つために残してある)
     """
-    ny, nx = bundle.shape
-    if not sources:
-        _log("  ❌ 星が 1 つも無いので解析できません。")
+    try:
+        return _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
+                              hint_radius_deg, verbose, index_dir, prep,
+                              _cancel_checker(cancel))
+    except Exception as e:
+        _log(f"\n  ❌ オフライン解析が途中で失敗しました: {type(e).__name__}: {e}")
         return None
+
+
+def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
+                   hint_radius_deg, verbose, index_dir, prep, stopped):
+    t_end = time.monotonic() + float(timeout)
+    ny, nx = bundle.shape
+    sources = list(sources or [])
 
     scale, how = estimate_pixel_scale(bundle.header, focal_length_mm, bundle.shape)
     fov_w = nx * scale / 60.0 if scale else None
@@ -857,117 +935,126 @@ def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
     else:
         _log(f"  - 画素スケール: {how}")
 
-    installed = (diagnostics or {}).get("indexes") or []
-    if installed:
-        lo, hi = index_coverage(installed)
-        if lo is not None:
-            _log(f"  - 手持ちの星図データが対応する画角: {lo:g}′ 〜 {hi:g}′"
-                 f" (index ファイル {len(installed)} 個)")
-            if scale:
-                # 判定は短辺で行う (上のコメント参照)
-                ok, msgs = missing_index_advice(fov_short, installed)
-                for m in msgs:
-                    _log(("  ⚠️ " if not ok else "  - ") + m)
-                if not ok:
-                    _log(f"     ※ 必要な段は横幅 {fov_w:.1f}′ ではなく"
-                         f"短辺 {fov_short:.1f}′ で決まります。")
+    catalog = index_catalog(index_dir)
+    installed = _catalog_names(catalog)
+    if not installed:
+        _log("  ❌ 使える星図データがありません。［準備］タブで落としてください。")
+        return None
+    lo, hi = index_coverage(installed)
+    if lo is not None:
+        _log(f"  - 手持ちの星図データが対応する画角: {lo:g}′ 〜 {hi:g}′"
+             f" (index ファイル {len(installed)} 個)")
+        if scale:
+            # 判定は短辺で行う (上のコメント参照)
+            ok, msgs = missing_index_advice(fov_short, installed)
+            for m in msgs:
+                _log(("  ⚠️ " if not ok else "  - ") + m)
+            if not ok:
+                _log(f"     ※ 必要な段は横幅 {fov_w:.1f}′ ではなく"
+                     f"短辺 {fov_short:.1f}′ で決まります。")
 
-    xy_path = write_xylist(sources, nx, ny,
-                           os.path.join(work_dir, "zahyou_sources.xyls"))
-    img_path = write_solver_fits(bundle.data,
-                                 os.path.join(work_dir, "zahyou_image.fits"))
-
-    t_short = max(30, int(timeout * 0.25))
-    t_long = max(60, int(timeout * 0.5))
-    # 星が少ないときは、こちらの星リストで粘っても当たりにくい。長く回しても
-    # 無駄なので短く切り上げ、時間は solve-field 自身に画像を探させる試行へ回す。
-    # (星 8 個の画像で、1 つ目の試行が 150 秒使い切ってから 2 つ目が 4 秒で
-    #  解けていた = 待ち時間のほとんどが無駄だった)
-    few = len(sources) < 12
-    t_xy = t_short if few else t_long
-
-    # --objs は「使う星を上位いくつに絞るか」。
-    # xylist はこちらが渡した星がすべてなので実数でよいが、画像を渡すときは
-    # solve-field 自身が星を探す。こちらの検出数で絞ってはいけない ――
-    # simplexy が 76 個見つけた画像で --objs 8 を渡していたために解けなかった
-    # (外したら 3.5 秒で解けた)。
-    OBJS_IMAGE = 200
-
-    def base(cpu, kind="xylist"):
-        n = min(len(sources), 200) if kind == "xylist" else OBJS_IMAGE
-        return ["--cpulimit", str(int(cpu)), "--objs", str(n)]
-
-    hint = []
+    hint = None
     if hint_radec is not None:
-        hint = ["--ra", f"{hint_radec[0]:.6f}", "--dec", f"{hint_radec[1]:.6f}",
-                "--radius", f"{hint_radius_deg:g}"]
-
-    narrow = []
-    if scale:
-        narrow = ["--scale-units", "arcsecperpix",
-                  "--scale-low", f"{max(scale * 0.75, 0.01):.4f}",
-                  "--scale-high", f"{scale * 1.25:.4f}"]
+        hint = (float(hint_radec[0]), float(hint_radec[1]), float(hint_radius_deg))
+    narrow = (max(scale * 0.75, 0.01), scale * 1.25) if scale else None
     # 画角が分からないときは「手持ちの index で解ける範囲」を総当たりする。
     # 固定値 (v6.0 は 0.2〜120) だと、長焦点の画像がそもそも範囲外になってしまう。
-    wlo, whi = blind_scale_bounds(nx, installed)
-    wide = ["--scale-units", "arcsecperpix",
-            "--scale-low", f"{wlo:.4f}", "--scale-high", f"{whi:.4f}"]
+    wide = blind_scale_bounds(nx, installed)
     if not scale:
-        _log(f"  - 探索するスケール: {wlo:.3f}〜{whi:.3f}″/px "
-             f"(画角 {wlo * nx / 60:.1f}′〜{whi * nx / 60:.0f}′ 相当)")
+        _log(f"  - 探索するスケール: {wide[0]:.3f}〜{wide[1]:.3f}″/px "
+             f"(画角 {wide[0] * nx / 60:.1f}′〜{wide[1] * nx / 60:.0f}′ 相当)")
 
-    attempts = []
-    # 星が少ないときは、こちらの星リストより solve-field 自身の抽出のほうが
-    # 当たりやすい (simplexy は淡い星も拾う)。いちばん先に試す。
-    # 実測: 星 8 個の画像で、星リストの試行が 150 秒粘ってから画像の試行が
-    # 4 秒で解けていた。順番を入れ替えるだけで 154 秒 → 20 秒になった。
-    if few:
-        attempts.append(("image", img_path, "画像を直接渡す (2x 縮小)",
-                         base(t_short, "image") + hint + (narrow or wide)
-                         + ["--downsample", "2"], t_short))
+    # 試行のはしご: (ラベル, 星の検出, ヒント, スケールの範囲, 残り時間の何割まで使うか)
+    #   標準 = run() が検出した星 / 深い = 画像を 2x2 にまとめて暗い星まで拾い直した星
+    std = []
     if hint and narrow:
-        attempts.append(("xylist", xy_path, "座標ヒント + スケール既知",
-                         base(t_short) + hint + narrow, t_short))
+        std.append(("座標ヒント + スケール既知", "std", hint, narrow, 0.25))
     if hint:
-        attempts.append(("xylist", xy_path, "座標ヒント + スケール全域",
-                         base(t_short) + hint + wide, t_short))
+        std.append(("座標ヒント + スケール全域", "std", hint, wide, 0.25))
     if narrow:
-        attempts.append(("xylist", xy_path, "全天 + スケール既知",
-                         base(t_xy) + narrow, t_xy))
-    attempts += [
-        ("xylist", xy_path, "全天 + スケール全域", base(t_xy) + wide, t_xy),
+        std.append(("全天 + スケール既知", "std", None, narrow, 0.25))
+    std.append(("全天 + スケール全域", "std", None, wide, 0.5))
+    deep = [
+        (f"深い検出 (2x2) + {'座標ヒント' if hint else '全天'} + "
+         f"{'スケール既知' if narrow else 'スケール全域'}", "deep", hint, narrow or wide, 1.0),
+        ("深い検出 (2x2) + 全天 + スケール全域", "deep", None, wide, 1.0),
     ]
-    attempts += [
-        ("xylist", xy_path, "全天 + 歪み補正なし (星が少ない画像向け)",
-         base(t_xy) + wide + ["--no-tweak"], t_xy),
-        ("image", img_path, "画像を直接渡す (2x 縮小)",
-         base(t_long, "image") + wide + ["--downsample", "2"], t_long),
-        ("image", img_path, "画像を直接渡す (4x 縮小)",
-         base(t_long, "image") + wide + ["--downsample", "4"], t_long),
-    ]
-    seen = set()                       # 同じ条件を 2 度走らせない
-    uniq = []
+    # 星が少ないときは、標準の星で粘っても当たりにくい。深い検出を先に回す。
+    # (v6 でも「画像を直接渡す」試行を先にして、星 8 個の画像が 154 秒 → 20 秒になった)
+    if len(sources) < 12:
+        deep = [(a[0], a[1], a[2], a[3], share) for a, share in zip(deep, (0.25, 0.5))]
+        attempts = deep + std
+    else:
+        attempts = std + deep
+    if not sources:                       # 標準の検出で 0 個なら、深い検出だけ
+        attempts = [a for a in attempts if a[1] == "deep"]
+    seen, uniq = set(), []                # 同じ条件を 2 度走らせない
     for a in attempts:
-        key = (a[0], tuple(a[3]))
+        key = (a[1], a[2], a[3])
         if key not in seen:
             seen.add(key)
             uniq.append(a)
     attempts = uniq
 
-    deadline = time.time() + timeout
-    for i, (kind, path, label, opts, t) in enumerate(attempts, 1):
-        left = deadline - time.time()
-        if left < 20:
+    solver_log = (lambda m: _log(f"    · {m}")) if verbose else None
+    star_sets = {"std": sources}
+    for i, (label, kind, hint_i, (s_lo, s_hi), share) in enumerate(attempts, 1):
+        if stopped():
+            _log("\n  ■ 中止しました。")
+            return None
+        if t_end - time.monotonic() < 2.0:
             _log("  ⏱ 制限時間に達したので、これ以上の再試行はしません。")
             break
-        t = int(min(t, left))
-        _log(f"\n  [{i}/{len(attempts)}] {label}  (最大 {t} 秒)")
-        hdr = run_solve_field(path, kind, work_dir, nx, ny, opts,
-                              timeout=t + 45, verbose=verbose)
-        if hdr is not None:
-            _log(f"  ✅ 解析成功 ({label})")
-            return hdr
+        if kind not in star_sets:
+            if prep is None:
+                prep = preprocess(bundle.data)[:3]
+            found, thr = detect_sources_deep(*prep)
+            star_sets[kind] = found
+            if found:
+                _log(f"\n  - 深い検出: 画像を 2x2 にまとめて星を {len(found)} 個検出"
+                     f" (しきい値 {thr:g}σ)")
+            else:
+                _log("\n  - 深い検出: 画像を 2x2 にまとめても星が見つかりませんでした。")
+        stars = star_sets[kind]
+        if not stars:
+            continue
+        left = t_end - time.monotonic()
+        if left < 2.0:
+            _log("  ⏱ 制限時間に達したので、これ以上の再試行はしません。")
+            break
+        t = left if i == len(attempts) else left * share
+        _log(f"\n  [{i}/{len(attempts)}] {label}  (最大 {t:.0f} 秒)")
+        xy = np.array([[s["x"], s["y"]] for s in stars], dtype=np.float64)
+        flux = np.array([s["flux"] for s in stars], dtype=np.float64)
+        try:
+            sol = sv_solve(xy, flux, nx, ny, catalog, scale_lo=s_lo, scale_hi=s_hi,
+                           hint=hint_i, deadline=time.monotonic() + t,
+                           cancel=stopped, log=solver_log)
+        except SvCancelled:
+            _log("  ■ 中止しました。")
+            return None
+        except Exception as e:
+            _log(f"  ⚠️ 解析エンジンでエラー: {type(e).__name__}: {e}")
+            continue
+        if sol is None:
+            continue
+        try:
+            hdr = _solution_header(sol, nx, ny)
+        except Exception as e:
+            _log(f"  ⚠️ 解の WCS を読めませんでした: {type(e).__name__}: {e}")
+            continue
+        note = _solution_note(sol)
+        if note:
+            _log(f"    {note}")
+        _log(f"  ✅ 解析成功 ({label})")
+        return hdr
 
+    if stopped():
+        _log("\n  ■ 中止しました。")
+        return None
+    if not sources and not star_sets.get("deep"):
+        _log("  ❌ 星が 1 つも無いので解析できません。")
+        return None
     _log("\n  ❌ すべての条件で解けませんでした。心当たりの順に:")
     if len(sources) < 15:
         _log(f"     ・写っている星が {len(sources)} 個と少なめです。"

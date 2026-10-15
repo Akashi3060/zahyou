@@ -22,6 +22,12 @@ CFG = g.settings_path()
 BAK = CFG + ".tabtest-bak"
 
 rows = []
+DIALOGS = []
+
+# ダイアログは誰も押さないので、出たら試験ごと止まってしまう。記録だけして先へ進む
+for _name in ("showinfo", "showwarning", "showerror"):
+    setattr(g.messagebox, _name,
+            lambda *a, _n=_name, **k: DIALOGS.append((_n,) + tuple(str(x) for x in a)))
 
 
 def check(name, ok, msg=""):
@@ -38,11 +44,18 @@ def pump(app, sec, until=None):
     return until is None
 
 
+def ready(app):
+    # engine_ready はワーカーの中で立ち、busy が下りるのは画面側の次の巡回。
+    # engine_ready だけを待って解析を始めると「いま別の処理が動いています」の
+    # ダイアログで止まる (読み込みに 2〜3 秒かかるエンジンで実際に踏んだ)
+    return app.engine_ready and not app.busy
+
+
 def run_once(app):
     app.image_path.set(IMAGE)
     app.v_mode.set("STAR_NAME")
     app.v_name.set("UCAC4 660-021020")
-    app.v_solve.set("オフライン (WSL) のみ")
+    app.v_solve.set("オフラインのみ")
     app._sync_mode()
     app.update()
     app._start_analysis()
@@ -59,7 +72,7 @@ try:
     # --- 1 回目 (設定なし = 初めて使う人) ---------------------------
     app = g.App()
     app.update()
-    pump(app, 180, lambda: app.engine_ready)
+    pump(app, 180, lambda: ready(app))
     check("初回の既定は「撮影時の向き」", app.result_tab == "orig", app.result_tab)
     shown = run_once(app)
     check("初回の結果は「撮影時の向き」で出る", shown == "撮影時の向き", shown)
@@ -75,7 +88,7 @@ try:
     # --- 2 回目 (次に開いたとき) ------------------------------------
     app = g.App()
     app.update()
-    pump(app, 180, lambda: app.engine_ready)
+    pump(app, 180, lambda: ready(app))
     check("開き直しても覚えている", app.result_tab == "northup", app.result_tab)
     shown = run_once(app)
     check("2 回目は「北が上」で出る", shown == "北が上", shown)
@@ -85,6 +98,8 @@ finally:
         shutil.copyfile(BAK, CFG)
         os.remove(BAK)
         print("設定ファイルを戻しました")
+
+check("途中でダイアログが出ない", not DIALOGS, DIALOGS)
 
 w = max(len(r[0]) for r in rows)
 n = 0

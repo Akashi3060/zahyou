@@ -1,24 +1,22 @@
 """
-zahyou : オフライン解析に必要なものを調べて、足りなければ入れる。
+zahyou : オフライン解析に必要なもの (星図データ) を調べて、足りなければ落とす。
 
 GUI から呼ばれる。ここには画面のコードを一切書かない (log コールバックだけ渡す)。
 
-    st = survey()                     # 今どうなっているか
-    install_astrometry(log)           # 足りないものを入れる
-    fetch_index(scales, dest, log)    # 星図データを落とす
-    write_cfg(index_dir, log)
+    st = survey(index_dir)                # 今どうなっているか (走査と検査)
+    fetch_index(scales, dest, log)        # 星図データを落とす
+    prepare_all(index_dir, scales, log)   # 足りない段を落として、検査する
 
-やること自体は dev/setup_wsl.ps1 と同じ。GUI から進み具合を出したいので
-Python に置き換えてある。
+v6 までは WSL と astrometry.net もここで入れていたが、v7 からは解析を zahyou 自身が
+行う (dev/solver_*.py)。要るのは星図データ (astrometry.net 形式の index-*.fits) だけ。
 """
 from __future__ import annotations
 
-import base64
 import concurrent.futures
 import math
 import os
 import re
-import subprocess
+import shutil
 import sys
 import time
 import urllib.request
@@ -45,10 +43,8 @@ TILES = 48                       # 5200 系は 48 分割 (HEALPix nside=2)
 
 DEFAULT_INDEX_DIR = (r"C:\AstrometryData" if os.name == "nt"
                      else "/usr/share/astrometry")
-CPU_LIMIT = 300                  # /etc/astrometry.cfg に書く値 [秒]
 
-# GUI (--windowed) から呼ぶので、コンソール窓を出さない
-_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
+_INDEX_RE = re.compile(r"index-(\d{4})(?:-(\d{2}))?\.fits$")
 
 
 def human(n):
@@ -72,253 +68,197 @@ def index_url(scale, tile=None):
     return f"{G41_BASE}/index-{scale}.fits"
 
 
-# ============================================================ WSL を叩く ===
+# ============================================================ 中身の検査 ===
+#  解析エンジンの目録 (SvIndexCatalog) は exec で読むエンジンの中にあり、
+#  起動の直後やダウンロードの最中には使えない。ここではヘッダーだけを読む
+#  軽い検査を自前で持つ (形式は docs/index-format.md の 2〜4 節)。
+#  エンジンの検査 (sv_validate_index_file) は validate として受け取れる。
 
-def _env():
-    e = dict(os.environ)
-    e["WSL_UTF8"] = "1"          # 既定の UTF-16 だと Python 側で化ける
-    return e
-
-
-def _decode(b):
-    """
-    wsl.exe の出力を文字にする。
-
-    WSL_UTF8=1 を渡していても、<b>WSL 自体が入っていないとき</b>の
-    「インストールされていません」という案内は System32 のスタブが出すので
-    UTF-16LE のままくる。ここを UTF-8 として読むと文字化けし、
-    いちばん読んでほしい場面で意味が伝わらない (実際に踏んだ)。
-    """
-    if not b:
-        return ""
-    if b.count(b"\x00") > len(b) // 4:
-        return b.decode("utf-16-le", "replace")
-    return b.decode("utf-8", "replace")
+_BLOCK = 2880
+_ENDIAN = "04:03:02:01"           # リトルエンディアン。ほかの値の索引は読めない
+_CHECKED = {}                     # (パス, 大きさ, 更新時刻, エンジンも見たか) → (ok, 理由)
 
 
-def wsl(command, as_root=False, timeout=600):
-    """WSL の中で sh -c を回す。戻り値 (returncode, 出力)"""
-    if os.name != "nt":
-        p = subprocess.run(["sh", "-c", command], capture_output=True,
-                           text=True, encoding="utf-8", errors="replace",
-                           timeout=timeout)
-        return p.returncode, ((p.stdout or "") + (p.stderr or "")).strip()
-    args = (["wsl.exe"] + (["-u", "root"] if as_root else [])
-            + ["-e", "sh", "-c", command])
+def _card_value(text):
+    """カードの値の部分 (文字列なら引用符の中、ほかは / の注記を除いたもの)。"""
+    t = text.strip()
+    if t.startswith("'"):
+        end = t.find("'", 1)
+        return (t[1:end] if end > 0 else t[1:]).rstrip()
+    return t.split("/", 1)[0].strip()
+
+
+def _read_header(f):
+    """FITS のヘッダーを 1 つ読む (2880 バイトのブロック単位)。END が無ければ ValueError。"""
+    cards = {}
+    while True:
+        block = f.read(_BLOCK)
+        if len(block) < _BLOCK:
+            raise ValueError("ヘッダーの途中でファイルが終わっています")
+        for i in range(0, _BLOCK, 80):
+            card = block[i:i + 80].decode("ascii", "replace")
+            key = card[:8].strip()
+            if key == "END":
+                return cards
+            if card[8:10] == "= " and key not in cards:
+                cards[key] = _card_value(card[10:])
+
+
+def _data_bytes(h):
+    """そのヘッダーに続くデータの長さ [バイト] (2880 の倍数に詰める前)。"""
+    naxis = int(h.get("NAXIS", "0") or 0)
+    if naxis == 0:
+        return 0
+    n = 1
+    for i in range(1, naxis + 1):
+        n *= int(h.get(f"NAXIS{i}", "0") or 0)
+    n += int(h.get("PCOUNT", "0") or 0)
+    n *= int(h.get("GCOUNT", "1") or 1)
+    return abs(int(h.get("BITPIX", "8"))) // 8 * n
+
+
+def _padded(n):
+    return (n + _BLOCK - 1) // _BLOCK * _BLOCK
+
+
+def _check_layout(path):
+    """ヘッダーだけで検査する。戻り値 (ok, 理由)。"""
+    m = _INDEX_RE.match(os.path.basename(path))
+    if not m:
+        return False, "索引ファイルの名前ではありません"
     try:
-        p = subprocess.run(args, capture_output=True, timeout=timeout,
-                           env=_env(), creationflags=_NO_WINDOW)
-    except FileNotFoundError:
-        return 127, "wsl.exe がありません"
-    except subprocess.TimeoutExpired:
-        return 124, f"{timeout} 秒で応答がありませんでした"
-    return p.returncode, (_decode(p.stdout) + _decode(p.stderr)).strip()
-
-
-def wsl_stream(command, log, as_root=False, timeout=3600, raw=False):
-    """
-    出力を 1 行ずつ log に流しながら回す。apt のような長い処理向け。
-
-    raw=True のときは command を「wsl.exe 自身への引数」として渡す
-    (--install など、Linux の中で動かすのではない用事)。
-    """
-    if raw:
-        if os.name != "nt":
-            log("Windows ではないので何もしません。")
-            return 1
-        args = ["wsl.exe"] + command.split()
-    elif os.name != "nt":
-        args = ["sh", "-c", command]
-    else:
-        args = (["wsl.exe"] + (["-u", "root"] if as_root else [])
-                + ["-e", "sh", "-c", command])
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            prim = _read_header(f)
+            pos = f.tell() + _padded(_data_bytes(prim))
+            while pos < size:
+                f.seek(pos)
+                h = _read_header(f)
+                pos = f.tell() + _padded(_data_bytes(h))
+    except (OSError, ValueError) as e:
+        return False, str(e)
+    if pos != size:
+        return False, (f"大きさが合いません (ヘッダーから {pos:,} バイト、"
+                       f"実物 {size:,} バイト。途中で切れたファイルです)")
     try:
-        p = subprocess.Popen(args, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT,
-                             env=_env() if os.name == "nt" else None,
-                             creationflags=_NO_WINDOW)
-    except FileNotFoundError:
-        log("wsl.exe がありません。")
-        return 127
-    t0 = time.time()
-    for raw in p.stdout:
-        line = _decode(raw).replace("\r", "").rstrip()
-        if line:
-            log("    " + line)
-        if time.time() - t0 > timeout:
-            p.kill()
-            log(f"    ⚠️ {timeout} 秒を超えたので打ち切りました。")
-            return 124
-    return p.wait()
+        if prim.get("ENDIAN") != _ENDIAN:
+            return False, f"エンディアンが違います ({prim.get('ENDIAN')})"
+        if int(prim.get("INDEXID", "-1")) != int(m.group(1)):
+            return False, f"INDEXID が名前と違います ({prim.get('INDEXID')})"
+        if m.group(2) is not None and int(prim.get("HEALPIX", "-1")) != int(m.group(2)):
+            return False, f"HEALPIX がタイル番号と違います ({prim.get('HEALPIX')})"
+    except ValueError as e:
+        return False, f"ヘッダーの値を読めません ({e})"
+    return True, "ok"
 
 
-def to_wsl_path(win_path):
-    if os.name != "nt":
-        return win_path
-    code, out = wsl("wslpath -a -u '%s'" % win_path, timeout=60)
-    if code == 0 and out:
-        return out.splitlines()[0].strip()
-    drive, rest = os.path.splitdrive(os.path.abspath(win_path))
-    return "/mnt/" + drive[0].lower() + rest.replace("\\", "/")
+def check_index_file(path, validate=None):
+    """
+    索引ファイル 1 本を検査する。戻り値 (ok, 理由)。
+
+    見るのは、大きさがヘッダーから計算した長さと一致するか (途中で切れたダウンロードは
+    ここで分かる)、ENDIAN、INDEXID とファイル名の番号、5200 系の HEALPIX とタイル番号。
+    中身 (星や quad) までは読まないので、253 本でも 1 秒かからない。
+    validate (エンジンの sv_validate_index_file) を渡すと、こちらの検査に通ったあとで
+    それも通す。同じファイルは大きさと更新時刻が変わるまで調べ直さない。
+    """
+    try:
+        st = os.stat(path)
+    except OSError as e:
+        return False, str(e)
+    key = (os.path.normcase(os.path.abspath(path)), st.st_size, st.st_mtime_ns,
+           validate is not None)
+    hit = _CHECKED.get(key)
+    if hit is not None:
+        return hit
+    ok, why = _check_layout(path)
+    if ok and validate is not None:
+        try:
+            ok, msg = validate(path)
+            if not ok:
+                why = str(msg)
+        except Exception as e:
+            ok, why = False, f"検査でエラー ({type(e).__name__}: {e})"
+    _CHECKED[key] = (ok, why)
+    return ok, why
 
 
 # ============================================================== 状態調べ ===
 
 def index_state(index_dir):
-    """Windows 側の星図データの置き場所を調べる。"""
-    st = {"dir": index_dir, "files": 0, "bytes": 0, "scales": [],
-          "fov": None, "ok": False}
+    """
+    星図データの置き場所を走査する (中身は見ない。中身の検査は survey)。
+
+      files / bytes : index-*.fits の数と合計の大きさ
+      scales        : ファイルが全部そろっている段 (5200 系は 48 タイル)
+      partial       : 一部だけある段 {段: ある数}。落とすのを途中で止めたもの
+      fov           : ファイルがある段の画角の範囲 (分角)
+    """
+    st = {"dir": index_dir, "files": 0, "bytes": 0, "scales": [], "partial": {},
+          "fov": None, "ok": False, "names": []}
     if not os.path.isdir(index_dir):
         return st
-    scales = set()
-    for name in os.listdir(index_dir):
-        m = re.match(r"index-(\d{4})(?:-\d{2})?\.fits$", name)
+    count = {}
+    for name in sorted(os.listdir(index_dir)):
+        m = _INDEX_RE.match(name)
         if not m:
             continue
         st["files"] += 1
+        st["names"].append(name)
         try:
             st["bytes"] += os.path.getsize(os.path.join(index_dir, name))
         except OSError:
             pass
-        scales.add(int(m.group(1)))
-    st["scales"] = sorted(scales)
-    covered = [SCALE_FOV[s] for s in st["scales"] if s in SCALE_FOV]
+        s = int(m.group(1))
+        count[s] = count.get(s, 0) + 1
+    st["scales"] = sorted(s for s, n in count.items() if n >= len(index_names(s)))
+    st["partial"] = {s: n for s, n in sorted(count.items())
+                     if n < len(index_names(s))}
+    covered = [SCALE_FOV[s] for s in count if s in SCALE_FOV]
     if covered:
         st["fov"] = (min(a for a, _ in covered), max(b for _, b in covered))
     st["ok"] = st["files"] > 0
     return st
 
 
-def survey(index_dir=None):
-    """4 つの前提を順に確かめる。GUI の一覧表はこの戻り値をそのまま出す。"""
+def survey(index_dir=None, validate=None):
+    """
+    星図データを走査して、1 本ずつ検査する。GUI の一覧表はこの戻り値をそのまま出す。
+
+      index : 置き場所の走査 (index_state)。scales は「全部そろって検査に通った段」
+      check : 検査の結果 {"ok", "checked", "bad": [(名前, 理由)]}
+      ready : オフライン解析できるか (検査に通った星図データが 1 本でもある)
+      notes : 足りないもの・壊れているもの (画面とログにそのまま出す)
+    """
     index_dir = index_dir or DEFAULT_INDEX_DIR
-    st = {"wsl": False, "distro": "", "solver": "", "cfg": "", "cfg_paths": [],
-          "index": index_state(index_dir), "visible": 0, "ready": False,
-          "notes": []}
+    idx = index_state(index_dir)
+    bad = []
+    for name in idx["names"]:
+        ok, why = check_index_file(os.path.join(index_dir, name), validate)
+        if not ok:
+            bad.append((name, why))
+    bad_scales = {int(_INDEX_RE.match(n).group(1)) for n, _ in bad}
+    idx["scales"] = [s for s in idx["scales"] if s not in bad_scales]
+    good = idx["files"] - len(bad)
+    st = {"index": idx,
+          "check": {"ok": idx["files"] > 0 and not bad, "checked": idx["files"],
+                    "bad": bad},
+          "ready": good > 0, "notes": []}
 
-    code, out = wsl("echo ok", timeout=90)
-    st["wsl"] = (code == 0 and "ok" in out)
-    if not st["wsl"]:
-        st["notes"].append("WSL が使えません。「WSL を入れる」を押してください。")
-        return st
-    st["distro"] = wsl(". /etc/os-release; echo $PRETTY_NAME", timeout=90)[1]
-
-    code, out = wsl("command -v solve-field", timeout=120)
-    st["solver"] = out if code == 0 else ""
-    if not st["solver"]:
-        st["notes"].append("WSL の中に astrometry.net (solve-field) がありません。")
-        return st
-
-    st["cfg"] = wsl("cat /etc/astrometry.cfg 2>/dev/null", timeout=90)[1]
-    st["cfg_paths"] = [ln.split(None, 1)[1].strip()
-                       for ln in st["cfg"].splitlines()
-                       if ln.strip().startswith("add_path")
-                       and len(ln.split(None, 1)) > 1]
-
-    if not st["index"]["ok"]:
-        st["notes"].append(f"{index_dir} に星図データ (index-*.fits) がありません。")
-        return st
-
-    want = to_wsl_path(index_dir)
-    if not any(p.rstrip("/") == want.rstrip("/") for p in st["cfg_paths"]):
-        st["notes"].append("/etc/astrometry.cfg が星図データの場所を指していません。")
-        return st
-
-    code, out = wsl("ls -1 '%s'/index-*.fits 2>/dev/null | wc -l" % want,
-                    timeout=300)
-    digits = out.strip().splitlines()[-1].strip() if out.strip() else ""
-    st["visible"] = int(digits) if digits.isdigit() else 0
-    if st["visible"] == 0:
-        st["notes"].append("WSL から星図データが見えません。")
-        return st
-
-    st["ready"] = True
+    notes = st["notes"]
+    if not idx["ok"]:
+        notes.append(f"{index_dir} に星図データ (index-*.fits) がありません。")
+    for s, n in idx["partial"].items():
+        notes.append(f"index-{s} は {len(index_names(s))} ファイル中 {n} しかありません "
+                     "(落とすのを途中で止めたもの)。もう一度落とせば続きから補います。")
+    if bad:
+        notes.append(f"中身のおかしい星図データが {len(bad)} 個あります (解析では読み飛ばします)。"
+                     "その段を落とし直してください。")
+        for name, why in bad[:5]:
+            notes.append(f"  {name}: {why}")
+        if len(bad) > 5:
+            notes.append(f"  ほか {len(bad) - 5} 個")
     return st
-
-
-# ================================================================ 直す側 ===
-
-def install_wsl(log):
-    """
-    WSL を入れる。
-
-    まず管理者権限なしで試す ―― Windows の機能としての WSL が既に入っていて
-    ディストリビューションだけ無い場合は、これで通る (実測 40 秒・UAC 無し)。
-    通らなければ UAC を出して管理者で実行し、再起動をお願いする。
-    """
-    if os.name != "nt":
-        log("Windows ではないので何もしません。")
-        return False
-
-    log("WSL を入れます (回線しだいで数分かかります)...")
-    rc = wsl_stream("--install --no-launch", log, raw=True, timeout=1800)
-    if rc == 0 and wsl("echo ok", timeout=120)[0] == 0:
-        log("  入りました。再起動は要りません。")
-        return True
-
-    log("  管理者の権限が要るようです。")
-    log("  UAC (管理者の確認) が出たら「はい」を押してください。")
-    ps = ('Start-Process -FilePath wsl.exe '
-          '-ArgumentList "--install","--no-launch" -Verb RunAs -Wait')
-    p = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy",
-                        "Bypass", "-Command", ps],
-                       capture_output=True, text=True, encoding="utf-8",
-                       errors="replace", creationflags=_NO_WINDOW)
-    if p.returncode != 0:
-        log("  失敗しました: " + (p.stderr or "").strip()[:400])
-        log("  管理者の PowerShell で  wsl --install  を実行してください。")
-        return False
-    log("  インストールを実行しました。")
-    # 再起動が要るかどうかは、実際に動かしてみないと分からない。
-    # 先に「再起動してください」と出してしまうと、続けられる場合に
-    # 矛盾したことを言うことになる (実測で踏んだ)。
-    if wsl("echo ok", timeout=240)[0] == 0:
-        log("  入りました。再起動は要りません。")
-        return True
-    log("  ★ Windows を再起動してから、もう一度「状態を確認」を押してください。")
-    return True
-
-
-def install_astrometry(log):
-    """WSL の中に astrometry.net を入れる。何度実行してもよい。"""
-    code, out = wsl("command -v solve-field", timeout=120)
-    if code == 0 and out:
-        log(f"  既に入っています: {out}")
-        return True
-    log("  apt で astrometry.net を入れます (回線しだいで数分かかります)...")
-    cmd = ("export DEBIAN_FRONTEND=noninteractive; "
-           "apt-get update -qq && apt-get install -y astrometry.net netpbm")
-    rc = wsl_stream(cmd, log, as_root=True, timeout=2400)
-    if rc != 0:
-        log(f"  apt が失敗しました (終了コード {rc})。")
-        log("  WSL のターミナルで  sudo apt update && sudo apt install astrometry.net -y")
-        return False
-    code, out = wsl("command -v solve-field", timeout=120)
-    if code != 0 or not out:
-        log("  入れたはずですが solve-field が見つかりません。")
-        return False
-    log(f"  入りました: {out}")
-    return True
-
-
-def write_cfg(index_dir, log, cpu_limit=CPU_LIMIT):
-    """/etc/astrometry.cfg を書く。元のファイルは 1 度だけ退避する。"""
-    wsl_dir = to_wsl_path(index_dir)
-    if not wsl_dir:
-        log("  星図データの場所を WSL 用のパスに変換できませんでした。")
-        return False
-    cfg = f"inparallel\ncpulimit {cpu_limit}\nautoindex\nadd_path {wsl_dir}\n"
-    b64 = base64.b64encode(cfg.encode("utf-8")).decode("ascii")
-    cmd = ("if [ -f /etc/astrometry.cfg ] && [ ! -f /etc/astrometry.cfg.bak-zahyou ]; "
-           "then cp /etc/astrometry.cfg /etc/astrometry.cfg.bak-zahyou; fi; "
-           f"echo '{b64}' | base64 -d > /etc/astrometry.cfg; cat /etc/astrometry.cfg")
-    code, out = wsl(cmd, as_root=True, timeout=180)
-    if code != 0:
-        log("  書き込めませんでした: " + out[:300])
-        return False
-    for line in out.splitlines():
-        log("    " + line)
-    return True
 
 
 # ============================================================ 星図データ ===
@@ -386,47 +326,95 @@ def _remote_size(url, timeout=60):
         return int(r.headers["Content-Length"])
 
 
+def _finish(part, path, log):
+    """落とし終えた .part を本来の名前へ付け替えて、ヘッダーを検査する。"""
+    name = os.path.basename(path)
+    try:
+        os.replace(part, path)
+    except OSError as e:
+        log(f"    {name}: 名前を付け替えられません ({e})。"
+            "解析で使っている最中なら、終わってからもう一度押してください。")
+        return False
+    ok, why = check_index_file(path)
+    if ok:
+        return True
+    log(f"    {name}: 落としたファイルの中身がおかしいので消します ({why})。")
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    return False
+
+
 def _download(url, path, log, on_bytes=None, stop=None, retries=5):
-    """途中まで落ちていれば Range で続きから。戻り値 True/False"""
+    """
+    途中まで落ちていれば Range で続きから。戻り値 True/False
+
+    書き込みは「名前.part」へ。最後まで落ちて大きさが合い、ヘッダーの検査に
+    通ってから本来の名前へ付け替える。v6 は本来の名前へ直接書いていたので、
+    途中で止めると中途半端なファイルが残り、オフラインの「状態を確認」が
+    そろっていると誤って答えた。
+    """
+    name = os.path.basename(path)
+    part = path + ".part"
     try:
         total = _remote_size(url)
     except Exception as e:
-        log(f"    {os.path.basename(path)}: 大きさを取れません ({e})")
+        log(f"    {name}: 大きさを取れません ({e})")
         return False
-    if os.path.exists(path) and os.path.getsize(path) == total:
-        return True
+    if os.path.exists(path):
+        if os.path.getsize(path) == total:
+            ok, why = check_index_file(path)
+            if ok:
+                return True
+            log(f"    {name}: 中身がおかしいので落とし直します ({why})")
+            try:
+                os.remove(path)
+            except OSError as e:
+                log(f"    {name}: 消せません ({e})")
+                return False
+        else:                            # v6 が残した途中のファイル → 続きから
+            try:
+                if os.path.exists(part):
+                    os.remove(path)
+                else:
+                    os.replace(path, part)
+            except OSError as e:
+                log(f"    {name}: 続きから落とす準備ができません ({e})")
+                return False
 
     for attempt in range(1, retries + 1):
-        have = os.path.getsize(path) if os.path.exists(path) else 0
-        if have == total:
-            return True
+        have = os.path.getsize(part) if os.path.exists(part) else 0
         if have > total:                          # 壊れている
-            os.remove(path)
+            os.remove(part)
             have = 0
-        req = urllib.request.Request(url)
-        if have:
-            req.add_header("Range", f"bytes={have}-")
         try:
-            with urllib.request.urlopen(req, timeout=120) as r, \
-                    open(path, "ab" if have else "wb") as f:
-                while True:
-                    if stop is not None and stop():
-                        return False
-                    chunk = r.read(1 << 20)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    if on_bytes:
-                        on_bytes(len(chunk))
-            if os.path.getsize(path) == total:
-                return True
+            if have < total:
+                req = urllib.request.Request(url)
+                if have:
+                    req.add_header("Range", f"bytes={have}-")
+                with urllib.request.urlopen(req, timeout=120) as r:
+                    if have and getattr(r, "status", 206) != 206:
+                        have = 0                  # 続きから貰えなかったので最初から
+                    with open(part, "ab" if have else "wb") as f:
+                        while True:
+                            if stop is not None and stop():
+                                return False
+                            chunk = r.read(1 << 20)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                            if on_bytes:
+                                on_bytes(len(chunk))
+            if os.path.getsize(part) == total:
+                return _finish(part, path, log)
         except Exception as e:
             if stop is not None and stop():
                 return False
-            log(f"    {os.path.basename(path)}: {type(e).__name__} "
+            log(f"    {name}: {type(e).__name__} "
                 f"({attempt}/{retries}) 続きから再開します")
             time.sleep(min(2 ** attempt, 20))
-    log(f"    {os.path.basename(path)}: あきらめました。")
+    log(f"    {name}: あきらめました。")
     return False
 
 
@@ -491,20 +479,27 @@ def fetch_index(scales, dest, log, progress=None, stop=None):
     for s, tile, name in jobs:
         path = os.path.join(dest, name)
         got = os.path.getsize(path) if os.path.exists(path) else 0
+        if not got and os.path.exists(path + ".part"):
+            got = os.path.getsize(path + ".part")       # 途中まで落ちているぶん
+            done_file = False
+        else:
+            done_file = bool(got)
         want = sizes.get(name)
         if want is None:                    # 大きさを聞けなかった
-            if got:                         # あるなら完成しているとみなす
+            if done_file:                   # あるなら完成しているとみなす
                 already += 1
                 continue
             todo.append((s, tile, name))
             total += int(SCALE_MB.get(s, 100) * 1024 * 1024
                          / len(index_names(s)))
             continue
-        if got >= want:
-            already += 1
-            continue
+        if done_file and got == want:
+            if check_index_file(path)[0]:
+                already += 1
+                continue
+            got = 0                         # 中身がおかしいので最初から落とし直す
         todo.append((s, tile, name))
-        total += want - got                 # 途中まで落ちているぶんは引く
+        total += want - got if 0 < got < want else want   # 途中まで落ちているぶんは引く
 
     if not todo:
         log(f"  すべて落ちています ({already} ファイル)。")
@@ -513,6 +508,14 @@ def fetch_index(scales, dest, log, progress=None, stop=None):
     if already:
         msg += f"  (既にある {already} ファイルは飛ばします)"
     log(msg)
+    try:
+        free = shutil.disk_usage(dest).free
+    except OSError:
+        free = None
+    if free is not None and free < total * 1.05 + (64 << 20):
+        log(f"  空き容量が足りません (要 {human(total)} / 空き {human(free)})。"
+            "置き場所を変えるか、ディスクを空けてください。")
+        return False
 
     done = [0]
 
@@ -540,62 +543,54 @@ def fetch_index(scales, dest, log, progress=None, stop=None):
 
 # ============================================================== まとめて ===
 
-def prepare_all(index_dir, scales, log, progress=None, stop=None):
-    """
-    「まとめて準備」。足りない工程だけを順に実行する。戻り値は survey()。
-    """
-    log("=" * 56)
-    log("1. WSL")
-    st = survey(index_dir)
-    if not st["wsl"]:
-        if not install_wsl(log):
-            return survey(index_dir)
-        st = survey(index_dir)
-        if not st["wsl"]:
-            # 管理者で入れた直後は再起動が要る。ここで止めて案内する。
-            log("  Windows を再起動してから、もう一度押してください。")
-            return st
-        log("  そのまま続けます。")
-    log(f"  OK  {st['distro']}")
+def report(st, log):
+    """survey() の結果をログに書く。"""
+    idx, chk = st["index"], st["check"]
+    log(f"  星図データ : "
+        + (f"{idx['files']} ファイル / {human(idx['bytes'])}  ({idx['dir']})"
+           if idx["ok"] else f"ありません  ({idx['dir']})"))
+    if chk["checked"]:
+        log("  検査       : "
+            + (f"{chk['checked']} ファイルとも正常" if not chk["bad"]
+               else f"{len(chk['bad'])} / {chk['checked']} ファイルに問題"))
+    if idx["fov"]:
+        log(f"  解ける画角 : {idx['fov'][0]:g}′ 〜 {idx['fov'][1]:g}′")
+    for m in st["notes"]:
+        log("  ⚠️ " + m)
 
-    log("=" * 56)
-    log("2. astrometry.net")
-    if not st["solver"]:
-        if not install_astrometry(log):
-            return survey(index_dir)
-    else:
-        log(f"  OK  {st['solver']}")
 
+def prepare_all(index_dir, scales, log, progress=None, stop=None, validate=None):
+    """
+    「まとめて準備」。足りない段を落として、検査する。戻り値は survey()。
+
+    scales を渡せばその段を、空ならおすすめの段 (画角 4′ 以上) をそろえる。
+    すでに全部そろって検査に通っている段は落とさない。
+    """
     log("=" * 56)
-    log("3. 星図データ")
-    have = index_state(index_dir)
-    need = [s for s in scales if s not in have["scales"]]
+    log("1. 星図データ")
+    st = survey(index_dir, validate)
+    want = sorted(scales) if scales else recommended_scales()
+    need = [s for s in want if s not in st["index"]["scales"]]
     if need:
         log("  足りない段: " + ", ".join(str(s) for s in need))
         if not fetch_index(need, index_dir, log, progress, stop):
-            return survey(index_dir)
+            st = survey(index_dir, validate)
+            report(st, log)
+            return st
     else:
-        log(f"  OK  {have['files']} ファイル / {human(have['bytes'])}")
+        idx = st["index"]
+        log(f"  OK  {idx['files']} ファイル / {human(idx['bytes'])}")
 
     log("=" * 56)
-    log("4. /etc/astrometry.cfg")
-    write_cfg(index_dir, log)
-
-    log("=" * 56)
-    log("5. 確認")
-    st = survey(index_dir)
+    log("2. 検査")
+    st = survey(index_dir, validate)
+    report(st, log)
     if st["ready"]:
-        log(f"  準備できました。WSL から {st['visible']} ファイルが見えています。")
-        fov = st["index"]["fov"]
-        if fov:
-            log(f"  解ける画角: {fov[0]:g}′ 〜 {fov[1]:g}′")
-    else:
-        for m in st["notes"]:
-            log("  ⚠️ " + m)
+        log("  準備できました。オフライン解析できます。")
     return st
 
 
 if __name__ == "__main__":                        # 手で確かめたいとき
     s = survey(sys.argv[1] if len(sys.argv) > 1 else None)
-    for k, v in s.items():
-        print(f"{k:10s} {v}")
+    report(s, print)
+    print("ready", s["ready"])

@@ -4,10 +4,15 @@
 解析そのものはノートブック版とまったく同じ ([`zahyou_engine.py`](../zahyou_engine.py)
 を読み込んで動かしています)。
 
+この版 (`APP_VER = "v7-dev"`、試作) は、オフライン解析を**エンジンの中の自前のソルバー**
+(`dev/solver_wcs.py` / `solver_index.py` / `solver_core.py`。`zahyou_engine.py` に組み込まれる)
+で行います。WSL も astrometry.net の実行ファイルも使いません。星図データ (索引ファイル) は
+v6 と同じ物を同じ場所に置きます。設計は [docs/design-native-solver.md](../docs/design-native-solver.md)。
+
 ```
 gui/
 ├── zahyou_gui.py    画面。1 ウィンドウ・3 タブ
-├── zahyou_env.py    WSL / astrometry.net / 星図データ の確認と導入
+├── zahyou_env.py    星図データの取得と検査 (置き場所の走査・ヘッダーの検査)
 ├── zahyou.spec      PyInstaller の設定
 ├── build_exe.ps1    exe を建てるスクリプト
 ├── test_gui.py      画面を組み立てて解析を 1 回通すテスト
@@ -21,7 +26,7 @@ gui/
 | タブ | 中身 |
 |---|---|
 | **解析** | 画像を選ぶ / 目標を打ち込む / 実行 → 大きな数字と図 2 枚 |
-| **準備** | WSL・astrometry.net・星図データ を「まとめて準備する」で用意 |
+| **準備** | 星図データを落として検査する (「まとめて準備する」で足りない段を落とす) |
 | **使い方** | 短い手引き |
 
 白地に黒い星の**星図**も、明暗が逆であることを見分けて自動で反転してから解きます
@@ -70,11 +75,10 @@ Releases に載せた値と見比べてください。
 
 インターネットがあればこれだけで動きます。**ネットの無いところで使うなら**、
 先に **[準備]** タブで「まとめて準備する」を押してください。
-WSL から星図データの設定まで、足りないものを順に用意します。
-実測では、WSL を消した状態から **76 秒・UAC なし・再起動なし**で
-「オフライン解析できます」になりました
-（Windows の機能としての WSL が入っていない PC では、
-UAC と再起動が 1 回だけ要ります）。
+足りない星図データ (おすすめの段) を落として検査します。
+一覧表 (「星図データ」「検査」「総合」の 3 行) の「総合」が
+「オフライン解析できます」になれば用意は済んでいます。
+解析のエンジンは exe の中にあるので、ほかに入れるものはありません。
 
 ## 入れ替える / やめる
 
@@ -82,6 +86,10 @@ UAC と再起動が 1 回だけ要ります）。
 GitHub の Releases API が資産ごとに `digest` (sha256) を返すので、
 動いている exe のハッシュと突き合わせて判定する
 (バージョン名だけだと「同じ版を建て直したもの」が分からない)。
+
+**試作版 (`v7-dev`) は更新の確認をしない。** Releases の最新は v6 なので、
+確かめると「新しい版がある」と判定して v6 の exe へ戻してしまう。
+試作版は手で上書きして入れ替える。
 
 入れ替えは動いている exe を自分で上書きできないので、
 PowerShell に任せる ― 落とす → SHA256 で確かめる →
@@ -109,13 +117,24 @@ zahyou.exe --update-apply --out apply.txt     # 入れ替えまで (起動し直
 
 手で入れ替えるなら `zahyou.exe` を上書きするだけ。
 設定 (`%LOCALAPPDATA%\zahyou`) も覚えた座標もそのまま引き継がれる。
-WSL と星図データは作り直さなくてよい。
+星図データは作り直さなくてよい (v6 と同じ物を同じ場所で使う)。
 
-やめるときに消すのは 4 か所 ― `zahyou.exe` /
-`%LOCALAPPDATA%\zahyou` (設定と記憶) / `C:\AstrometryData` (星図データ) /
-WSL の中の astrometry.net (`sudo apt remove --purge astrometry.net`、
-設定は `/etc/astrometry.cfg.bak-zahyou` から戻せる)。
-WSL 自体はほかの用事にも使うので、消す前に確かめること。
+やめるときに消すのは 3 か所 ― `zahyou.exe` /
+`%LOCALAPPDATA%\zahyou` (設定と記憶) / `C:\AstrometryData` (星図データ)。
+
+v6 の [準備] タブが WSL へ入れた astrometry.net は、この版では使わない。
+消すなら `sudo apt remove --purge astrometry.net` (設定は
+`/etc/astrometry.cfg.bak-zahyou` から戻せる)。WSL 自体はほかの用事にも使うので、
+`wsl --unregister` する前に、ほかに使っていないことを確かめること。
+
+## オフライン解析のつなぎ方
+
+- 解くのは同じプロセスの中 (`solve_offline` → `sv_solve`)。別のプログラムは起動しない。
+- 星図データの置き場所は [準備] タブの欄 (`gui.json` の `indexdir`) を**エンジンへ直接渡す**
+  (`_params` の `INDEX_DIR`)。v6 は WSL の `/etc/astrometry.cfg` を経由していた。
+- 中止は `threading.Event` を立てて渡す (`CANCEL_EVENT`)。エンジンは quad の束を 1 つ処理するごと・
+  検証 1 回ごとにこれと締め切りを確かめる。v6 は WSL の `solve-field` を `pkill` していて、ほとんど効かなかった。
+- 解析の方法の選択肢は「オフラインのみ」。`gui.json` に残っている v6 の「オフライン (WSL) のみ」はそのまま読み替える。
 
 ## 建て方
 
@@ -175,13 +194,17 @@ zahyou.exe --selftest "画像パス" --out selftest.txt            # 解析ま�
 ## テスト
 
 ```powershell
-python test_gui.py                    # 画面と解析 1 回      15
-python test_buttons.py                # ボタンの手応え        14
-python test_result_tab.py             # 図の表示の記憶         6
-python test_recommend.py              # おすすめの段の選び方   20
+python test_gui.py                    # 画面と解析 1 回
+python test_buttons.py                # ボタンの手応え
+python test_result_tab.py             # 図の表示の記憶
+python test_recommend.py              # おすすめの段の選び方
 dist\onefile\zahyou.exe --selftest "画像パス" --out selftest.txt            # 固めたあと
 dist\onefile\zahyou.exe --selftest "画像パス" --out selftest.txt --online   # 経路を指定
 ```
+
+どれも WSL を使わない。オフラインで解く試験 (`test_gui.py`・`test_result_tab.py`) は
+星図データ (既定 `C:\AstrometryData`) を読む。解き方そのものの試験は `dev/` 側にある
+(`test_solver_*.py`。[dev/README.md](../dev/README.md))。
 
 `test_recommend.py` は段の選び方そのものも見ています。段の「隣」を
 **番号順ではなく画角の順**で数えているか、が要点 —— 4100 系 (22′〜2000′) と
@@ -191,27 +214,13 @@ dist\onefile\zahyou.exe --selftest "画像パス" --out selftest.txt --online   
 
 どちらも同じ `zahyou_gui.selftest()` を呼びます (exe には test_gui.py が
 入らないので、本体側に置いてあります)。`--online` / `--offline` で解析の経路を
-指定できます。固めた exe での実測 14/14:
+指定できます。確かめる項目は、画面が組み立てられる / エンジンを読み込める /
+環境 (星図データ) を調べられる / 解析が終わる / 距離・赤経方向・赤緯方向が出る /
+図が 2 枚貼られる / 画像中心などが出る / ログが流れている / 目標なしでも解ける /
+向きが数字で出る / ボタンが見切れていない / 配色を切り替えられる。
 
-```
-  PASS  画面が組み立てられる
-  PASS  エンジンを読み込める
-  PASS  環境を調べられる     Ubuntu 26.04 LTS
-  PASS  解析が終わる       9.2 秒 / オフライン (WSL) のみ
-  PASS  距離が出る        1.583′
-  PASS  赤経方向が出る      0.918′ 東
-  PASS  赤緯方向が出る      1.290′ 北
-  PASS  図が 2 枚貼られる   2 枚
-  PASS  画像中心などが出る    画素スケール 1.4616″/px  視野 23.58′ × 13.35′
-  PASS  ログが流れている
-  PASS  目標なしでも解ける    画像中心 (赤経) = 4h07m33.9s
-  PASS  向きが数字で出る     画像中心 (赤緯) = +41d57m53s / 画素スケール = 1.462″/px
-  PASS  ボタンが見切れていない
-  PASS  配色を切り替えられる   最後は dark
-```
-
-オンライン経路 (`--online`) でも 13.6 秒で同じ答えでした。
-ノートブック版とも一致します。
+v6 の固めた exe では全部通り、オンライン経路とも、ノートブック版とも同じ答えでした。
+試作版の結果と所要時間は、自前のエンジンで測り直します。
 
 「ボタンが見切れていない」は、入れ物が狭くて Tk がラベルを削っていないかを
 `winfo_width()` と `winfo_reqwidth()` の差で見ています
@@ -239,3 +248,9 @@ dist\onefile\zahyou.exe --selftest "画像パス" --out selftest.txt --online   
   (画角 2′〜22′、1 段あたり 48 ファイル。段によっては 20 GB を超える)
 
 途中で中止しても、次に押せば続きから落とし直します (Range ヘッダで再開)。
+落とすあいだは `.part` に書き、終わってから名前を変えて、ヘッダーを検査します
+(大きさがヘッダーから計算した長さと合うか、`INDEXID` とファイル名、`HEALPIX` とタイル番号。
+`sv_validate_index_file()`)。「状態を確認」も置き場所の `index-*.fits` を全部この検査にかけます。
+
+星図データの形式は [docs/index-format.md](../docs/index-format.md)、
+元になった星表 (Tycho-2 / Gaia DR2) の条件は [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md) にあります。

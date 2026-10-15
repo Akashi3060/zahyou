@@ -4,11 +4,12 @@ zahyou — 天体画像から目標への向きを求める (デスクトップ�
 1 つのウィンドウで完結する。タブは 3 つだけ:
 
     [解析]   画像を選ぶ → 目標を打ち込む → 実行 → 結果と図
-    [準備]   WSL / astrometry.net / 星図データ をボタンひとつで用意する
+    [準備]   星図データ (index ファイル) をボタンひとつで用意する
     [使い方] 短い手引き
 
 解析そのものは zahyou_engine.py (ノートブック版と同じもの) をそのまま読み込んで
 使う。ここには解析のロジックを書かない ―― 二重管理になると必ずずれるため。
+v7 からオフライン解析もエンジンの中 (自前の解析エンジン) で行い、WSL は使わない。
 """
 from __future__ import annotations
 
@@ -41,7 +42,9 @@ import zahyou_env as env                 # noqa: E402
 import zahyou_update as upd              # noqa: E402
 
 APP_NAME = "zahyou"
-APP_VER = "v6"
+# 試作版は "-dev" で終える。更新の確認をしない (しないと v6 の exe へ
+# 「更新」されてしまう。zahyou_update.check を参照)
+APP_VER = "v7-dev"
 ENGINE_FILE = "zahyou_engine.py"
 
 # ============================================================== 配色 ===
@@ -74,9 +77,12 @@ THEMES = {
 SOLVE_CHOICES = {
     "自動 (インターネットがあれば使う)": "AUTO",
     "オンラインのみ": "ONLINE",
-    "オフライン (WSL) のみ": "OFFLINE",
+    "オフラインのみ": "OFFLINE",
 }
 SOLVE_DEFAULT = "自動 (インターネットがあれば使う)"
+# gui.json には表示の文言のまま保存しているので、文言を変えたら旧い文言を読み替える
+# (読み替えないと、v6 で「オフライン」を選んでいた人が黙って「自動」に戻る)
+SOLVE_RENAMED = {"オフライン (WSL) のみ": "オフラインのみ"}
 
 
 # ============================================================== 小道具 ===
@@ -275,8 +281,9 @@ class Engine:
         orig_ps = ns["print_solution"]
         orig_ro = ns["report_offsets"]
 
-        def print_solution(wcs, shape):
-            s = orig_ps(wcs, shape)
+        def print_solution(wcs, shape, *args, **kwargs):
+            # flip_y (画面の見た目で位置角を出す) などの引数はそのまま渡す
+            s = orig_ps(wcs, shape, *args, **kwargs)
             got["summary"], got["shape"] = s, shape
             return s
 
@@ -327,7 +334,8 @@ class App(tk.Tk):
         self.engine = Engine()
         self.engine_ready = False
         self.busy = False
-        self.cancel_flag = False
+        # 中止の合図。エンジン (CANCEL_EVENT) とダウンロード (stop) が同じものを見る
+        self.cancel_event = threading.Event()
         self._final_msg = ""       # 処理が終わったときに状態バーへ残す一言
         self.jobs = queue.Queue()          # ワーカー → 画面 の受け渡し
         self.canvases = []
@@ -355,6 +363,18 @@ class App(tk.Tk):
         self.after(700, lambda: setattr(self, "_auto_tab", False))
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._bg(self._load_engine, label="エンジンを読み込んでいます...")
+
+    @property
+    def cancel_flag(self):
+        """中止が押されたか。中身は cancel_event (エンジンにはこちらを渡す)。"""
+        return self.cancel_event.is_set()
+
+    @cancel_flag.setter
+    def cancel_flag(self, value):
+        if value:
+            self.cancel_event.set()
+        else:
+            self.cancel_event.clear()
 
     # ---------------------------------------------------------- 見た目 ---
     def _apply_theme(self, name=None, redraw=True):
@@ -503,7 +523,7 @@ class App(tk.Tk):
         self._bg(self._check_update_worker, "更新を確認しています...")
 
     def _check_update_worker(self):
-        st = upd.check(stop=lambda: self.cancel_flag)
+        st = upd.check(stop=lambda: self.cancel_flag, version=APP_VER)
         self._update_state = st
         self._final_msg = st["message"]
         self._post(lambda: self._show_update(st))
@@ -562,7 +582,7 @@ class App(tk.Tk):
         if not self.update_auto:
             return
         try:
-            st = upd.check(timeout=15)
+            st = upd.check(timeout=15, version=APP_VER)
         except Exception:
             return
         self._update_state = st
@@ -821,7 +841,7 @@ class App(tk.Tk):
         ttk.Label(left, text="オフライン解析に必要なもの", style="Head.TLabel"
                   ).pack(anchor="w")
         self.tv = ttk.Treeview(left, columns=("state",), show="tree headings",
-                               height=5, selectmode="none")
+                               height=3, selectmode="none")
         self.tv.heading("#0", text="項目")
         self.tv.heading("state", text="状態")
         self.tv.column("#0", width=170, anchor="w")
@@ -829,8 +849,7 @@ class App(tk.Tk):
         self.tv.pack(fill="x", pady=6)
         self.tv.tag_configure("ok", foreground=self.th["ok"])
         self.tv.tag_configure("ng", foreground=self.th["ng"])
-        for key, name in [("wsl", "WSL"), ("solver", "astrometry.net"),
-                          ("index", "星図データ"), ("cfg", "設定ファイル"),
+        for key, name in [("index", "星図データ"), ("check", "検査"),
                           ("ready", "総合")]:
             self.tv.insert("", "end", iid=key, text=name, values=("未確認",))
 
@@ -844,22 +863,9 @@ class App(tk.Tk):
         self.btn_env_stop = ttk.Button(row, text="中止", command=self._cancel,
                                        state="disabled")
         self.btn_env_stop.pack(side="left")
-
-        row2 = ttk.Frame(left)
-        row2.pack(fill="x")
-        ttk.Label(row2, text="個別に:", style="Muted.TLabel").pack(side="left")
-        ttk.Button(row2, text="WSL", width=7,
-                   command=lambda: self._step(env.install_wsl, "WSL を入れる")
-                   ).pack(side="left", padx=2)
-        ttk.Button(row2, text="astrometry.net", width=15,
-                   command=lambda: self._step(env.install_astrometry,
-                                              "astrometry.net を入れる")
-                   ).pack(side="left", padx=2)
-        ttk.Button(row2, text="設定ファイル", width=13,
-                   command=lambda: self._step(
-                       lambda log: env.write_cfg(self.index_dir, log),
-                       "設定ファイルを書く")
-                   ).pack(side="left", padx=2)
+        ttk.Label(left, text="解析は zahyou の中で行うので、要るのは星図データだけです"
+                             " (WSL は要りません)。",
+                  style="Muted.TLabel", wraplength=410).pack(anchor="w")
 
         # --- 星図データ -------------------------------------------------
         g = ttk.LabelFrame(left, text=" 星図データ ", padding=8)
@@ -1006,12 +1012,11 @@ class App(tk.Tk):
         add("水色の × が画像の中心、黄色の ○ が目標、赤い矢印が動かす向きです。")
         add("")
         add("ネットが無いところで使う", "h")
-        add("[準備] タブで「まとめて準備する」を押すと、次を順に用意します。")
-        add("  ・WSL (Windows の中で動く Linux)")
-        add("  ・astrometry.net (解析エンジン本体)")
-        add("  ・星図データ (画角ごとに分かれた index ファイル)")
-        add("  ・/etc/astrometry.cfg (星図データの場所を教える設定)")
-        add("WSL を入れた直後だけ Windows の再起動が要ります。", "b")
+        add("オフラインで解くのに要るのは、星図データ (画角ごとに分かれた index ファイル) だけです。")
+        add("星の並びから向きを割り出す計算は zahyou の中で行うので、")
+        add("WSL や astrometry.net を入れる必要はありません。", "b")
+        add("[準備] タブで「まとめて準備する」を押すと、足りない星図データを落として、")
+        add("1 本ずつ中身 (途中で切れていないか) を確かめます。")
         add("星図データは、望遠鏡の画角に合った段だけあれば足ります。")
         add("  ・機材の数値が分からない  → 「おすすめをまとめて落とす」")
         add("      画角 4' 以上をぜんぶ (約 9.5 GB)。たいていはこれで足ります。")
@@ -1030,6 +1035,7 @@ class App(tk.Tk):
         add("・オフラインで解けないときは、[準備] タブの「解ける画角」を見て、")
         add("  その画角の段が入っているか確かめてください。")
         add("・焦点距離を入れると、探す範囲が狭まって速く確実になります。")
+        add("・解析が長引いたら「中止」を押してください。数秒で止まります。")
         add("設定と記憶の置き場所", "h")
         add("設定 (目標・焦点距離・配色) と、覚えた座標・画素スケールは")
         add("この PC の次の場所にあります。")
@@ -1042,18 +1048,22 @@ class App(tk.Tk):
         add("")
         add("新しい版に入れ替える / やめる", "h")
         add("新しい zahyou.exe を、古いものに上書きするだけです。")
-        add("設定も覚えた座標も引き継がれ、WSL と星図データはそのままで構いません。")
+        add("設定も覚えた座標も引き継がれ、星図データはそのままで構いません。")
+        add("v6 までに WSL へ入れた astrometry.net は、もう使いません。")
+        add("要らなければマニュアル 9 章の手順で消せます。")
         add("やめるときは、zahyou.exe と上の置き場所を消してください。")
-        add("星図データ (C:\\AstrometryData) と WSL の中の astrometry.net は、")
-        add("使わないならマニュアル 9 章の手順で消せます。")
+        add("星図データ (C:\\AstrometryData) は、使わないならフォルダーごと消せます。")
         add("")
         add("ライセンス", "h")
         add("zahyou 自身は MIT ライセンスです。自由に使って、書き換えて、")
         add("配ってかまいません。著作権表示だけ残してください。")
-        add("この exe には第三者のライブラリが入っていますが、GPL・LGPL は", "m")
-        add("含みません。astrometry.net (GPL) と星図データは同梱しておらず、", "m")
-        add("[準備] タブが WSL へ入れて、別のプロセスとして呼んでいます。", "m")
-        add("一覧は配布ページの THIRD-PARTY-NOTICES.md にあります。", "m")
+        add("星の並びから向きを割り出す解き方は、Lang et al. (2010, AJ 139, 1782) の", "m")
+        add("論文をもとに zahyou 用に自前で書き直したものです。", "m")
+        add("astrometry.net のプログラム (コード) は含んでいません。", "m")
+        add("星図データ (index ファイル) は Tycho-2 と Gaia DR2 から作られたもので、", "m")
+        add("この exe には同梱していません ([準備] タブが配布元から落とします)。", "m")
+        add("この exe には第三者のライブラリが入っていますが、GPL・LGPL は含みません。", "m")
+        add("詳しくは配布ページの THIRD-PARTY-NOTICES.md にあります。", "m")
         add("")
         add(f"{APP_NAME} {APP_VER}   ノートブック版と同じ解析エンジンを使っています。", "m")
         t.insert("end", "https://github.com/Akashi3060/zahyou\n", "link")
@@ -1138,22 +1148,17 @@ class App(tk.Tk):
         self.v_status.set(self._final_msg)
 
     def _cancel(self):
+        """
+        中止の合図を立てる。
+
+        解析はエンジンが合図 (CANCEL_EVENT) を段の間と探索の中で見て、数秒以内に
+        止まる。ダウンロードも 1 MiB ごとに見る。v6 は WSL の solve-field を
+        pkill し続けるしかなく、ほとんど効いていなかった。
+        """
         self.cancel_flag = True
         self.v_status.set("中止しています...")
         log = getattr(self, "_log_target", None) or self.log_run
-        log("\n■ 中止します (動いている solve-field も止めます)...")
-        # WSL 側で走っている solve-field を止める (これをしないと粘り続ける)
-        threading.Thread(target=self._kill_solver, daemon=True).start()
-
-    def _kill_solver(self):
-        for _ in range(30):
-            if not self.busy:
-                return
-            try:
-                env.wsl("pkill -f solve-field; pkill -f backend", timeout=30)
-            except Exception:
-                pass
-            time.sleep(2)
+        log("\n■ 中止します (数秒で止まります)...")
 
     # --- ログ -----------------------------------------------------------
     def _append(self, widget, text):
@@ -1184,23 +1189,46 @@ class App(tk.Tk):
     def _survey_quiet(self):
         """起動したついでの確認。[準備] タブが空のままにならないよう 1 行残す。"""
         try:
-            st = env.survey(self.index_dir)
+            st = env.survey(self.index_dir, self._index_validator())
         except Exception:
-            self.log_env("環境の確認に失敗しました:\n" + traceback.format_exc())
+            self.log_env("星図データの確認に失敗しました:\n" + traceback.format_exc())
             return
         self.env_state = st
         idx = st["index"]
         if st["ready"]:
             self.log_env(f"✅ オフライン解析できます "
-                         f"({st['distro']} / 星図データ {idx['files']} ファイル"
+                         f"(星図データ {idx['files']} ファイル"
                          + (f" / 画角 {idx['fov'][0]:g}′〜{idx['fov'][1]:g}′"
                             if idx["fov"] else "") + ")")
+            for m in st["notes"]:
+                self.log_env("  ⚠️ " + m)
         else:
             self.log_env("❌ オフライン解析はまだ使えません。")
             for m in st["notes"]:
                 self.log_env("  ⚠️ " + m)
-            self.log_env("「まとめて準備する」を押すと用意します。")
+            self.log_env("「まとめて準備する」を押すと星図データを落とします。")
         self._post(lambda: self._show_env(st))
+
+    def _index_validator(self):
+        """エンジンの索引の検査 (読み込めていれば)。[準備] タブの判定を解析とそろえるため。"""
+        ns = self.engine.ns or {}
+        fn = ns.get("sv_validate_index_file")
+        return fn if callable(fn) else None
+
+    def _release_indexes(self):
+        """
+        エンジンが開いている索引ファイルを手放させる。
+
+        Windows では mmap 中のファイルを消したり置き換えたりできないので、
+        星図データを落とし直す前に呼ぶ。
+        """
+        ns = self.engine.ns or {}
+        fn = ns.get("release_index_catalog")
+        if callable(fn):
+            try:
+                fn()
+            except Exception:
+                pass
 
     # ============================================================ 解析 ===
     def _choose_image(self):
@@ -1252,6 +1280,10 @@ class App(tk.Tk):
             "SHOW_DETECTED_SOURCES": bool(self.v_marks.get()),
             "IMAGE_PATH": self.image_path.get().strip() or None,
             "API_KEY": os.environ.get("ASTROMETRY_API_KEY", "axvhxwfkvnzreobn"),
+            # 星図データの置き場所はエンジンへ直接渡す (v6 は WSL の設定ファイル経由)
+            "INDEX_DIR": self.v_indexdir.get().strip() or env.DEFAULT_INDEX_DIR,
+            # 「中止」の合図。エンジンが段の間と探索の中で見る
+            "CANCEL_EVENT": self.cancel_event,
         }
 
     def _start_analysis(self):
@@ -1450,7 +1482,7 @@ class App(tk.Tk):
             self.log_env("  「状態を確認」を押すと、この場所で調べ直します。")
 
     def _survey(self):
-        self._bg(self._survey_worker, "環境を調べています...", log=self.log_env)
+        self._bg(self._survey_worker, "星図データを調べています...", log=self.log_env)
 
     def _survey_worker(self):
         """
@@ -1460,25 +1492,10 @@ class App(tk.Tk):
         結果は表にしか出さなかった。押しても何も起きていないように見える。
         """
         self.log_env("=" * 56)
-        self.log_env("状態を確認しています...")
-        st = env.survey(self.index_dir)
+        self.log_env("状態を確認しています (星図データを 1 本ずつ検査します)...")
+        st = env.survey(self.index_dir, self._index_validator())
         self.env_state = st
-        idx = st["index"]
-        self.log_env(f"  WSL            : {st['distro'] or '使えません'}")
-        self.log_env(f"  astrometry.net : {st['solver'] or '入っていません'}")
-        self.log_env(f"  星図データ      : "
-                     + (f"{idx['files']} ファイル / {env.human(idx['bytes'])}"
-                        f"  ({idx['dir']})" if idx["ok"]
-                        else f"ありません  ({idx['dir']})"))
-        self.log_env(f"  設定ファイル    : "
-                     + (", ".join(st["cfg_paths"]) or "書かれていません"))
-        if st["visible"]:
-            self.log_env(f"  WSL から見えている: {st['visible']} ファイル")
-        if idx["fov"]:
-            self.log_env(f"  解ける画角      : "
-                         f"{idx['fov'][0]:g}′ 〜 {idx['fov'][1]:g}′")
-        for m in st["notes"]:
-            self.log_env("  ⚠️ " + m)
+        env.report(st, self.log_env)
         if st["ready"]:
             self.log_env("✅ オフライン解析できます。")
             self._final_msg = "オフライン解析できます。"
@@ -1489,14 +1506,26 @@ class App(tk.Tk):
 
     def _show_env(self, st):
         idx = st["index"]
+        chk = st.get("check") or {}
         fov = idx.get("fov")
+        partial = idx.get("partial") or {}
+        if not idx["ok"]:
+            index_row = (False, f"{idx['dir']} にありません")
+        else:
+            text = f"{idx['files']} ファイル / {env.human(idx['bytes'])}"
+            if partial:
+                text += "  (途中の段 " + ", ".join(str(s) for s in partial) + ")"
+            index_row = (not partial, text)
+        bad = chk.get("bad") or []
+        if not chk.get("checked"):
+            check_row = (False, "調べるものがありません")
+        elif bad:
+            check_row = (False, f"{len(bad)} / {chk['checked']} ファイルに問題")
+        else:
+            check_row = (True, f"{chk['checked']} ファイルとも正常")
         rows = {
-            "wsl": (st["wsl"], st["distro"] or ("使えます" if st["wsl"] else "入っていません")),
-            "solver": (bool(st["solver"]), st["solver"] or "入っていません"),
-            "index": (idx["ok"], (f"{idx['files']} ファイル / {env.human(idx['bytes'])}"
-                                  if idx["ok"] else f"{idx['dir']} にありません")),
-            "cfg": (bool(st["cfg_paths"]),
-                    ", ".join(st["cfg_paths"]) or "書かれていません"),
+            "index": index_row,
+            "check": check_row,
             "ready": (st["ready"], "オフライン解析できます" if st["ready"]
                       else "まだ足りません"),
         }
@@ -1510,30 +1539,6 @@ class App(tk.Tk):
         for s, var in self.scale_vars.items():          # 既にある段は外しておく
             if s in idx["scales"]:
                 var.set(False)
-
-    def _step(self, fn, title):
-        """
-        個別ボタン。見出しと結論で挟んで fn(log) を呼ぶ。
-
-        中身によっては 1 行しか出ないことがあり
-        (「既に入っています」など)、押せたのかどうか分からなかった。
-        """
-        def work():
-            self.log_env("=" * 56)
-            self.log_env(f"{title}")
-            fn(self.log_env)
-            st = env.survey(self.index_dir)
-            self.env_state = st
-            if st["ready"]:
-                self.log_env("✅ オフライン解析できます。")
-                self._final_msg = "オフライン解析できます。"
-            else:
-                self.log_env("残っているもの:")
-                for m in st["notes"] or ["(なし)"]:
-                    self.log_env("  ⚠️ " + m)
-                self._final_msg = "まだ準備が要ります。"
-            self._post(lambda: self._show_env(st))
-        self._bg(work, f"{title} を実行しています...", log=self.log_env)
 
     def _recommend(self):
         try:
@@ -1636,21 +1641,19 @@ class App(tk.Tk):
                  "星図データを落としています...", log=self.log_env)
 
     def _download_worker(self, scales):
+        self._release_indexes()
         ok = env.fetch_index(scales, self.index_dir, self.log_env,
                              progress=self._progress,
                              stop=lambda: self.cancel_flag)
-        if not ok and self.cancel_flag:
-            self.log_env("中止したので、設定ファイルは書き換えません。")
-            self._final_msg = "中止しました。"
-            st = env.survey(self.index_dir)
-            self.env_state = st
-            self._post(lambda: self._show_env(st))
-            return
-        env.write_cfg(self.index_dir, self.log_env)
-        st = env.survey(self.index_dir)
+        st = env.survey(self.index_dir, self._index_validator())
         self.env_state = st
-        self._final_msg = ("星図データを入れました。" if st["ready"]
-                           else "落とし終えましたが、まだ足りません。")
+        if not ok and self.cancel_flag:
+            self._final_msg = "中止しました。"
+        elif not ok:
+            self._final_msg = "落とせなかったファイルがあります。ログを見てください。"
+        else:
+            self._final_msg = ("星図データを入れました。" if st["ready"]
+                               else "落とし終えましたが、まだ足りません。")
         self._post(lambda: self._show_env(st))
 
     def _progress(self, done, total):
@@ -1664,24 +1667,47 @@ class App(tk.Tk):
         self._post(set_it)
 
     def _prepare_all(self):
+        """
+        「まとめて準備する」= 足りない星図データを落として、中身を検査する。
+
+        段に印を付けてあればその段を、無ければおすすめの段 (画角 4′ 以上) を
+        そろえる。そろっていれば検査だけ。落とす段があるときは容量を見せて聞く。
+        """
         scales = [s for s, v in self.scale_vars.items() if v.get()]
         if not scales:
-            if not messagebox.askokcancel(
-                    APP_NAME,
-                    "星図データの段が選ばれていません。\n"
-                    "WSL と astrometry.net の準備だけ進めますか?\n\n"
-                    "(段は下のチェックか「必要な段を選ぶ」で指定できます)"):
-                return
+            want = env.recommended_scales()
+            if self.env_state is not None:
+                have = list(self.env_state.get("index", {}).get("scales", []))
+            else:
+                have = env.index_state(self.v_indexdir.get())["scales"]
+            need = [s for s in want if s not in have]
+            if need:
+                mb = env.scales_mb(need)
+                if not messagebox.askokcancel(
+                        APP_NAME,
+                        "段が選ばれていないので、おすすめ (画角 "
+                        f"{env.RECOMMENDED_MIN_FOV:g}′ 以上) をそろえます。\n"
+                        f"足りない {len(need)} 段 / 約 {mb/1024:.1f} GB を\n"
+                        f"{self.v_indexdir.get()} へ落とします。よろしいですか?\n\n"
+                        "(段は下のチェックか「必要な段を選ぶ」で指定できます。\n"
+                        "途中で中止しても、次に押せば続きから再開します)"):
+                    self.v_status.set("やめました。")
+                    return
         self._bg(lambda: self._prepare_worker(scales), "準備しています...",
                  log=self.log_env)
 
     def _prepare_worker(self, scales):
+        self._release_indexes()
         st = env.prepare_all(self.index_dir, scales, self.log_env,
                              progress=self._progress,
-                             stop=lambda: self.cancel_flag)
+                             stop=lambda: self.cancel_flag,
+                             validate=self._index_validator())
         self.env_state = st
-        self._final_msg = ("準備できました。オフライン解析できます。"
-                           if st["ready"] else "まだ足りません。ログを見てください。")
+        if self.cancel_flag:
+            self._final_msg = "中止しました。"
+        else:
+            self._final_msg = ("準備できました。オフライン解析できます。"
+                               if st["ready"] else "まだ足りません。ログを見てください。")
         self._post(lambda: self._show_env(st))
 
     # ============================================================ 設定保存 ===
@@ -1727,6 +1753,8 @@ class App(tk.Tk):
         if d.get("result_tab") in ("orig", "northup", "log"):
             self.result_tab = d["result_tab"]
         # 古い設定には昔の文言が入っていることがある (選択肢を書き換えたため)
+        if self.v_solve.get() in SOLVE_RENAMED:
+            self.v_solve.set(SOLVE_RENAMED[self.v_solve.get()])
         if self.v_solve.get() not in SOLVE_CHOICES:
             self.v_solve.set(SOLVE_DEFAULT)
         self._sync_mode()
@@ -1780,9 +1808,15 @@ def selftest(image, target="UCAC4 660-021020", offline_first=True, log_out=None,
         app.destroy()
         return out
 
-    pump(app, 120, lambda: app.env_state is not None)
+    # engine_ready はワーカーの中で立ち、busy が下りるのは画面側の次の巡回。
+    # busy のうちに解析を始めると「いま別の処理が動いています」のダイアログで
+    # 止まる (星図データの確認が速く終わると起きる)。両方を待つ
+    pump(app, 120, lambda: app.env_state is not None and not app.busy)
     st = app.env_state or {}
-    check("環境を調べられる", bool(st), st.get("distro", ""))
+    idx = st.get("index") or {}
+    check("星図データを調べられる", bool(st),
+          f"{idx.get('files', 0)} ファイル / "
+          + ("オフライン解析できます" if st.get("ready") else "まだ足りません"))
     offline = bool(st.get("ready")) and offline_first
 
     app.image_path.set(image)
@@ -1791,7 +1825,7 @@ def selftest(image, target="UCAC4 660-021020", offline_first=True, log_out=None,
     if force:                                   # --online / --offline で強制
         app.v_solve.set(next(k for k, v in SOLVE_CHOICES.items() if v == force))
     else:
-        app.v_solve.set("オフライン (WSL) のみ" if offline else SOLVE_DEFAULT)
+        app.v_solve.set("オフラインのみ" if offline else SOLVE_DEFAULT)
     app._sync_mode()
     app.update()
 
@@ -1938,13 +1972,13 @@ def _update_cli(argv):
         out.append(str(m))
         print(m, flush=True)
 
-    st = upd.check()
+    st = upd.check(version=APP_VER)
     log(f"state   : {st['state']}")
     log(f"message : {st['message']}")
     for k in ("tag", "updated", "size", "sha256", "here_sha256"):
         if k in st:
             log(f"{k:8s}: {st[k]}")
-    code = 0 if st["state"] in ("up_to_date", "available") else 1
+    code = 0 if st["state"] in ("up_to_date", "available", "dev") else 1
     if "--update-apply" in argv and st["state"] == "available":
         new = upd.download(st, log)
         if not new:

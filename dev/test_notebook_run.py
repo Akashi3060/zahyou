@@ -41,7 +41,7 @@ def main():
 
     nb = nbformat.read(NB, as_version=4)
     # セル C は解析が走って重いので、ここでは A と B だけ動かす
-    #（解析そのものは test_wsl_e2e.py / test_robust.py で確認している）
+    #（解析そのものは test_solver_real.py / test_robust.py で確認している）
     nb.cells = [c for c in nb.cells if c.get("id") != "zahyou-c-run"]
 
     NotebookClient(nb, timeout=300, kernel_name="python3",

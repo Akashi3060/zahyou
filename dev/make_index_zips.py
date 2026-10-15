@@ -42,12 +42,13 @@ C:\\ 直下に展開してください。次のようになれば正しい配置
     ...
     C:\\AstrometryData\\index-{scale}-47.fits
 
-WSL 側の /etc/astrometry.cfg に
+zahyou v7 から(試作版 v7-dev を含む)は、置くだけで読みます。WSL も設定ファイルも要りません。
+
+v6 (WSL を使う版) で使う場合は、WSL 側の /etc/astrometry.cfg に
     add_path /mnt/c/AstrometryData
     autoindex
 が書かれていれば、追加のファイルは自動で認識されます。
-
-なお /mnt/c からの読み出しは遅いので、WSL の中へ移すと数倍速くなります。
+なお v6 では /mnt/c からの読み出しが遅いので、WSL の中へ移すと数倍速くなります。
     cp -r /mnt/c/AstrometryData ~/AstrometryData
     sudo sed -i "s#/mnt/c/AstrometryData#$HOME/AstrometryData#" /etc/astrometry.cfg
 

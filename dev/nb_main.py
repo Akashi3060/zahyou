@@ -56,6 +56,21 @@ def _existing_wcs_header(header, shape):
         return None
 
 
+def _cancel_requested(say=True):
+    """
+    GUI の「中止」が押されたか。合図は CANCEL_EVENT (threading.Event) で届く。
+
+    ノートブックにはこの設定が無い (None) ので、いつも False。
+    解析の段の間で確かめ、オフライン解析の中には同じ Event をそのまま渡す。
+    """
+    ev = globals().get("CANCEL_EVENT")
+    if ev is not None and ev.is_set():
+        if say:
+            _log("\n■ 中止しました。")
+        return True
+    return False
+
+
 def _sanity_ok(wcs, shape):
     """解いた結果がまともかどうか、描画の前に確かめる。"""
     try:
@@ -71,13 +86,15 @@ def run():
     t0 = time.time()
     img_path, img_name = _pick_image_path()
     _log("=" * 62)
-    _log(f"  zahyou v6   {img_name}")
+    _log(f"  zahyou v7-dev   {img_name}")
     _log("=" * 62)
 
     # ---------------------------------------------------------------- 画像 ---
     bundle = load_image_any(img_path)
     ny, nx = bundle.shape
     _log(f"読み込み : {nx} x {ny} 画素   [{bundle.note}]")
+    if _cancel_requested():
+        return None
 
     # ------------------------------------------------------------ 星の検出 ---
     # オンラインでもオフラインでも同じ星のリストを使う。
@@ -87,7 +104,9 @@ def run():
     sub, mask, sigma, info = preprocess(bundle.data)
     for line in info:
         _log(f"  - {line}")
-    sources, thr = detect_sources(sub, mask, sigma)
+    # 自前のソルバーは星が多いほど quad を選べるので、60 個見つかるまで粘る
+    # (v6 は solve-field に渡すので 12 個で止めていた)
+    sources, thr = detect_sources(sub, mask, sigma, min_sources=60)
     if sources:
         fwhm = float(np.median([s["fwhm"] for s in sources]))
         _log(f"  - 星を {len(sources)} 個検出 "
@@ -96,6 +115,8 @@ def run():
             _log("  ⚠️ 星が少なすぎます。露出を伸ばすか複数フレームを重ねてください。")
     else:
         _log("  ⚠️ 星を検出できませんでした。露出・ピント・雲を確認してください。")
+    if _cancel_requested():
+        return None
 
     # ------------------------------------------------------------- つながり ---
     if SOLVE_MODE == 'ONLINE':
@@ -144,23 +165,32 @@ def run():
             elif SOLVE_MODE == 'ONLINE':
                 _log("SOLVE_MODE='ONLINE' なのでここで終了します。")
             else:
-                _log("   → ローカル (WSL) の解析に切り替えます。")
+                _log("   → オフラインの解析に切り替えます。")
+            if wcs_header is None and _cancel_requested():
+                return None
 
         if wcs_header is None and SOLVE_MODE != 'ONLINE':
-            _log("\n[オフライン] WSL の astrometry.net を確認しています...")
-            diag = solver_diagnostics()
+            if _cancel_requested():
+                return None
+            index_dir = globals().get("INDEX_DIR") or DEFAULT_INDEX_DIR
+            _log("\n[オフライン] 星図データを確認しています...")
+            diag = solver_diagnostics(index_dir)
             for m in diag["messages"]:
                 _log(f"⚠️ {m}")
             if diag["ok"]:
-                _log(f"  - solve-field OK / index ファイル {len(diag['indexes'])} 個")
+                _log(f"  - 星図データ {len(diag['indexes'])} ファイル ({index_dir})")
                 wcs_header = solve_offline(
                     bundle, sources, work_dir, timeout=OFFLINE_TIMEOUT,
                     focal_length_mm=FOCAL_LENGTH_MM, hint_radec=hint,
-                    hint_radius_deg=SEARCH_RADIUS_DEG, diagnostics=diag)
+                    hint_radius_deg=SEARCH_RADIUS_DEG, diagnostics=diag,
+                    index_dir=index_dir, prep=(sub, mask, sigma),
+                    cancel=globals().get("CANCEL_EVENT"))
                 if wcs_header is not None:
-                    how = "オフライン (WSL の astrometry.net)"
+                    how = "オフライン (zahyou 内蔵の解析エンジン)"
 
         if wcs_header is None:
+            if _cancel_requested(say=False):    # 中止はオフライン解析が知らせ済み
+                return None
             _log("\n❌ 座標を特定できませんでした。")
             return None
 
@@ -170,7 +200,8 @@ def run():
             _log("❌ 解析結果がおかしいので採用しません。")
             return None
 
-        summary = print_solution(wcs, bundle.shape)
+        # 位置角とパリティは、図 1 と同じ「画面の見た目」で出す (上下反転を考える)
+        summary = print_solution(wcs, bundle.shape, flip_y=bundle.flip_y)
         _log(f"  解いた方法    : {how}")
         _log(f"  所要時間      : {time.time() - t0:.1f} 秒")
 
@@ -184,6 +215,8 @@ def run():
         remember_scale(bundle.header, bundle.shape, summary["scale"])
 
         # ------------------------------------------------------------ 描画 ---
+        if _cancel_requested():
+            return None
         shown = sources if SHOW_DETECTED_SOURCES else None
 
         if target is None:
@@ -211,6 +244,8 @@ def run():
             _log("\n  目標は画面の外です。矢印の向きへ動かしてください。")
 
         plot_original(wcs, bundle.display, target, bundle.flip_y, sources=shown)
+        if _cancel_requested():                 # 北が上の図の描き直しは重い
+            return None
         plot_north_up(wcs, bundle.display, target)
         return wcs
 

@@ -1,7 +1,7 @@
 """
 GitHub の Releases に新しい zahyou.exe があるか調べて、入れ替える。
 
-    st = check()                      # 調べるだけ
+    st = check(version=APP_VER)       # 調べるだけ (試作版 "-dev" は調べない)
     download(st, dest, log, ...)      # 落として、中身を確かめる
     apply_update(dest, log)           # 入れ替えて再起動 (呼んだ側はアプリを閉じる)
 
@@ -101,13 +101,19 @@ def latest(timeout=20):
     }
 
 
-def check(timeout=20, stop=None):
+def check(timeout=20, stop=None, version=None):
     """
     更新があるか調べる。戻り値は画面にそのまま出せる形。
 
-      state   : "available" / "up_to_date" / "source" / "error"
+      state   : "available" / "up_to_date" / "source" / "dev" / "error"
       message : 1 行の説明
+
+    version (画面の APP_VER) が "-dev" で終わる試作版は確かめない。
+    見分けは Releases の最新版の資産との SHA256 の突き合わせなので、試作版の exe は
+    いつも「新しい版があります」になり、押すと v6 の exe へ入れ替わってしまう。
     """
+    if version and str(version).endswith("-dev"):
+        return {"state": "dev", "message": "試作版のため更新の確認はしません。"}
     exe = running_exe()
     if exe is None:
         return {"state": "source",

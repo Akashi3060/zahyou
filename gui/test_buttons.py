@@ -5,8 +5,8 @@
     ―― このどれかが無いボタンは、押しても反応が分からない。
 
 実際に「状態を確認」がこれで、押しても表が黙って更新されるだけだった。
-時間のかかるもの・お金や時間を使うもの (WSL の導入・9 GB のダウンロード) は
-差し替えるか、確認ダイアログで「いいえ」を返して止める。
+時間のかかるもの・お金や時間を使うもの (9 GB のダウンロード) は
+確認ダイアログで「いいえ」を返して止める。
 
   python test_buttons.py
 """
@@ -39,8 +39,10 @@ def main():
                 lambda *a, name=name, **k: DIALOGS.append(name))
     # 確認は「いいえ」= 実行しない (9 GB を落とし始めないため)
     g.messagebox.askokcancel = lambda *a, **k: DIALOGS.append("ask") or False
-    # WSL の導入は UAC が出て止まるので、押せたことだけ確かめる
-    env.install_wsl = lambda log: (log("  (テストなので実際には入れません)"), True)[1]
+    # 「まとめて準備する」は、星図データがそろっていれば聞かずに検査だけする。
+    # 足りないときに聞かずに落とし始めないよう、落とす関数そのものも止めておく
+    env.fetch_index = lambda *a, **k: (a[2]("  (テストなので実際には落としません)"),
+                                       False)[1]
 
     app = g.App()
     app.update()

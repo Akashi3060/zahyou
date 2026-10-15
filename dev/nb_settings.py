@@ -19,11 +19,14 @@ DEC_INPUT_STR = "+41d 59m 10.512s"
 FOCAL_LENGTH_MM = None
 
 # ------------------------------------------------------------------------------
-# 3. 解析の方法  'AUTO'(自動) / 'ONLINE'(ネットのみ) / 'OFFLINE'(WSL のみ)
+# 3. 解析の方法  'AUTO'(自動) / 'ONLINE'(ネットのみ) / 'OFFLINE'(星図データだけで解く)
 SOLVE_MODE = 'AUTO'
 
 ONLINE_TIMEOUT = 120      # オンライン解析の打ち切り時間 [秒]
-OFFLINE_TIMEOUT = 300     # オフライン(WSL)解析にかけてよい合計時間 [秒]
+OFFLINE_TIMEOUT = 300     # オフライン解析にかけてよい合計時間 [秒]
+
+# 星図データ (index-*.fits) の置き場所。オフライン解析はここだけを読みます
+INDEX_DIR = r"C:\AstrometryData"
 
 # 目標のだいたいの方向を手がかりに使う (向けている先を探すので圧倒的に速い)
 USE_TARGET_AS_HINT = True
