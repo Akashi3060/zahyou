@@ -433,8 +433,10 @@ class SvKdTree:
     def ball_candidates(self, qt, r_t):
         """木の単位の問い合わせ qt (Q, D) のそれぞれについて、中心から r_t 以内に届く葉の点を全部挙げる。
 
-        全問い合わせを幅優先で一斉にたどる(1 段ごとに numpy の配列演算)。節点の箱は根の全域から
-        split の位置で狭めていき、箱までの最短距離が r_t を超えた枝は捨てる。
+        全問い合わせを幅優先で一斉にたどる(1 段ごとに numpy の配列演算)。箱までの最短距離が r_t を超えた
+        枝は捨てる。箱そのものは持たず、次元ごとの「箱までの距離の 2 乗」だけを持つ(Arya & Mount の増分距離):
+        分割面に対して問い合わせと同じ側の子は親と同じ距離、反対側の子は分割次元の距離が |q − 位置| に
+        変わるだけ(子の箱は親の箱を分割面で切ったものなので)。根の箱は整数の全域 [0, 2^bits − 1]。
         戻り値 (qi, pt): 問い合わせの番号とデータの番号の組(候補。距離の最終判定は呼ぶ側)。
         """
         qt = np.asarray(qt, dtype=np.float64)
@@ -443,46 +445,36 @@ class SvKdTree:
         if Q == 0 or not (r_t >= 0):
             return none
         r2 = float(r_t) * float(r_t)
-        # frontier: 問い合わせの番号、節点、箱 [lo, hi]、箱までの距離の次元ごとの 2 乗
-        qi = np.arange(Q, dtype=np.int64)
-        node = np.zeros(Q, dtype=np.int64)
-        lo = np.zeros((Q, D))
-        hi = np.full((Q, D), self.full)
-        gap = np.maximum(np.maximum(lo - qt, qt - hi), 0.0)
+        # frontier: 問い合わせの番号、節点、箱までの距離の次元ごとの 2 乗 g2 とその和 gs
+        gap = np.maximum(np.maximum(-qt, qt - self.full), 0.0)
         g2 = gap * gap
-        keep = g2.sum(axis=1) <= r2
-        qi, node, lo, hi, g2 = qi[keep], node[keep], lo[keep], hi[keep], g2[keep]
+        gs = g2.sum(axis=1)
+        keep = np.nonzero(gs <= r2)[0]
+        qi = keep.astype(np.int64)
+        node = np.zeros(len(qi), dtype=np.int64)
+        g2, gs = g2[keep], gs[keep]
         mask = self.mask
         for _ in range(self.levels - 1):            # 内部節点の段(葉は最後の段にだけある)
             if len(qi) == 0:
                 return none
             raw = self.split[node].astype(np.int64)
             dim = raw & mask
-            val = (raw & ~mask).astype(np.float64)
+            diff = qt[qi, dim] - (raw - dim)        # q − 分割の位置
+            right = diff > 0.0                      # 同じ側の子が右(q > 位置)
+            far2 = diff * diff
             ar = np.arange(len(qi))
-            q = qt[qi, dim]
-            lo_d = lo[ar, dim]
-            hi_d = hi[ar, dim]
-            rest = g2.sum(axis=1) - g2[ar, dim]     # 分割次元以外の分
-            hi_l = np.minimum(hi_d, val)            # 左の子: hi[dim] = min(hi[dim], 位置)
-            gl = np.maximum(np.maximum(lo_d - q, q - hi_l), 0.0)
-            lo_r = np.maximum(lo_d, val)            # 右の子: lo[dim] = max(lo[dim], 位置)
-            gr = np.maximum(np.maximum(lo_r - q, q - hi_d), 0.0)
-            il = np.nonzero(rest + gl * gl <= r2)[0]
-            ir = np.nonzero(rest + gr * gr <= r2)[0]
-            nl = len(il)
-            sel = np.concatenate([il, ir])
-            qi2 = qi[sel]
-            node2 = 2 * node[sel] + 1
-            node2[nl:] += 1
-            lo2, hi2, g22 = lo[sel], hi[sel], g2[sel]
-            a = np.arange(nl)
-            b = np.arange(nl, len(sel))
-            hi2[a, dim[il]] = hi_l[il]
-            g22[a, dim[il]] = gl[il] * gl[il]
-            lo2[b, dim[ir]] = lo_r[ir]
-            g22[b, dim[ir]] = gr[ir] * gr[ir]
-            qi, node, lo, hi, g2 = qi2, node2, lo2, hi2, g22
+            gs_far = gs - g2[ar, dim] + far2        # 反対側の子までの距離の 2 乗
+            f = np.nonzero(gs_far <= r2)[0]
+            near = 2 * node + 1 + right
+            if len(f) == 0:
+                node = near
+                continue
+            g2f = g2[f]
+            g2f[np.arange(len(f)), dim[f]] = far2[f]
+            qi = np.concatenate([qi, qi[f]])
+            node = np.concatenate([near, 2 * node[f] + 2 - right[f]])
+            g2 = np.concatenate([g2, g2f])
+            gs = np.concatenate([gs, gs_far[f]])
         if len(qi) == 0:
             return none
         # 葉の点を全部並べる
@@ -536,6 +528,25 @@ def sv_index_codes_from_xyz(P):
     return np.stack([zc.real, zc.imag], axis=-1).reshape(n, -1)
 
 
+class SvIndexCorrupt(ValueError):
+    """索引ファイルの中身が壊れている(ヘッダーと大きさは正しいが、木の葉の範囲や quad の星番号が範囲の外)。
+    file にその SvIndexFile が入る。sv_solve はそのファイルを目録から外して探索を続ける。"""
+
+    def __init__(self, file, message):
+        super().__init__(f"{file.name}: {message}")
+        self.file = file
+
+
+def _sv_check_lr(tree):
+    """木の葉の範囲 lr が単調非減少で、最後が ndata − 1 か(壊れていると点の番号が範囲の外になる)。"""
+    lr = tree.lr.astype(np.int64)
+    if len(lr) == 0 or int(lr[-1]) != tree.ndata - 1:
+        return f"{tree.name} の木の葉の範囲(lr)の最後が点の数と合いません(中身が壊れています。落とし直してください)"
+    if len(lr) > 1 and bool(np.any(lr[1:] < lr[:-1])):
+        return f"{tree.name} の木の葉の範囲(lr)が増える順になっていません(中身が壊れています。落とし直してください)"
+    return None
+
+
 class SvIndexFile:
     """索引ファイル 1 本。ヘッダーは作るときに読み、データは使うときに mmap する(close() で放す)。
 
@@ -579,6 +590,7 @@ class SvIndexFile:
         self._sweep = None
         self._codetree = None
         self._startree = None
+        self.broken = None                     # 中身が壊れていると分かったら理由(SvIndexCatalog.mark_broken)
 
     def __repr__(self):
         return (f"SvIndexFile({self.name!r}, dimquads={self.dimquads}, nquads={self.nquads}, "
@@ -620,6 +632,11 @@ class SvIndexFile:
             sweep = buf[o:o + self.nstars]
             codetree = SvKdTree(buf, lay["codes"])
             startree = SvKdTree(buf, lay["stars"])
+            # 葉の範囲の検査(表 1 つあたり葉の数 × 4 バイトだけ読む。quads の表全体は読まず、quad_stars で見る)
+            for t in (codetree, startree):
+                bad = _sv_check_lr(t)
+                if bad:
+                    raise SvIndexCorrupt(self, bad)
         except Exception:
             raw = getattr(mm, "_mmap", None)
             del mm, buf
@@ -663,7 +680,11 @@ class SvIndexFile:
     def quad_stars(self, quad_ids):
         """quad の星番号 (n, dimquads) int64。列は A, B, C(, D)。"""
         self.open()
-        return self._quads[np.asarray(quad_ids, dtype=np.int64)].astype(np.int64)
+        out = self._quads[np.asarray(quad_ids, dtype=np.int64)].astype(np.int64)
+        if out.size and (int(out.max()) >= self.nstars or int(out.min()) < 0):
+            raise SvIndexCorrupt(self, f"quad の星番号が星の数 {self.nstars:,} の外です"
+                                       "(中身が壊れています。落とし直してください)")
+        return out
 
     def codes(self, quad_ids):
         """quad のコード(実数に戻したもの)(n, code_dim)。"""
@@ -680,11 +701,17 @@ class SvIndexFile:
         self.open()
         return self._sweep[np.asarray(star_ids, dtype=np.int64)].copy()
 
-    def code_ball(self, queries, radius):
+    def code_ball(self, queries, radius, check=None):
         """コードが ‖q − c‖ ≤ radius の quad を、問い合わせ (Q, code_dim) のそれぞれについて全部探す。
+
+        check: 引数なしの関数(締め切りと中止の確かめ)。問い合わせ SV_BALL_CHUNK 個ごとに呼ぶ(例外はそのまま通す。
+        束のコードは数万個になることがあり、1 回の照合が 0.4 秒を超えた)。
 
         戻り値 (qi, quad): 問い合わせの番号と quad の番号(int64。qi・quad の順に並べてある)。
         木の単位で量子化の分(D × 0.25 目盛り²)だけ広げて候補を取り、最後に実数で判定する。
+        候補(葉の点の全部で、当たりの数十倍ある)はまず木の単位の単精度で距離を測り、境界から十分内側
+        (単精度の誤差の 2 倍以上)は当たり、十分外側は外れと決め、境界のそばだけを実数で判定する
+        (木の単位の距離 = 実数の距離 × scale なので、結果は全部を実数で判定したときと同じ)。
         """
         t = self.codetree
         q = np.asarray(queries, dtype=np.float64)
@@ -697,22 +724,44 @@ class SvIndexFile:
         if len(q) == 0 or not (r >= 0):
             return none
         r_t = math.sqrt((r * t.scale) ** 2 + 0.25 * t.ndim) * (1.0 + 1e-9) + 1e-6
+        # 単精度の距離² の誤差: 目盛り(≤ 2^32)の丸め 2^-24 相対 × 2|d| × D と、2 乗と和の丸め。
+        # 余裕は誤差の見積もりの数倍(rs2 · 1e-4 + 半径に比例する分 + 1 目盛り²)
+        rs2 = (r * t.scale) ** 2
+        band = rs2 * 1e-4 + 2.0 * t.ndim * (t.full * 2.0 ** -23) * (math.sqrt(rs2) + 1.0) + 1.0
+        lo32 = np.float32(max(0.0, rs2 - band))
+        hi32 = np.float32(rs2 + band)
         out_q, out_c = [], []
         for s in range(0, len(q), SV_BALL_CHUNK):
+            if check is not None and s > 0:
+                check()
             qq = q[s:s + SV_BALL_CHUNK]
-            qi, pt = t.ball_candidates(t.to_tree(qq), r_t)
+            qt = t.to_tree(qq)
+            qi, pt = t.ball_candidates(qt, r_t)
             if len(pt) == 0:
                 continue
-            c = t.to_real(t.data[pt])
-            ok = ((c - qq[qi]) ** 2).sum(axis=1) <= r * r
+            qt32 = qt.astype(np.float32)
+            # 先に 1 つめの次元の差だけで落とす(|d₀| > 半径なら距離も半径を超える。1 列だけ読むので安い)
+            k = np.nonzero(np.abs(t.data[pt, 0] - qt32[qi, 0]) <= np.float32(math.sqrt(rs2) + 1.0))[0]
+            qi, pt = qi[k], pt[k]
+            d = t.data[pt].astype(np.float32)
+            d -= qt32[qi]
+            d2 = np.einsum("ij,ij->i", d, d)
+            inner = d2 <= lo32
+            edge = np.nonzero(~inner & (d2 <= hi32))[0]
+            if len(edge):
+                c = t.to_real(t.data[pt[edge]])
+                inner[edge[((c - qq[qi[edge]]) ** 2).sum(axis=1) <= r * r]] = True
+            ok = np.nonzero(inner)[0]
             out_q.append(qi[ok] + s)
             out_c.append(pt[ok])
         if not out_q:
             return none
         qi = np.concatenate(out_q)
         quad = np.concatenate(out_c)
-        order = np.lexsort((quad, qi))
-        return qi[order], quad[order]
+        # (qi, quad) の順に並べる。1 つの整数の鍵にして並べるほうが lexsort より速い
+        key = qi * np.int64(t.ndata) + quad
+        key.sort()
+        return key // t.ndata, key % t.ndata
 
     def stars_in_cone(self, center_xyz, radius_rad):
         """center から角距離 radius_rad 以内の星の番号(int64、昇順)。
@@ -801,6 +850,20 @@ class SvIndexCatalog:
         for f in self.files:
             f.close()
 
+    def mark_broken(self, f, reason):
+        """中身が壊れていると分かったファイルを files から外し、problems に入れる(mmap も放す)。
+
+        series からは外さない(探索の仮説は「系列の中の位置」でファイルを指すので、並びを変えない)。
+        代わりに f.broken を立て、select・tiles_near と検証の参照星の検索がそのファイルを飛ばす。
+        """
+        if f.broken is not None:
+            return
+        f.broken = str(reason)
+        f.close()
+        if f in self.files:
+            self.files.remove(f)
+        self.problems.append((f.path, str(reason)))
+
     def __enter__(self):
         return self
 
@@ -848,7 +911,9 @@ class SvIndexCatalog:
             reach = (0.0 if hint_radius_rad is None else float(hint_radius_rad)) + 0.5 * diag * s_hi / SV_ARCSEC_PER_RAD
         out = []
         for iid in ids:
-            fs = self.series[iid]
+            fs = [f for f in self.series[iid] if f.broken is None]
+            if not fs:
+                continue
             if hint is not None and fs[0].tile_center_xyz is not None:
                 cen = np.array([f.tile_center_xyz for f in fs])
                 ang = sv_angle_between(cen, hint[None, :])
@@ -863,7 +928,7 @@ class SvIndexCatalog:
 
         全天の系列はそのファイル。検証でタイルの境界をまたぐ視野の星を集めるのに使う。
         """
-        fs = self.series.get(indexid, [])
+        fs = [f for f in self.series.get(indexid, []) if f.broken is None]
         if not fs or fs[0].tile_center_xyz is None:
             return list(fs)
         c = sv_normalize(np.asarray(center_xyz, dtype=np.float64).reshape(3))

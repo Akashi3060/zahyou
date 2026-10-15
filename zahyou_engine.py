@@ -46,6 +46,9 @@ import re
 
 
 SV_ARCSEC_PER_RAD = 180.0 / math.pi * 3600.0
+SV_LSQ_MAX_SHIFTS = 40       # sv_fit_wcs_lsq で接点を動かす回数の上限(90° の視野で星が隅の 1/4 だけでも収まる)
+SV_LSQ_TOL_PX = 1e-8         # CRPIX に残る定数項(画素に直したもの)がこれ以下なら接点を動かすのをやめる
+SV_LSQ_FAIL_PX = 0.01        # 上限まで動かしてもこれを超えて残れば、当てはめは失敗(ValueError)
 
 
 def sv_radec_to_xyz(ra_deg, dec_deg):
@@ -503,15 +506,19 @@ def sv_fit_sip_inverse(wcs, width=None, height=None, order=None, bounds=None):
 
 
 def sv_fit_wcs_lsq(field_xy, star_xyz, weights=None, crpix=None, sip_order=0,
-                   crval_xyz=None, iterations=3, width=None, height=None):
+                   crval_xyz=None, iterations=SV_LSQ_MAX_SHIFTS, width=None, height=None):
     """対応する画像の点と星から、TAN(+SIP)を重みつき最小二乗で当てる(設計書 3.8 節)。
 
     CRPIX は固定(既定は画像の点の重みつき重心)。接点(既定は星の重みつきの和の方向)のまわりで星を
     投影し、ξ と η をそれぞれ u, v(画素 − CRPIX)の多項式(0 ≤ p+q ≤ 次数、次数 = max(1, sip_order))で当てる。
-    定数項は接点のずれなので、接点をそのぶん動かして当て直す(iterations 回動かし、当てるのは iterations+1 回。
-    ずれは 1 回ごとにおよそ「視野の広さ(ラジアン)の 2 乗」倍に縮む)。1 次の項が CD、2 次以上に
-    CD⁻¹ を掛けたものが SIP の A, B。sip_order ≥ 2 なら逆変換 AP, BP(次数 sip_order+1)も、画像全体
-    (width, height。無ければ点の範囲)の格子で当てる。重み 0 の点は使わない。点が足りなければ ValueError。
+    定数項は接点のずれなので、接点をそのぶん動かして当て直す。定数項を CD⁻¹ で画素に直した大きさが
+    SV_LSQ_TOL_PX 以下になるまで繰り返す(iterations は動かす回数の上限)。ずれの縮み方は星の配置しだいで、
+    星が CRPIX のまわりに散っていれば 1 回ごとにおよそ「視野の広さ(ラジアン)の 2 乗」倍だが、CRPIX から離れて
+    固まっていると遅い(60° の視野で星が隅の 1/4 だけだと、3 回動かしても中心で 5 px 残り、10 回で 0.000 px。
+    90° の隅の 1/4 では 30 回近く要る)。上限まで動かしても SV_LSQ_FAIL_PX を超えるずれが残れば ValueError
+    (その WCS は CRPIX の位置が定まっていない)。1 次の項が CD、2 次以上に CD⁻¹ を掛けたものが SIP の A, B。
+    sip_order ≥ 2 なら逆変換 AP, BP(次数 sip_order+1)も、画像全体(width, height。無ければ点の範囲)の
+    格子で当てる。重み 0 の点は使わない。点が足りなければ ValueError。
     """
     f = np.asarray(field_xy, dtype=np.float64).reshape(-1, 2)
     s = np.asarray(star_xyz, dtype=np.float64).reshape(-1, 3)
@@ -548,16 +555,19 @@ def sv_fit_wcs_lsq(field_xy, star_xyz, weights=None, crpix=None, sip_order=0,
         ww = np.where(ok, w, 0.0)
         t = np.column_stack([np.where(ok, np.degrees(xi), 0.0), np.where(ok, np.degrees(eta), 0.0)])
         coef = _sv_poly_lstsq(u, v, t, order, 0, ww)
-        if k == nshift:
+        cd = np.array([[coef[0, 1, 0], coef[0, 0, 1]],
+                       [coef[1, 1, 0], coef[1, 0, 1]]])
+        if abs(float(np.linalg.det(cd))) < 1e-300 or not np.all(np.isfinite(coef)):
+            raise ValueError("CD が特異(点が一直線に並んでいる)")
+        # 定数項 = CRPIX が写る (ξ, η)。画素に直して十分小さければ終わり
+        left = float(np.hypot(*np.linalg.solve(cd, coef[:, 0, 0])))
+        if left <= SV_LSQ_TOL_PX or k == nshift:
             break
-        # 定数項 = CRPIX が写る (ξ, η)。接点をそこへ動かして当て直す。最後の当てはめのあとには動かさない
-        # (CD は接点の東・北に対する値で、極のそばでは接点をわずかに動かすだけで東・北の向きが大きく回るため。
-        # 残る定数項は、動かした回数ぶん小さくなったずれで、捨てる)
+        # 接点をそこへ動かして当て直す。最後の当てはめのあとには動かさない(CD は接点の東・北に対する値で、
+        # 極のそばでは接点をわずかに動かすだけで東・北の向きが大きく回るため。残る定数項は捨てる)
         r = sv_tan_deproject(np.radians(coef[0, 0, 0]), np.radians(coef[1, 0, 0]), r)
-    cd = np.array([[coef[0, 1, 0], coef[0, 0, 1]],
-                   [coef[1, 1, 0], coef[1, 0, 1]]])
-    if abs(float(np.linalg.det(cd))) < 1e-300:
-        raise ValueError("CD が特異(点が一直線に並んでいる)")
+    if left > SV_LSQ_FAIL_PX:
+        raise ValueError(f"接点が定まりません({nshift} 回動かしても CRPIX に {left:.3g} px のずれが残る)")
     if order < 2:
         return SvWcs(r, crpix, cd)
     hi = coef.copy()
@@ -983,8 +993,10 @@ class SvKdTree:
     def ball_candidates(self, qt, r_t):
         """木の単位の問い合わせ qt (Q, D) のそれぞれについて、中心から r_t 以内に届く葉の点を全部挙げる。
 
-        全問い合わせを幅優先で一斉にたどる(1 段ごとに numpy の配列演算)。節点の箱は根の全域から
-        split の位置で狭めていき、箱までの最短距離が r_t を超えた枝は捨てる。
+        全問い合わせを幅優先で一斉にたどる(1 段ごとに numpy の配列演算)。箱までの最短距離が r_t を超えた
+        枝は捨てる。箱そのものは持たず、次元ごとの「箱までの距離の 2 乗」だけを持つ(Arya & Mount の増分距離):
+        分割面に対して問い合わせと同じ側の子は親と同じ距離、反対側の子は分割次元の距離が |q − 位置| に
+        変わるだけ(子の箱は親の箱を分割面で切ったものなので)。根の箱は整数の全域 [0, 2^bits − 1]。
         戻り値 (qi, pt): 問い合わせの番号とデータの番号の組(候補。距離の最終判定は呼ぶ側)。
         """
         qt = np.asarray(qt, dtype=np.float64)
@@ -993,46 +1005,36 @@ class SvKdTree:
         if Q == 0 or not (r_t >= 0):
             return none
         r2 = float(r_t) * float(r_t)
-        # frontier: 問い合わせの番号、節点、箱 [lo, hi]、箱までの距離の次元ごとの 2 乗
-        qi = np.arange(Q, dtype=np.int64)
-        node = np.zeros(Q, dtype=np.int64)
-        lo = np.zeros((Q, D))
-        hi = np.full((Q, D), self.full)
-        gap = np.maximum(np.maximum(lo - qt, qt - hi), 0.0)
+        # frontier: 問い合わせの番号、節点、箱までの距離の次元ごとの 2 乗 g2 とその和 gs
+        gap = np.maximum(np.maximum(-qt, qt - self.full), 0.0)
         g2 = gap * gap
-        keep = g2.sum(axis=1) <= r2
-        qi, node, lo, hi, g2 = qi[keep], node[keep], lo[keep], hi[keep], g2[keep]
+        gs = g2.sum(axis=1)
+        keep = np.nonzero(gs <= r2)[0]
+        qi = keep.astype(np.int64)
+        node = np.zeros(len(qi), dtype=np.int64)
+        g2, gs = g2[keep], gs[keep]
         mask = self.mask
         for _ in range(self.levels - 1):            # 内部節点の段(葉は最後の段にだけある)
             if len(qi) == 0:
                 return none
             raw = self.split[node].astype(np.int64)
             dim = raw & mask
-            val = (raw & ~mask).astype(np.float64)
+            diff = qt[qi, dim] - (raw - dim)        # q − 分割の位置
+            right = diff > 0.0                      # 同じ側の子が右(q > 位置)
+            far2 = diff * diff
             ar = np.arange(len(qi))
-            q = qt[qi, dim]
-            lo_d = lo[ar, dim]
-            hi_d = hi[ar, dim]
-            rest = g2.sum(axis=1) - g2[ar, dim]     # 分割次元以外の分
-            hi_l = np.minimum(hi_d, val)            # 左の子: hi[dim] = min(hi[dim], 位置)
-            gl = np.maximum(np.maximum(lo_d - q, q - hi_l), 0.0)
-            lo_r = np.maximum(lo_d, val)            # 右の子: lo[dim] = max(lo[dim], 位置)
-            gr = np.maximum(np.maximum(lo_r - q, q - hi_d), 0.0)
-            il = np.nonzero(rest + gl * gl <= r2)[0]
-            ir = np.nonzero(rest + gr * gr <= r2)[0]
-            nl = len(il)
-            sel = np.concatenate([il, ir])
-            qi2 = qi[sel]
-            node2 = 2 * node[sel] + 1
-            node2[nl:] += 1
-            lo2, hi2, g22 = lo[sel], hi[sel], g2[sel]
-            a = np.arange(nl)
-            b = np.arange(nl, len(sel))
-            hi2[a, dim[il]] = hi_l[il]
-            g22[a, dim[il]] = gl[il] * gl[il]
-            lo2[b, dim[ir]] = lo_r[ir]
-            g22[b, dim[ir]] = gr[ir] * gr[ir]
-            qi, node, lo, hi, g2 = qi2, node2, lo2, hi2, g22
+            gs_far = gs - g2[ar, dim] + far2        # 反対側の子までの距離の 2 乗
+            f = np.nonzero(gs_far <= r2)[0]
+            near = 2 * node + 1 + right
+            if len(f) == 0:
+                node = near
+                continue
+            g2f = g2[f]
+            g2f[np.arange(len(f)), dim[f]] = far2[f]
+            qi = np.concatenate([qi, qi[f]])
+            node = np.concatenate([near, 2 * node[f] + 2 - right[f]])
+            g2 = np.concatenate([g2, g2f])
+            gs = np.concatenate([gs, gs_far[f]])
         if len(qi) == 0:
             return none
         # 葉の点を全部並べる
@@ -1086,6 +1088,25 @@ def sv_index_codes_from_xyz(P):
     return np.stack([zc.real, zc.imag], axis=-1).reshape(n, -1)
 
 
+class SvIndexCorrupt(ValueError):
+    """索引ファイルの中身が壊れている(ヘッダーと大きさは正しいが、木の葉の範囲や quad の星番号が範囲の外)。
+    file にその SvIndexFile が入る。sv_solve はそのファイルを目録から外して探索を続ける。"""
+
+    def __init__(self, file, message):
+        super().__init__(f"{file.name}: {message}")
+        self.file = file
+
+
+def _sv_check_lr(tree):
+    """木の葉の範囲 lr が単調非減少で、最後が ndata − 1 か(壊れていると点の番号が範囲の外になる)。"""
+    lr = tree.lr.astype(np.int64)
+    if len(lr) == 0 or int(lr[-1]) != tree.ndata - 1:
+        return f"{tree.name} の木の葉の範囲(lr)の最後が点の数と合いません(中身が壊れています。落とし直してください)"
+    if len(lr) > 1 and bool(np.any(lr[1:] < lr[:-1])):
+        return f"{tree.name} の木の葉の範囲(lr)が増える順になっていません(中身が壊れています。落とし直してください)"
+    return None
+
+
 class SvIndexFile:
     """索引ファイル 1 本。ヘッダーは作るときに読み、データは使うときに mmap する(close() で放す)。
 
@@ -1129,6 +1150,7 @@ class SvIndexFile:
         self._sweep = None
         self._codetree = None
         self._startree = None
+        self.broken = None                     # 中身が壊れていると分かったら理由(SvIndexCatalog.mark_broken)
 
     def __repr__(self):
         return (f"SvIndexFile({self.name!r}, dimquads={self.dimquads}, nquads={self.nquads}, "
@@ -1170,6 +1192,11 @@ class SvIndexFile:
             sweep = buf[o:o + self.nstars]
             codetree = SvKdTree(buf, lay["codes"])
             startree = SvKdTree(buf, lay["stars"])
+            # 葉の範囲の検査(表 1 つあたり葉の数 × 4 バイトだけ読む。quads の表全体は読まず、quad_stars で見る)
+            for t in (codetree, startree):
+                bad = _sv_check_lr(t)
+                if bad:
+                    raise SvIndexCorrupt(self, bad)
         except Exception:
             raw = getattr(mm, "_mmap", None)
             del mm, buf
@@ -1213,7 +1240,11 @@ class SvIndexFile:
     def quad_stars(self, quad_ids):
         """quad の星番号 (n, dimquads) int64。列は A, B, C(, D)。"""
         self.open()
-        return self._quads[np.asarray(quad_ids, dtype=np.int64)].astype(np.int64)
+        out = self._quads[np.asarray(quad_ids, dtype=np.int64)].astype(np.int64)
+        if out.size and (int(out.max()) >= self.nstars or int(out.min()) < 0):
+            raise SvIndexCorrupt(self, f"quad の星番号が星の数 {self.nstars:,} の外です"
+                                       "(中身が壊れています。落とし直してください)")
+        return out
 
     def codes(self, quad_ids):
         """quad のコード(実数に戻したもの)(n, code_dim)。"""
@@ -1230,11 +1261,17 @@ class SvIndexFile:
         self.open()
         return self._sweep[np.asarray(star_ids, dtype=np.int64)].copy()
 
-    def code_ball(self, queries, radius):
+    def code_ball(self, queries, radius, check=None):
         """コードが ‖q − c‖ ≤ radius の quad を、問い合わせ (Q, code_dim) のそれぞれについて全部探す。
+
+        check: 引数なしの関数(締め切りと中止の確かめ)。問い合わせ SV_BALL_CHUNK 個ごとに呼ぶ(例外はそのまま通す。
+        束のコードは数万個になることがあり、1 回の照合が 0.4 秒を超えた)。
 
         戻り値 (qi, quad): 問い合わせの番号と quad の番号(int64。qi・quad の順に並べてある)。
         木の単位で量子化の分(D × 0.25 目盛り²)だけ広げて候補を取り、最後に実数で判定する。
+        候補(葉の点の全部で、当たりの数十倍ある)はまず木の単位の単精度で距離を測り、境界から十分内側
+        (単精度の誤差の 2 倍以上)は当たり、十分外側は外れと決め、境界のそばだけを実数で判定する
+        (木の単位の距離 = 実数の距離 × scale なので、結果は全部を実数で判定したときと同じ)。
         """
         t = self.codetree
         q = np.asarray(queries, dtype=np.float64)
@@ -1247,22 +1284,44 @@ class SvIndexFile:
         if len(q) == 0 or not (r >= 0):
             return none
         r_t = math.sqrt((r * t.scale) ** 2 + 0.25 * t.ndim) * (1.0 + 1e-9) + 1e-6
+        # 単精度の距離² の誤差: 目盛り(≤ 2^32)の丸め 2^-24 相対 × 2|d| × D と、2 乗と和の丸め。
+        # 余裕は誤差の見積もりの数倍(rs2 · 1e-4 + 半径に比例する分 + 1 目盛り²)
+        rs2 = (r * t.scale) ** 2
+        band = rs2 * 1e-4 + 2.0 * t.ndim * (t.full * 2.0 ** -23) * (math.sqrt(rs2) + 1.0) + 1.0
+        lo32 = np.float32(max(0.0, rs2 - band))
+        hi32 = np.float32(rs2 + band)
         out_q, out_c = [], []
         for s in range(0, len(q), SV_BALL_CHUNK):
+            if check is not None and s > 0:
+                check()
             qq = q[s:s + SV_BALL_CHUNK]
-            qi, pt = t.ball_candidates(t.to_tree(qq), r_t)
+            qt = t.to_tree(qq)
+            qi, pt = t.ball_candidates(qt, r_t)
             if len(pt) == 0:
                 continue
-            c = t.to_real(t.data[pt])
-            ok = ((c - qq[qi]) ** 2).sum(axis=1) <= r * r
+            qt32 = qt.astype(np.float32)
+            # 先に 1 つめの次元の差だけで落とす(|d₀| > 半径なら距離も半径を超える。1 列だけ読むので安い)
+            k = np.nonzero(np.abs(t.data[pt, 0] - qt32[qi, 0]) <= np.float32(math.sqrt(rs2) + 1.0))[0]
+            qi, pt = qi[k], pt[k]
+            d = t.data[pt].astype(np.float32)
+            d -= qt32[qi]
+            d2 = np.einsum("ij,ij->i", d, d)
+            inner = d2 <= lo32
+            edge = np.nonzero(~inner & (d2 <= hi32))[0]
+            if len(edge):
+                c = t.to_real(t.data[pt[edge]])
+                inner[edge[((c - qq[qi[edge]]) ** 2).sum(axis=1) <= r * r]] = True
+            ok = np.nonzero(inner)[0]
             out_q.append(qi[ok] + s)
             out_c.append(pt[ok])
         if not out_q:
             return none
         qi = np.concatenate(out_q)
         quad = np.concatenate(out_c)
-        order = np.lexsort((quad, qi))
-        return qi[order], quad[order]
+        # (qi, quad) の順に並べる。1 つの整数の鍵にして並べるほうが lexsort より速い
+        key = qi * np.int64(t.ndata) + quad
+        key.sort()
+        return key // t.ndata, key % t.ndata
 
     def stars_in_cone(self, center_xyz, radius_rad):
         """center から角距離 radius_rad 以内の星の番号(int64、昇順)。
@@ -1351,6 +1410,20 @@ class SvIndexCatalog:
         for f in self.files:
             f.close()
 
+    def mark_broken(self, f, reason):
+        """中身が壊れていると分かったファイルを files から外し、problems に入れる(mmap も放す)。
+
+        series からは外さない(探索の仮説は「系列の中の位置」でファイルを指すので、並びを変えない)。
+        代わりに f.broken を立て、select・tiles_near と検証の参照星の検索がそのファイルを飛ばす。
+        """
+        if f.broken is not None:
+            return
+        f.broken = str(reason)
+        f.close()
+        if f in self.files:
+            self.files.remove(f)
+        self.problems.append((f.path, str(reason)))
+
     def __enter__(self):
         return self
 
@@ -1398,7 +1471,9 @@ class SvIndexCatalog:
             reach = (0.0 if hint_radius_rad is None else float(hint_radius_rad)) + 0.5 * diag * s_hi / SV_ARCSEC_PER_RAD
         out = []
         for iid in ids:
-            fs = self.series[iid]
+            fs = [f for f in self.series[iid] if f.broken is None]
+            if not fs:
+                continue
             if hint is not None and fs[0].tile_center_xyz is not None:
                 cen = np.array([f.tile_center_xyz for f in fs])
                 ang = sv_angle_between(cen, hint[None, :])
@@ -1413,7 +1488,7 @@ class SvIndexCatalog:
 
         全天の系列はそのファイル。検証でタイルの境界をまたぐ視野の星を集めるのに使う。
         """
-        fs = self.series.get(indexid, [])
+        fs = [f for f in self.series.get(indexid, []) if f.broken is None]
         if not fs or fs[0].tile_center_xyz is None:
             return list(fs)
         c = sv_normalize(np.asarray(center_xyz, dtype=np.float64).reshape(3))
@@ -1430,8 +1505,13 @@ SV_NN_CELLS = 1_500_000        # 検証の距離の表(仮説 × 画像の星 ×
 SV_QUICK_STARS = 10            # 検証の前の安い足切り: 並びの先頭何個の星に参照星が 1 つも無ければ捨てるか(0 で無し)
 SV_ACC_CELLS = 3_000_000       # 検証の積み上げで一度に持つ「仮説 × 参照星」の上限
 SV_REF_CHUNK = 150_000         # 足切りを通った仮説を、参照星の数の見積もりでこの数ずつに分けて検証する
+SV_VERIFY_STEP = 8192          # 系列の仮説をこの数ずつ検証し、そのたびに解を選ぶ(解があればそこで止める)
 SV_TWEAK_STEPS = 10            # 改良の反復の回数(3.8)
 SV_TWEAK_GAMMA = 0.7           # 反復ごとに quad からの距離による σ の広がりを弱める割合
+SV_TWEAK_MIN_MATCHES = 6       # 改良の最後の当て直しを一致だけで行う一致の数(TAN の未知数 6 の 2 倍の式)
+SV_SIP_F_Z = 2.3263478740408408  # SIP を付ける F 検定の有意水準(上側 1 %)の標準正規分布の点
+SV_SIP_GRID = 3                # SIP を付けるには、当てる星が画像を 3 × 3 に分けた箱の …
+SV_SIP_MIN_BOXES = 7           # … 7 つ以上にあること(星の無い側へ多項式を外挿しないため)
 SV_TRACE_MAX_HYP = 20000       # trace に書く仮説の数の上限
 SV_AREA_GRID = 10              # 有効面積を数える画像の区切り(10 × 10)
 
@@ -2143,32 +2223,34 @@ def _sv_cone_pairs(f, centers, radii, small=False):
             s = e
     hs_out, pt_out, xyz_out = [], [], []
     for grp in groups:
+        qt = qt_all[grp]
         # 量子化(3 × 0.25 目盛り²)と、正規化で動く分(|xyz| − 1 ≤ 4e-10 ≒ 0.9 目盛り)を広げる
         if small:
             rt = np.sqrt((chord[grp] * t.scale) ** 2 + 0.75) + 4.0
-            qi, pt = _sv_kd_small_ball(t, qt_all[grp], rt)
-            if len(pt) == 0:
-                continue
-            # 葉の中の点は大半が遠いので、木の単位のまま(実数に戻す前に)ふるう
-            dt = t.data[pt] - qt_all[grp][qi]
-            near = np.einsum("ij,ij->i", dt, dt) <= rt[qi] ** 2
-            qi, pt = qi[near], pt[near]
+            qi, pt = _sv_kd_small_ball(t, qt, rt)
         else:
             r_t = math.sqrt((float(chord[grp].max()) * t.scale) ** 2 + 0.75) + 4.0
-            qi, pt = t.ball_candidates(qt_all[grp], r_t)
+            qi, pt = t.ball_candidates(qt, r_t)
         if len(pt) == 0:
             continue
+        # 葉の中の点は大半が遠いので、木の単位のまま(実数に戻す前に)ふるう。木の単位の距離 = 実数の距離 × scale
+        # (to_real は minval + 整数 / scale)。弦 + 2e-9(|v| と 1 の差 4e-10 の分を広げた値。最後の判定より広い)。
+        # 先に 1 つめの次元の差だけで落とす(1 列だけ読むので安い)
+        lim = (chord[grp][qi] + 2e-9) * t.scale
+        k = np.nonzero(np.abs(t.data[pt, 0] - qt[qi, 0]) <= lim)[0]
+        dt = t.data[pt[k]].astype(np.float64)
+        dt -= qt[qi[k]]
+        k = k[np.einsum("ij,ij->i", dt, dt) <= lim[k] * lim[k]]
+        if len(k) == 0:
+            continue
+        qi, pt = qi[k], pt[k]
         v = t.to_real(t.data[pt])
         h = grp[qi]
-        # |v| と 1 の差は 4e-10 以下なので、正規化は残す星だけ(判定はわずかに広めにとる)
-        d2 = ((v - centers[h]) ** 2).sum(axis=1)
-        ok = d2 <= (chord[h] + 2e-9) ** 2
-        v = v[ok]
+        # 最後の判定は前と同じ式(stars_in_cone と同じ答えになるように)
         v = v / np.sqrt(np.einsum("ij,ij->i", v, v))[:, None]
-        h = h[ok]
-        ok2 = ((v - centers[h]) ** 2).sum(axis=1) <= chord[h] ** 2
+        ok2 = np.nonzero(((v - centers[h]) ** 2).sum(axis=1) <= chord[h] ** 2)[0]
         hs_out.append(h[ok2])
-        pt_out.append(pt[ok][ok2])
+        pt_out.append(pt[ok2])
         xyz_out.append(v[ok2])
     if not hs_out:
         return np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros((0, 3))
@@ -2185,18 +2267,38 @@ def _sv_series_cone(catalog, indexid, centers, radii, clock=None, small=False):
     H = len(centers)
     parts = []
     if fs[0].tile_center_xyz is None:
-        cand = [(0, np.arange(H))]
+        cand = [(0, np.arange(s, min(H, s + 32768))) for s in range(0, H, 32768)]   # 区切りごとに締め切りを見る
+    elif H == 0:
+        cand = []
     else:
         tc = np.array([f.tile_center_xyz for f in fs])
         tr = np.array([f.tile_radius_rad for f in fs])
-        # 角距離 ≤ 外接半径 + 半径 を内積で(余弦は 0〜π で単調。わずかに広めに取る)
-        lim = np.minimum(tr[:, None] + radii[None, :] + 1e-9, math.pi)
-        near = tc @ centers.T >= np.cos(lim)
-        cand = [(k, np.nonzero(near[k])[0]) for k in np.nonzero(near.any(axis=1))[0]]
+        # 角距離 ≤ 外接半径 + 半径 を内積で(余弦は 0〜π で単調。わずかに広めに取る)。まず半径の最大で
+        # タイルごとに 1 つの余弦と比べ(安い)、半径がそろっていないときは残った組だけ自分の半径で比べ直す
+        rmax = float(np.max(radii))
+        kk, hh = [], []
+        for s in range(0, H, 8192):
+            c = centers[s:s + 8192]
+            dots = tc @ c.T
+            k, h = np.nonzero(dots >= np.cos(np.minimum(tr + rmax + 1e-9, math.pi))[:, None])
+            if len(k) and float(np.min(radii[s:s + 8192])) < rmax:
+                lim = np.minimum(tr[k] + radii[s + h] + 1e-9, math.pi)
+                m = dots[k, h] >= np.cos(lim)
+                k, h = k[m], h[m]
+            kk.append(k)
+            hh.append(h + s)
+        k = np.concatenate(kk)
+        h = np.concatenate(hh)
+        o = np.argsort(k, kind="stable")              # タイルの順、タイルの中は中心の番号の順
+        k, h = k[o], h[o]
+        cut = np.nonzero(np.diff(k))[0] + 1
+        cand = [(int(kg[0]), hg) for kg, hg in zip(np.split(k, cut), np.split(h, cut)) if len(kg)]
     for k, hs in cand:
         if len(hs) == 0:
             continue
         f = fs[k]
+        if f.broken is not None:                      # 中身が壊れていると分かったファイル(mark_broken)
+            continue
         qi, sid, xyz = _sv_cone_pairs(f, centers[hs], radii[hs], small)
         if len(sid):
             parts.append((hs[qi], sid, np.full(len(sid), k), xyz, f.sweep(sid)))
@@ -2458,53 +2560,103 @@ def _sv_wrms(wcs, fxy, sxyz, w):
     return math.sqrt(float((w[ok] * r2[ok]).sum() / w[ok].sum()))
 
 
-def _sv_refine(field, catalog, f, hy1, order, clock=None, steps=SV_TWEAK_STEPS):
+def sv_f_upper(d1, d2, z=SV_SIP_F_Z):
+    """F 分布(自由度 d1, d2)の上側の点。z は同じ確率の標準正規分布の点(既定は上側 1 %)。
+
+    Paulson の近似(F^(1/3) を正規分布で近似する式を F について解く)。d1 ≥ 6・d2 ≥ 12 で正確な値との差は 1 % 以下。
+    """
+    d1, d2 = float(d1), float(d2)
+    a, b = 1.0 - 2.0 / (9.0 * d2), 1.0 - 2.0 / (9.0 * d1)
+    c2, c1 = 2.0 / (9.0 * d2), 2.0 / (9.0 * d1)
+    A = a * a - z * z * c2
+    B = a * b
+    C = b * b - z * z * c1
+    if A <= 0.0 or B * B - A * C < 0.0:
+        return math.inf
+    return ((B + math.sqrt(B * B - A * C)) / A) ** 3
+
+
+def _sv_spread_boxes(xy, W, H, g=SV_SIP_GRID):
+    """点が画像を g × g に分けた箱のいくつに入っているか。"""
+    if len(xy) == 0:
+        return 0
+    ix = np.clip(np.floor((xy[:, 0] + 0.5) / W * g), 0, g - 1).astype(np.int64)
+    iy = np.clip(np.floor((xy[:, 1] + 0.5) / H * g), 0, g - 1).astype(np.int64)
+    return int(len(np.unique(iy * g + ix)))
+
+
+def _sv_refine(field, catalog, f, hy1, order, clock=None, steps=SV_TWEAK_STEPS, final=True):
     """仮説 1 個を改良する(3.8 節)。
 
     一致した組を今の WCS で投影し直した参照星との最近傍で取り直し、重みつき最小二乗で TAN(CD と CRVAL)を
     当て直す。これを steps 回、σ の「quad からの距離による広がり」を γ = 0.7^k で弱めながら繰り返す。
-    order ≥ 2 で一致(quad の星を含む)が 3 × (未知数 = 2 軸 × 項の数。2 次なら 12)以上あり、自由度で割った
-    残差が下がるときだけ SIP を付ける(一致が 20 個前後で 2 次を当てると中心まで 1 px 動いた)。
-    最後に CRPIX を画像の中心に置いて当て直し、γ = 1 で検証し直す。
+    反復の当てはめも CRPIX を画像の中心に置く(最後の形と同じ。当てた点の重心に置くと、点が画像の片側に
+    寄ったとき、広い視野では接点の違う TAN になって中心のスケールが狂い(短辺 19° の合成星野で −2 %)、
+    その WCS で取り直した一致がさらに片側へ寄った)。接点の初めの値は今の WCS で画像の中心が写る位置。
+    final(解として返す前の改良)なら、最後の当て直しは quad の星を除いた一致が SV_TWEAK_MIN_MATCHES 個以上あれば
+    一致だけで行う(quad の星はコードの許容(AB の 1 % ≒ 数 px)の中で選ばれた組なので、偽の星が混じっても照合を
+    通る。合成星野 few20 では quad の 1 星が索引の星から 3.4 px 離れた偽の星で、それを重み 1 で入れた当てはめは
+    スケールが 0.2 % ずれた。検証の一致は quad と別の証拠)。足りなければ quad の星(重み 1)も入れる。
+    tune-up(final=False。solve 未満の仮説を引き上げるか決める)では、これまでどおり quad の星を入れたまま
+    当てる(quad の星を外すと、偶然の一致だけに当てはめて対数オッズを押し上げやすくなるため)。
+    order ≥ 2 で SIP を付けるのは、当てる組が 3 × (未知数 = 2 軸 × 項の数。2 次なら 12)以上あり、
+    その星が画像を 3 × 3 に分けた箱の 7 つ以上にあり、TAN に比べた残差の減り方が F 検定(上側 1 %)で
+    有意なときだけ(一致が 20 個前後で 2 次を当てると中心まで 1 px 動いた。星が左 1/3 だけの画像に付けると
+    隅が 7〜13 px 動いた)。最後に γ = 1 で検証し直す。
     戻り値 (wcs, 検証の結果)。
     """
     wcs = _sv_wcs_of(hy1)
     fs = catalog.series[f.indexid]
     quad_xyz = fs[int(hy1["fid"][0])].star_xyz(hy1["qindex"][0])
+    cx, cy = float(field.center[0]), float(field.center[1])
     # 参照星は 1 回だけ集める(少し広めに。改良で中心とスケールが少し動いても足りるように)
-    cen = wcs.pix_to_xyz(field.center[0], field.center[1]).reshape(1, 3)
+    cen = wcs.pix_to_xyz(cx, cy).reshape(1, 3)
     rad = np.array([field.half_diag * float(hy1["scale"][0]) * 1.25 / SV_ARCSEC_PER_RAD])
     refs = _sv_series_cone(catalog, f.indexid, cen, rad)
     fxy = sxyz = w = None
+    nmatch = 0
     for k in range(int(steps)):
         gamma = SV_TWEAK_GAMMA ** k
         res = _sv_verify_hyps(field, catalog, f, _sv_hyp_from_wcs(hy1, wcs), gamma=gamma, record=True,
                               wcs=wcs, refs=refs, clock=clock)
         fxy, sxyz, w = _sv_fit_pairs(field, res["matches"][0], hy1, quad_xyz)
+        nmatch = len(res["matches"][0])
         if (w > 0).sum() < 3:
             break
         try:
-            wcs = sv_fit_wcs_lsq(fxy, sxyz, weights=w, sip_order=0)
+            wcs = sv_fit_wcs_lsq(fxy, sxyz, weights=w, crpix=field.center, sip_order=0,
+                                 crval_xyz=wcs.pix_to_xyz(cx, cy).reshape(3))
         except ValueError:
             break
+    if final and fxy is not None and int((w[:nmatch] > 0).sum()) >= SV_TWEAK_MIN_MATCHES:
+        fxy, sxyz, w = fxy[:nmatch], sxyz[:nmatch], w[:nmatch]     # quad の星(後ろに付いている)を外す
     nm = int((w > 0).sum()) if w is not None else 0
+    cv = wcs.pix_to_xyz(cx, cy).reshape(3)
     if int(order) >= 2 and fxy is not None:
         terms = (int(order) + 1) * (int(order) + 2) // 2
-        if nm >= 3 * 2 * terms:                 # 未知数 = 2 軸 × 項の数
+        # 未知数 = 2 軸 × 項の数。星が画像の大部分に散っているときだけ(片寄っていると、星の無い側へ
+        # 多項式を外挿して大きくずれる。左 1/3 だけの星で隅が 7〜13 px 動いた)
+        if nm >= 3 * 2 * terms and _sv_spread_boxes(fxy[w > 0], field.W, field.H) >= SV_SIP_MIN_BOXES:
             try:
-                tan_c = sv_fit_wcs_lsq(fxy, sxyz, weights=w, crpix=field.center, sip_order=0)
+                tan_c = sv_fit_wcs_lsq(fxy, sxyz, weights=w, crpix=field.center, sip_order=0, crval_xyz=cv)
                 sip_c = sv_fit_wcs_lsq(fxy, sxyz, weights=w, crpix=field.center, sip_order=int(order),
-                                       width=field.W, height=field.H)
-                # 自由度で割った残差で比べる(未知数を増やせば残差そのものは必ず下がるので)
-                chi_t = _sv_wrms(tan_c, fxy, sxyz, w) ** 2 * 2 * nm / max(1, 2 * nm - 2 * 3)
-                chi_s = _sv_wrms(sip_c, fxy, sxyz, w) ** 2 * 2 * nm / max(1, 2 * nm - 2 * terms)
-                if chi_s < chi_t:
+                                       width=field.W, height=field.H, crval_xyz=cv)
+                # 残差の減り方の F 検定(上側 1 %)。「自由度で割った残差が下がれば採る」(F > 1)だと、
+                # 歪みが無くても 4 割ほどで SIP が付いた
+                rss_t = _sv_wrms(tan_c, fxy, sxyz, w) ** 2
+                rss_s = _sv_wrms(sip_c, fxy, sxyz, w) ** 2
+                d1, d2 = 2 * terms - 2 * 3, 2 * nm - 2 * terms
+                if rss_s > 0.0:
+                    take = (rss_t - rss_s) / d1 > sv_f_upper(d1, d2) * rss_s / d2
+                else:
+                    take = rss_t > 0.0
+                if take:
                     wcs = sip_c
             except ValueError:
                 pass
-    if not wcs.has_sip and fxy is not None and (w > 0).sum() >= 3:
+    if not wcs.has_sip and fxy is not None and nm >= 3:
         try:
-            wcs = sv_fit_wcs_lsq(fxy, sxyz, weights=w, crpix=field.center, sip_order=0)
+            wcs = sv_fit_wcs_lsq(fxy, sxyz, weights=w, crpix=field.center, sip_order=0, crval_xyz=cv)
         except ValueError:
             pass
     res = _sv_verify_hyps(field, catalog, f, _sv_hyp_from_wcs(hy1, wcs), gamma=1.0, record=True,
@@ -2568,9 +2720,12 @@ def _sv_match_file(field, f, fid, batch, s_lo, s_hi, hint, clock):
         return None, 0
     # 三角形(2 次元のコード)は、同じ位置のずれでコードの L2 が √(D/4) 倍になるので許容誤差もそう縮める
     # (Lang et al. の再現率 95 % の値も quad 0.0095・三角形 0.0064 で、比はほぼ 1/√2)
-    qi, qid = f.code_ball(batch["q"][vsel], tol * math.sqrt(f.code_dim / 4.0))
+    qi, qid = f.code_ball(batch["q"][vsel], tol * math.sqrt(f.code_dim / 4.0),
+                          check=None if clock is None else clock.check)
     if len(qi) == 0:
         return None, 0
+    if clock is not None:
+        clock.check()
     nhit = len(qi)
     v = vsel[qi]
     row = batch["row"][v]
@@ -2594,7 +2749,8 @@ def _sv_match_file(field, f, fid, batch, s_lo, s_hi, hint, clock):
     local = np.take_along_axis(batch["quads"][row[k]], perm[k], axis=1)
     F = field.P[local]
     fit = sv_fit_similarity_many(F, S[k])
-    good = fit["ok"] & (fit["scale"] >= s_lo) & (fit["scale"] <= s_hi)
+    # スケールの判定は安い棄却 1 と同じ許容で(許容なしだと、範囲を 1 つの値で渡したときにほぼ当たらない)
+    good = fit["ok"] & (fit["scale"] >= s_lo * (1.0 - tol)) & (fit["scale"] <= s_hi * (1.0 + tol))
     g = np.nonzero(good)[0]
     if len(g) == 0:
         return None, nhit
@@ -2629,6 +2785,61 @@ def sv_blind_scale_bounds(catalog, width):
     return max(low, 0.01), min(high, 3600.0)
 
 
+_SV_TILE_EDGE = {}                 # (healpix, nside) → (境界の点 (4·64, 3), 隣り合う点の間の角の最大の半分)
+
+
+def _sv_tile_edge(f):
+    """タイルの境界を辺ごとに 64 点で区切った点と、境界上のどの点からも最寄りの点までの角距離の上限。"""
+    key = (int(f.healpix), int(f.hpnside))
+    if key not in _SV_TILE_EDGE:
+        t = np.linspace(0.0, 1.0, 65)[:-1]
+        zero, one = np.zeros_like(t), np.ones_like(t)
+        dx = np.concatenate([t, one, 1.0 - t, zero])          # 境界を一周する順
+        dy = np.concatenate([zero, t, one, 1.0 - t])
+        pts = sv_healpix_xy_point(key[0], key[1], dx, dy)
+        gap = sv_angle_between(pts, np.roll(pts, -1, axis=0))
+        _SV_TILE_EDGE[key] = (pts, float(gap.max()) / 2.0)
+    return _SV_TILE_EDGE[key]
+
+
+def _sv_hint_tiles(files, field, s_hi, hint_t, p):
+    """ヒントがあるとき、タイルの索引を「その段の quad が照合で残りうるタイル」に絞る。
+
+    catalog.select はタイルを「ヒントの円(半径 + 画像の対角の半分 × スケールの上限)とタイルの外接円が重なるか」で
+    選ぶが、スケール不明だと上限が大きく、細かい段でも 20° 以上先のタイルまで入る。段ごとには、照合で残る
+    quad の画素スケールは s_impl = AB の角距離 ÷ AB の画素 ≤ SCALE_U ÷ (quad_min_frac × 短辺)(AB の画素は
+    quad 作りの下限以上)で、s_hi·(1 + codetol) も超えない。_sv_match_file は quad の中心がヒントの円
+    (半径 + 対角の半分 × s_impl × 1.05)の外なら捨てるので、残る quad の星 A は、ヒントから
+    R = その円の半径 + SCALE_U/2 以内にある。星はタイルの中だけにあるので、タイルの中に R 以内の点が無ければ
+    そのタイルからは仮説が出ない。「中に R 以内の点がある」は、ヒントがタイルの中にあるか、境界の標本点のどれかが
+    R + 標本の間隔の半分 以内にあるかで判定する(取りこぼさない側)。参照星はこれまでどおり系列の全タイルから集める。
+    全天の索引はそのまま。索引の quad の AB は SCALE_U 以下(手元の索引で 1e-7 以内まで確かめた)だが 0.1 % の余裕をとる。
+    """
+    hc, hr = hint_t
+    short = min(field.W, field.H)
+    out = []
+    home = {}
+    for f in files:
+        if f.tile_center_xyz is None:
+            out.append(f)
+            continue
+        U = f.scale_hi_rad * 1.001
+        s_max = s_hi * (1.0 + float(p.codetol))
+        if p.quad_min_frac > 0:
+            s_max = min(s_max, U * SV_ARCSEC_PER_RAD / (float(p.quad_min_frac) * short))
+        R = hr + field.half_diag * s_max * 1.05 / SV_ARCSEC_PER_RAD + U / 2.0
+        if float(sv_angle_between(f.tile_center_xyz, hc)) > f.tile_radius_rad + R + 1e-9:
+            continue
+        if f.hpnside not in home:
+            home[f.hpnside] = int(sv_healpix_xy_from_xyz(hc, f.hpnside))
+        if home[f.hpnside] != f.healpix:
+            pts, half_gap = _sv_tile_edge(f)
+            if float(np.min(sv_angle_between(pts, hc[None, :]))) > R + half_gap + 1e-6:
+                continue
+        out.append(f)
+    return out
+
+
 def sv_solve(xy, flux, width, height, catalog, *, scale_lo=None, scale_hi=None, hint=None,
              deadline=None, cancel=None, log=None, params=None, trace=None):
     """星のリストから WCS を求める(設計書 3 節)。解けなければ None。
@@ -2637,7 +2848,20 @@ def sv_solve(xy, flux, width, height, catalog, *, scale_lo=None, scale_hi=None, 
     catalog: SvIndexCatalog。scale_lo / scale_hi: 画素スケールの範囲(″/px。無ければ手持ちの段から逆算)。
     hint: (赤経, 赤緯, 半径)(度)か None。deadline: time.monotonic() の締め切り。cancel: 呼ぶと True/False を
     返す関数(True なら SvCancelled を投げる)。log: 1 行ずつの文字列を受ける関数。trace: JSON を書くパス。
+    hint の値が数でない・赤緯が ±90° の外・半径が負なら ValueError(黙って別の場所を探したり、何も当たらない
+    探索を締め切りまで続けたりしないように)。
     """
+    if hint is not None:
+        try:
+            h_ra, h_dec, h_rad = (float(v) for v in hint)
+        except (TypeError, ValueError):
+            raise ValueError(f"ヒントは (赤経, 赤緯, 半径) の 3 つの数で渡してください({hint!r})")
+        if not (math.isfinite(h_ra) and math.isfinite(h_dec) and math.isfinite(h_rad)):
+            raise ValueError(f"ヒントに数でない値があります(赤経 {h_ra}、赤緯 {h_dec}、半径 {h_rad})")
+        if not -90.0 <= h_dec <= 90.0:
+            raise ValueError(f"ヒントの赤緯 {h_dec}° が −90°〜+90° の外です")
+        if h_rad < 0.0:
+            raise ValueError(f"ヒントの半径 {h_rad}° が負です")
     t0 = time.monotonic()
     p = params if params is not None else SvParams()
     clock = _SvClock(deadline, cancel)
@@ -2680,6 +2904,8 @@ def _sv_search(xy, flux, width, height, catalog, scale_lo, scale_hi, hint, clock
     files = catalog.select(s_lo, s_hi, width, height,
                            hint_xyz=None if hint_t is None else hint_t[0],
                            hint_radius_rad=None if hint_t is None else hint_t[1])
+    if hint_t is not None:
+        files = _sv_hint_tiles(files, field, s_hi, hint_t, p)
     st["files"] = [f.name for f in files]
     st["scale"] = (s_lo, s_hi)
     if not files:
@@ -2761,27 +2987,62 @@ def _sv_flush(field, catalog, info, pending, s_lo, s_hi, hint_t, clock, log, p, 
             groups[-1][1].append((f, fid))
         else:
             groups.append((f.indexid, [(f, fid)]))
+    bad_series = st.setdefault("bad_series", set())
     for iid, members in groups:
-        hys = []
-        for f, fid in members:
-            b = batches.get(f.dimquads)
-            if b is None:
-                continue
-            clock.check()
-            hy, nhit = _sv_match_file(field, f, fid, b, s_lo, s_hi, hint_t, clock)
-            st["hits"] += nhit
-            fl["hits"] += nhit
-            if hy is not None:
-                hys.append(hy)
-        if not hys:
+        if iid in bad_series:
             continue
-        hy = _sv_hyp_concat(hys)
-        sol = _sv_verify_and_pick(field, catalog, members[0][0], hy, clock, log, p, st, fl)
+        while True:
+            # 中身の壊れた索引(SvIndexCorrupt)はそのファイルを目録から外して、系列の照合と検証をやり直す。
+            # それ以外の読み取りの例外は、どのファイルか分からないので系列ごとこの探索から外す
+            # (例外が sv_solve の外へ出ると、ほかの索引で解ける画像まで解けなくなるため)
+            try:
+                sol = _sv_flush_series(field, catalog, members, batches, s_lo, s_hi, hint_t, clock, log, p,
+                                       st, fl)
+            except SvIndexCorrupt as e:
+                if e.file.broken is not None:          # 外したはずのファイルがまた出た(起きないはず)
+                    bad_series.add(iid)
+                    sol = None
+                    break
+                catalog.mark_broken(e.file, str(e))
+                st.setdefault("broken", []).append(str(e))
+                if log:
+                    log(f"星図データが壊れているので、この先は使いません: {e}")
+                members = [(f, fid) for f, fid in members if f.broken is None]
+                continue
+            except (ValueError, IndexError) as e:
+                bad_series.add(iid)
+                st.setdefault("broken", []).append(f"index-{iid}: {type(e).__name__}: {e}")
+                if log:
+                    log(f"星図データ index-{iid} を読めないので、この探索では使いません"
+                        f"(中身が壊れているかもしれません。落とし直してください): {type(e).__name__}: {e}")
+                sol = None
+            break
         if sol is not None:
             fl["t"] = round(time.monotonic() - st["t0"], 4)
             return sol
     fl["t"] = round(time.monotonic() - st["t0"], 4)
     return None
+
+
+def _sv_flush_series(field, catalog, members, batches, s_lo, s_hi, hint_t, clock, log, p, st, fl):
+    """系列 1 つぶん: 索引ごとに照合し、仮説をまとめて検証する。解けたら SvSolution。"""
+    hys = []
+    for f, fid in members:
+        if f.broken is not None:
+            continue
+        b = batches.get(f.dimquads)
+        if b is None:
+            continue
+        clock.check()
+        hy, nhit = _sv_match_file(field, f, fid, b, s_lo, s_hi, hint_t, clock)
+        st["hits"] += nhit
+        fl["hits"] += nhit
+        if hy is not None:
+            hys.append(hy)
+    if not hys:
+        return None
+    hy = _sv_hyp_concat(hys)
+    return _sv_verify_and_pick(field, catalog, members[0][0], hy, clock, log, p, st, fl)
 
 
 def _sv_hyp_concat(hys):
@@ -2800,58 +3061,63 @@ def _sv_hyp_concat(hys):
 
 
 def _sv_verify_and_pick(field, catalog, f, hy, clock, log, p, st, fl):
-    """仮説の束を検証し、solve 以上の最初の仮説(なければ tune-up で上がった最初のもの)を改良して返す。"""
+    """仮説の束を newpoint の順に SV_VERIFY_STEP 個ずつ検証し、solve 以上の最初の仮説(なければ tune-up で
+    上がった最初のもの)を改良して返す。区切りごとに選ぶので、解が見つかればそこで止まる(後ろの仮説は検証しない)。
+    区切りは順に進むので、選ばれる仮説は束全体を検証してから選んだときと同じ。"""
     n = hy["n"]
-    best = np.full(n, -np.inf)
-    nmatch = np.zeros(n, np.int64)
-    quick = np.zeros(n, dtype=bool)
-    step = 2048                        # 大きすぎる束は分けて検証する(1 回の処理を短く保つ)
-    for s in range(0, n, step):
-        part = _sv_hyp_take(hy, slice(s, min(n, s + step)))
-        res = _sv_verify_hyps(field, catalog, f, part, clock=clock, quick=True)
-        best[s:s + part["n"]] = res["best"]
-        nmatch[s:s + part["n"]] = res["nmatch"]
-        quick[s:s + part["n"]] = res["quick_rejected"]
-        clock.check()
-    st["hyps"] += n
-    fl["hyps"] += n
-    st["quick_rejected"] = st.get("quick_rejected", 0) + int(quick.sum())
-    if n and float(best.max()) > st.get("logodds_max", -math.inf):
-        st["logodds_max"] = float(best.max())               # 改良する前の、検証した仮説の対数オッズの最大
     fs = catalog.series[f.indexid]
-    room = SV_TRACE_MAX_HYP - len(st["hyp_log"]) if st.get("trace") else 0
-    for i in range(min(n, max(0, room))):
-        ra, dec = sv_xyz_to_radec(hy["crval"][i])
-        st["hyp_log"].append(dict(index=fs[int(hy["fid"][i])].name, row=int(hy["row"][i]),
-                                  mirror=bool(hy["mirror"][i]),
-                                  quad_field=hy["qfield"][i].tolist(), quad_index=hy["qindex"][i].tolist(),
-                                  crval=[float(ra), float(dec)], crpix=hy["crpix"][i].tolist(),
-                                  cd=hy["cd"][i].tolist(), scale=round(float(hy["scale"][i]), 6),
-                                  quick_rejected=bool(quick[i]),
-                                  logodds=round(float(best[i]), 4) if np.isfinite(best[i]) else None,
-                                  nmatch=int(nmatch[i])))
     solve = float(p.logodds_solve)
     tune = float(p.logodds_tune)
-    for i in np.nonzero(best >= tune)[0]:
-        hy1 = _sv_hyp_take(hy, slice(i, i + 1))
-        if best[i] < solve:
-            # tune-up: 1 次で改良して検証し直す
-            _, r1 = _sv_refine(field, catalog, f, hy1, 1, clock=clock)
-            st.setdefault("tuneups", []).append(dict(index=fs[int(hy["fid"][i])].name,
-                                                     before=round(float(best[i]), 4),
-                                                     after=round(float(r1["best"][0]), 4)))
-            if not (r1["best"][0] >= solve):
+    for s in range(0, n, SV_VERIFY_STEP):
+        part = _sv_hyp_take(hy, slice(s, min(n, s + SV_VERIFY_STEP)))
+        m = part["n"]
+        res = _sv_verify_hyps(field, catalog, f, part, clock=clock, quick=True)
+        best, nmatch, quick = res["best"], res["nmatch"], res["quick_rejected"]
+        st["hyps"] += m
+        fl["hyps"] += m
+        st["quick_rejected"] = st.get("quick_rejected", 0) + int(quick.sum())
+        if m and float(best.max()) > st.get("logodds_max", -math.inf):
+            st["logodds_max"] = float(best.max())           # 改良する前の、検証した仮説の対数オッズの最大
+        room = SV_TRACE_MAX_HYP - len(st["hyp_log"]) if st.get("trace") else 0
+        for i in range(min(m, max(0, room))):
+            ra, dec = sv_xyz_to_radec(part["crval"][i])
+            st["hyp_log"].append(dict(index=fs[int(part["fid"][i])].name, row=int(part["row"][i]),
+                                      mirror=bool(part["mirror"][i]),
+                                      quad_field=part["qfield"][i].tolist(), quad_index=part["qindex"][i].tolist(),
+                                      crval=[float(ra), float(dec)], crpix=part["crpix"][i].tolist(),
+                                      cd=part["cd"][i].tolist(), scale=round(float(part["scale"][i]), 6),
+                                      quick_rejected=bool(quick[i]),
+                                      logodds=round(float(best[i]), 4) if np.isfinite(best[i]) else None,
+                                      nmatch=int(nmatch[i])))
+        for i in np.nonzero(best >= tune)[0]:
+            hy1 = _sv_hyp_take(part, slice(i, i + 1))
+            if best[i] < solve:
+                # tune-up: 1 次で改良して検証し直す
+                _, r1 = _sv_refine(field, catalog, f, hy1, 1, clock=clock, final=False)
+                st.setdefault("tuneups", []).append(dict(index=fs[int(part["fid"][i])].name,
+                                                         before=round(float(best[i]), 4),
+                                                         after=round(float(r1["best"][0]), 4)))
+                if not (r1["best"][0] >= solve):
+                    continue
+            try:
+                wcs, res1 = _sv_refine(field, catalog, f, hy1, p.tweak_order, clock=clock)
+            except _SvTimeUp:
+                # solve を超えた仮説がある(解は見つかっている)ので、締め切りを過ぎても改良は最後まで済ませる
+                # (数十 ms。中止の合図はそのまま見る)。ここで None を返すと、解けている画像が「解けず」になる
+                if log:
+                    log("締め切りを過ぎましたが、解が見つかっているので改良を済ませます")
+                wcs, res1 = _sv_refine(field, catalog, f, hy1, p.tweak_order,
+                                       clock=_SvClock(None, clock.cancel))
+            lo = float(res1["best"][0])
+            if not (lo >= solve):
                 continue
-        wcs, res = _sv_refine(field, catalog, f, hy1, p.tweak_order, clock=clock)
-        lo = float(res["best"][0])
-        if not (lo >= solve):
-            continue
-        return SvSolution(
-            wcs=wcs, logodds=lo, nmatch=int(res["nmatch"][0]), ndistract=int(res["ndistract"][0]),
-            nfield=int(res["NT"][0]), nref=int(res["NR"][0]), index_name=fs[int(hy1["fid"][0])].name,
-            quad_field=hy1["qfield"][0].copy(), quad_index=hy1["qindex"][0].copy(),
-            quads_tried=int(st["quads"]), hypotheses=int(st["hyps"]), seconds=0.0,
-            matches=[(m[0], m[1], m[2]) for m in res["matches"][0]])
+            return SvSolution(
+                wcs=wcs, logodds=lo, nmatch=int(res1["nmatch"][0]), ndistract=int(res1["ndistract"][0]),
+                nfield=int(res1["NT"][0]), nref=int(res1["NR"][0]), index_name=fs[int(hy1["fid"][0])].name,
+                quad_field=hy1["qfield"][0].copy(), quad_index=hy1["qindex"][0].copy(),
+                quads_tried=int(st["quads"]), hypotheses=int(st["hyps"]), seconds=0.0,
+                matches=[(mm[0], mm[1], mm[2]) for mm in res1["matches"][0]])
+        clock.check()
     return None
 
 
@@ -3301,8 +3567,13 @@ def detect_sources(sub, mask, sigma, min_sources=12, max_sources=400,
     min_snr を 3.0 に下げると暗い画像で星は増えるが (実測 8 → 15 個)、
     疎な星野では雑音のこぶも同じだけ増える (合成テストで純度 100% → 30%)。
     どの値でも「本物だけ増やす」ことはできなかったので 5.0 のままにしてある。
-    星が少ない画像は、画像を 2x2 にまとめてから検出し直す「深い検出」に任せる
-    (solve_offline がその試行を先に回す)。
+    これは図に緑の丸で出す星で、確かなものだけを残す。解析エンジンには、暗い星まで
+    拾う detect_sources_deep の星を先に渡す (solve_offline)。
+
+    しきい値の段の「σ」は smooth_sigma = sigma / 2 を単位にしているが、σ=1 の
+    ガウスでぼかした白色雑音の実際の標準偏差は sigma / (2√π) ≈ 0.28 sigma
+    (3I の画像の実測 0.31 sigma)。つまり最後の段 2.0 は実際には約 3.2σ で、
+    書いてある値より 1.6〜1.8 倍高い。図の星を変えないために、このままにしてある。
     """
     if ndimage is None:
         raise RuntimeError("scipy が必要です:  pip install scipy")
@@ -3348,36 +3619,328 @@ def detect_sources(sub, mask, sigma, min_sources=12, max_sources=400,
     return best[:max_sources], used
 
 
-def detect_sources_deep(sub, mask, sigma):
-    """
-    深い検出。画像を 2x2 にまとめてから同じ detect_sources をかけ、座標を元の画素へ戻す。
+# ------------------------------------------------ 解析エンジンに渡す星 (深い検出) ---
+#
+# detect_sources は図に出す星なので、領域の面積と開口 SNR で確かなものだけを残す。
+# 星の少ない画像ではそれが数個にとどまり、解析エンジンの検証 (対数オッズ) の
+# 証拠が足りなくなる (3I: 星 8 個で対数オッズ 21.6〜21.9、合格は 20.7。この検出の星 15 個で 47.7)。
+# 解析エンジンに渡す星は次の考え方で別に拾う (solve-field の image2xy と同じ方針。コードは自前):
+#   背景を引く → 星の幅に合わせてガウスでぼかす (整合フィルター) →
+#   局所の雑音の u 倍を超える局所の極大を星とする。
+# u は「雑音だけの画像で偽の極大が画像全体で 2 個ほど」になる値にする (下の式)。
+# 偽の星が多いと検証で不利になるので、数は増やしすぎない。
 
-    4 画素を足すと星の光は 4 倍、白色雑音は 2 倍なので、SNR が 2 倍になって
-    暗い星まで拾える (solve-field の --downsample 2 の代わり)。星が数個しか
-    写っていない画像 (3I など) を解くための経路。
-    まとめた画素 (bx, by) は元の画素 2bx, 2bx+1 の真ん中なので、戻すと (2bx+0.5, 2by+0.5)。
-    戻り値は detect_sources と同じ (星のリスト, しきい値)。
+_DEEP_FALSE_RATE = 0.045        # 偽の極大の数の係数 (白色雑音で数えて合わせた値)
+
+
+def _block_map(img, valid, box, fn):
     """
+    box 画素の升ごとに fn (升の値を最後の軸に並べた配列 → 升ごとの値) を計算し、
+    3x3 の中央値でならしてから升の中心を節点に双一次で引き伸ばす (外側は端の値)。
+    マスクの画素は NaN にして渡す。升が縦横 3 つ未満なら None。
+    """
+    ny, nx = img.shape
+    by, bx = ny // box, nx // box
+    if by < 3 or bx < 3:
+        return None
+    h, w = by * box, bx * box
+    oy, ox = (ny - h) // 2, (nx - w) // 2
+    t = np.where(valid, img, np.nan)[oy:oy + h, ox:ox + w].astype(np.float32)
+    t = t.reshape(by, box, bx, box).transpose(0, 2, 1, 3).reshape(by, bx, box * box)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")              # 全部マスクの升 (All-NaN slice)
+        coarse = fn(t)
+    good = np.isfinite(coarse)
+    if not good.any():
+        return None
+    coarse = np.where(good, coarse, float(np.median(coarse[good])))
+    coarse = ndimage.median_filter(coarse, size=3, mode="nearest")
+    fy = np.clip((np.arange(ny) - (oy + 0.5 * box - 0.5)) / box, 0, by - 1)
+    fx = np.clip((np.arange(nx) - (ox + 0.5 * box - 0.5)) / box, 0, bx - 1)
+    iy = np.minimum(fy.astype(int), by - 2)
+    wy = (fy - iy)[:, None]
+    rows = coarse[iy] * (1 - wy) + coarse[iy + 1] * wy
+    ix = np.minimum(fx.astype(int), bx - 2)
+    wx = (fx - ix)[None, :]
+    return (rows[:, ix] * (1 - wx) + rows[:, ix + 1] * wx).astype(np.float32)
+
+
+def _median_last(t):
+    """最後の軸の中央値 (NaN を除く)。NaN が無ければ速い np.median で済ませる。"""
+    if np.isnan(t).any():
+        return np.nanmedian(t, axis=-1)
+    return np.median(t, axis=-1)
+
+
+def _mad_sigma_last(t):
+    """最後の軸の MAD から出した標準偏差。有効な画素が 1/4 未満の升は NaN。"""
+    med = _median_last(t)
+    mad = _median_last(np.abs(t - med[..., None]))
+    n = np.sum(np.isfinite(t), axis=-1)
+    return np.where(n >= t.shape[-1] // 4, 1.4826 * mad, np.nan)
+
+
+def _clipped_stats(values, limit=500_000):
+    """sigma_clipped_stats (3σ) の (中央値, 標準偏差)。多いときは等間隔に間引いて速くする。"""
+    values = np.ravel(values)
+    if values.size > limit:
+        values = values[::int(math.ceil(values.size / limit))]
+    _, med, std = sigma_clipped_stats(values, sigma=3.0, maxiters=5)
+    return float(med), float(std)
+
+
+def _sharpness(work, y, x):
+    """中心の値 / 上下左右の平均。ベイヤーの補間で十字に広がったホットピクセルは大きい。"""
+    n4 = (float(work[y - 1, x]) + float(work[y + 1, x])
+          + float(work[y, x - 1]) + float(work[y, x + 1])) / 4.0
+    return float(work[y, x]) / n4 if n4 > 0 else math.inf
+
+
+def _psf_sigma(sm1, work, valid, ns1, sigma, max_stars=40, min_snr=10.0):
+    """
+    明るい星 (σ=1 でぼかした画像で雑音の min_snr 倍以上) の半値の面積から、
+    星像の σ を測る。ぼかした分 (σ=1) は二乗で引く。
+    戻り値 (σ [画素] か None, 使った星の数, 鋭さの上限)。
+    鋭さ (_sharpness) が明るい星の典型 (下から 1/4) の 2 倍を超える点は
+    ホットピクセルとみなして幅の計算に使わない。頂が平ら (飽和) な星も使わない。
+    """
+    ny, nx = sm1.shape
+    mx = ndimage.maximum_filter(sm1, size=7)
+    pk = (sm1 == mx) & (sm1 > min_snr * ns1) & valid
+    pk[:2] = pk[-2:] = False
+    pk[:, :2] = pk[:, -2:] = False
+    ys, xs = np.nonzero(pk)
+    if len(ys) < 3:
+        return None, 0, math.inf
+    found = []                                      # (σ, 鋭さ か None)
+    for i in np.argsort(-sm1[ys, xs])[:max_stars]:
+        y, x = int(ys[i]), int(xs[i])
+        v = float(sm1[y, x])
+        sharp = _sharpness(work, y, x) if work[y, x] > 10.0 * sigma else None
+        for r in (8, 16, 32):                       # 半値の領域が窓に収まるまで広げる
+            y0, y1 = max(0, y - r), min(ny, y + r + 1)
+            x0, x1 = max(0, x - r), min(nx, x + r + 1)
+            t = sm1[y0:y1, x0:x1]
+            lab, _ = ndimage.label(t > 0.5 * v)
+            k = lab[y - y0, x - x0]
+            if k == 0:
+                break
+            reg = lab == k
+            rr, cc = np.nonzero(reg)
+            touches = (rr.min() == 0 or cc.min() == 0 or rr.max() == reg.shape[0] - 1
+                       or cc.max() == reg.shape[1] - 1)
+            if touches:
+                if r < 32:
+                    continue
+                break                               # 65 画素の窓より大きい = 星ではない
+            if int((t[reg] > 0.98 * v).sum()) > 4:  # 頂が平ら = 飽和
+                break
+            fwhm = 2.0 * math.sqrt(float(reg.sum()) / math.pi)
+            found.append((math.sqrt(max((fwhm / 2.3548) ** 2 - 1.0, 0.0)), sharp))
+            break
+    sharps = [s for _, s in found if s is not None]
+    limit = max(2.5, 2.0 * float(np.percentile(sharps, 25))) if len(sharps) >= 3 else math.inf
+    widths = [w for w, s in found if (s is None or s <= limit) and w > 0.3]
+    if len(widths) < 3:
+        return None, len(widths), limit
+    return float(np.percentile(widths, 40)), len(widths), limit
+
+
+def _false_peaks(u, area, s):
+    """
+    雑音だけの画像を σ=s でぼかしたとき、雑音の u 倍を超える局所の極大の数の見込み。
+    ガウス場の極大の数の式 (面積 / s² · u · exp(-u²/2) に比例) の係数を、
+    白色雑音で数えて合わせた (s = 1〜3、968x548 と 1608x1104 で係数 0.04〜0.045)。
+    """
+    return _DEEP_FALSE_RATE * area / (s * s) * u * math.exp(-0.5 * u * u)
+
+
+def _peak_offset(a, b, c):
+    """
+    3 点 (左, 中央, 右) の極大の位置を -0.5〜0.5 で返す。値が全部正ならガウスに
+    ちょうど合う対数の放物線、そうでなければ普通の放物線を当てる。
+    """
+    if a > 0.0 and b > 0.0 and c > 0.0:
+        la, lb, lc = math.log(a), math.log(b), math.log(c)
+        den = la - 2.0 * lb + lc
+        if den < 0.0:
+            return min(max(0.5 * (la - lc) / den, -0.5), 0.5)
+    den = a - 2.0 * b + c
+    if den < 0.0:
+        return min(max(0.5 * (a - c) / den, -0.5), 0.5)
+    return 0.0
+
+
+def detect_sources_deep(sub, mask, sigma, max_sources=400, target_false=2.0, min_u=4.0,
+                        info=None):
+    """
+    深い検出 (解析エンジンに渡す星)。detect_sources より暗い星まで拾う。
+
+      1. σ=1 でぼかした画像の明るい星から、星像の幅 (σ_psf) を測る
+      2. 画像を σ = 1.25 σ_psf (測れなければ 1.5、1〜8 に収める) のガウスでぼかし、
+         升ごとの中央値で背景を引く。雑音は升ごとの MAD で場所ごとに測る
+      3. 局所の極大のうち、その場所の雑音の u 倍を超えるものを候補にする。
+         u は _false_peaks が target_false 個 (画像全体) になる値 (min_u 以上)
+      4. 明るい順に見て、次のものは捨てる:
+         ・もっと明るい星との間の谷が雑音の 3 倍より浅い (同じ星の肩・光条のこぶ)
+         ・ぼかした像の曲率で見た伸びが 4 倍を超える (光跡・線)
+         ・鋭さが明るい星の典型の 2 倍を超える (ベイヤーで十字に広がったホットピクセル)
+         ・まわりの輪 (ぼかした星像の σ の 3 倍の半径) の中央値より雑音の 3 倍以上高くない
+           (大きなかぶりの上で、背景の当てはめの残りに雑音が乗っただけの極大。月明かりの
+           合成画像で偽の星が 42 → 5 個。前処理の背景は 64 画素の升を双一次で引き伸ばすので、
+           急なかぶりでは升の節点に折れ目のこぶが残る)
+      5. 位置はぼかした像の 3x3 に (対数の) 放物線を当てて小数まで出す
+
+    戻り値は detect_sources と同じ形 (星のリスト, しきい値 u)。リストは明るい順。
+    flux はぼかした像の頂の値から出したガウスの全光量 (並べ替えの目安)、
+    snr は頂の値 / その場所の雑音、area は FWHM の円の面積 (目安)。
+    info に dict を渡すと、測った値 (s_psf, s, u, 候補の数, 捨てた理由ごとの数, 秒) を入れる。
+
+    以前の版は画像を 2x2 にまとめて detect_sources をかけていたが、効くのは FWHM が
+    7 画素以上の星だけだった。ここでは星の幅に合わせてぼかすので、細い星でも太い星でも
+    同じように効く。
+    """
+    if ndimage is None:
+        raise RuntimeError("scipy が必要です:  pip install scipy")
+    from scipy.spatial import cKDTree
+
+    t_start = time.perf_counter()
     ny, nx = sub.shape
-    h, w = ny // 2 * 2, nx // 2 * 2              # 奇数の端の 1 行・1 列は捨てる
-    if h < 16 or w < 16:
+    valid = ~np.asarray(mask, dtype=bool)
+    if ny < 16 or nx < 16 or int(valid.sum()) < 256:
         return [], None
-    s2 = np.asarray(sub[:h, :w], dtype=np.float32).reshape(
-        h // 2, 2, w // 2, 2).sum(axis=(1, 3))
-    m2 = np.asarray(mask[:h, :w]).reshape(h // 2, 2, w // 2, 2).any(axis=(1, 3))
-    # 雑音は測り直す。ベイヤーの平滑化などで隣どうしの雑音がそろっていると、
-    # まとめた後の雑音は 2σ より大きくなる (2σ と決め打ちすると偽の星が増える)。
-    ref = s2[~m2] if (~m2).any() else s2
-    sigma2 = float(sigma_clipped_stats(ref, sigma=3.0)[2])
-    if not np.isfinite(sigma2) or sigma2 <= 0:
-        sigma2 = 2.0 * float(sigma)
-    found, thr = detect_sources(s2, m2, sigma2, min_sources=60)
-    for c in found:
-        c["x"] = 2.0 * c["x"] + 0.5
-        c["y"] = 2.0 * c["y"] + 0.5
-        c["fwhm"] *= 2.0
-        c["area"] *= 4
-    return found, thr
+    work = np.where(valid, sub, 0.0).astype(np.float32)
+    sigma = float(sigma)
+
+    # 1. 星像の幅
+    sm1 = ndimage.gaussian_filter(work, 1.0)
+    back = _block_map(sm1, valid, 32, _median_last)
+    sm1 = sm1 - (back if back is not None else float(np.median(sm1[valid])))
+    ns1 = _clipped_stats(sm1[valid])[1]
+    if not np.isfinite(ns1) or ns1 <= 0:
+        ns1 = 0.28 * sigma
+    s_psf, n_psf, sharp_max = _psf_sigma(sm1, work, valid, ns1, sigma)
+    del sm1, back
+    s = min(max(1.25 * s_psf if s_psf else 1.5, 1.0), 8.0)
+
+    # 2. ぼかす・背景を引く・雑音を測る
+    sm = ndimage.gaussian_filter(work, s)
+    box = int(max(16, round(8 * s)))
+    back = _block_map(sm, valid, box, _median_last)
+    sm = sm - (back if back is not None else float(np.median(sm[valid])))
+    del back
+    # マスクの縁はぼかしでマスクの 0 が混ざって沈むので、ぼかしの幅だけ広げて除く
+    bad = (ndimage.binary_dilation(~valid, iterations=int(math.ceil(2 * s)) + 1)
+           if not valid.all() else np.zeros(valid.shape, dtype=bool))
+    if int((~bad).sum()) < 256:
+        return [], None
+    med, ns = _clipped_stats(sm[~bad])
+    if not np.isfinite(ns) or ns <= 0:
+        ns = max(ns1, 1e-12)
+    sm -= med
+    nmap = _block_map(sm, ~bad, int(max(32, round(16 * s))), _mad_sigma_last)
+    if nmap is None:
+        nmap = np.full(sm.shape, ns, dtype=np.float32)
+    nmap = np.maximum(nmap, 0.7 * ns)              # 星で埋まった升で雑音を低く見積もらない
+
+    # 3. しきい値と候補
+    area = float((~bad).sum())
+    u = float(min_u)
+    while u < 8.0 and _false_peaks(u, area, s) > target_false:
+        u += 0.05
+    u = round(u, 2)
+    mx = ndimage.maximum_filter(sm, size=2 * int(math.ceil(s)) + 1)
+    pk = (sm == mx) & (sm > u * nmap) & ~bad
+    edge = max(2, int(math.ceil(s)))
+    pk[:edge] = False
+    pk[-edge:] = False
+    pk[:, :edge] = False
+    pk[:, -edge:] = False
+    ys, xs = np.nonzero(pk)
+    del mx, pk
+    vals = sm[ys, xs]
+    order = np.argsort(-vals)[:max(4000, 10 * max_sources)]
+    ys, xs, vals = ys[order], xs[order], vals[order].astype(np.float64)
+    n = len(ys)
+
+    # 4. 明るい順に選ぶ
+    keep = np.zeros(n, dtype=bool)
+    rejected = {"saddle": 0, "elong": 0, "sharp": 0, "ring": 0}
+    # 局所の背景を測る輪: ぼかした星像の σ (√(σ_psf² + s²)) の 3 倍の半径。星の光はそこで頂の 1% まで落ちる
+    sp = s_psf if s_psf else s / 1.25
+    r_ring = 3.0 * math.sqrt(sp * sp + s * s)
+    ang = np.linspace(0.0, 2.0 * math.pi, max(16, int(2.0 * math.pi * r_ring)), endpoint=False)
+    ring_dx = np.round(r_ring * np.cos(ang)).astype(int)
+    ring_dy = np.round(r_ring * np.sin(ang)).astype(int)
+
+    def reach(v):
+        # 明るい星の像が雑音に沈むまでの半径の目安 (肩のこぶを探す範囲)
+        return min(max(4.0 * s, 2.0 * s * math.sqrt(max(v / (u * ns), 1.0))), 40.0 * s)
+
+    if n:
+        pts = np.column_stack([xs, ys]).astype(np.float64)
+        tree = cKDTree(pts)
+        r_max = reach(vals[0])
+        for i in range(n):
+            y, x, v = int(ys[i]), int(xs[i]), float(vals[i])
+            if work[y, x] > 10.0 * sigma and _sharpness(work, y, x) > sharp_max:
+                rejected["sharp"] += 1
+                continue
+            shoulder = False
+            for j in tree.query_ball_point(pts[i], r_max):
+                if j >= i or not keep[j]:
+                    continue
+                d = math.hypot(x - xs[j], y - ys[j])
+                if d > reach(vals[j]):
+                    continue
+                m = int(math.ceil(2 * d)) + 2
+                line = ndimage.map_coordinates(
+                    sm, [np.linspace(y, ys[j], m), np.linspace(x, xs[j], m)], order=1)
+                if v - float(line.min()) < 3.0 * float(nmap[y, x]):
+                    shoulder = True
+                    break
+            if shoulder:
+                rejected["saddle"] += 1
+                continue
+            c = sm[y - 1:y + 2, x - 1:x + 2].astype(np.float64)
+            dxx = c[1, 2] - 2.0 * c[1, 1] + c[1, 0]
+            dyy = c[2, 1] - 2.0 * c[1, 1] + c[0, 1]
+            dxy = (c[2, 2] - c[2, 0] - c[0, 2] + c[0, 0]) / 4.0
+            tr, det = dxx + dyy, dxx * dyy - dxy * dxy
+            elong = math.inf
+            if det > 0 and tr < 0:
+                root = math.sqrt(max(tr * tr / 4.0 - det, 0.0))
+                l1, l2 = tr / 2.0 - root, tr / 2.0 + root   # どちらも負。l1 が急なほう
+                if l2 < 0:
+                    elong = math.sqrt(l1 / l2)
+            if elong > 4.0:
+                rejected["elong"] += 1
+                continue
+            ry = np.clip(y + ring_dy, 0, ny - 1)
+            rx = np.clip(x + ring_dx, 0, nx - 1)
+            ring = sm[ry, rx][~bad[ry, rx]]               # マスクの側は沈んでいるので使わない
+            if len(ring) >= 8 and v - float(np.median(ring)) < 3.0 * float(nmap[y, x]):
+                rejected["ring"] += 1
+                continue
+            keep[i] = True
+
+    # 5. 位置と明るさ
+    fwhm = 2.3548 * sp
+    out = []
+    for i in np.flatnonzero(keep):
+        y, x, v = int(ys[i]), int(xs[i]), float(vals[i])
+        c = sm[y - 1:y + 2, x - 1:x + 2].astype(np.float64)
+        ox = _peak_offset(c[1, 0], c[1, 1], c[1, 2])
+        oy = _peak_offset(c[0, 1], c[1, 1], c[2, 1])
+        out.append(dict(x=x + ox, y=y + oy, flux=v * 2.0 * math.pi * (sp * sp + s * s),
+                        peak=float(sub[y, x]), area=int(round(math.pi * fwhm * fwhm / 4.0)),
+                        elong=1.0, fwhm=fwhm, snr=v / float(nmap[y, x])))
+    out.sort(key=lambda c: -c["flux"])
+    if info is not None:
+        info.update(s_psf=s_psf, n_psf=n_psf, s=s, u=u, noise=ns, candidates=n,
+                    kept=len(out), rejected=rejected, sharp_max=sharp_max,
+                    seconds=time.perf_counter() - t_start)
+    return out[:max_sources], u
 
 
 # ============================================================ スケール推定 ===
@@ -3561,9 +4124,39 @@ def missing_index_advice(fov_arcmin, index_names):
     return False, [
         f"画角 {fov_arcmin:.1f}′ に対応する星図データ ({lo:g}′〜{hi:g}′ 段) がありません。",
         f"必要なファイル: {files}",
-        f"取得: ［準備］タブの段の一覧で index-{series} に印を付け、"
-        "「選んだ段を落とす」を押してください。",
+        _index_get_advice(series),
     ]
+
+
+def _in_gui():
+    """GUI から動いているか。GUI はエンジンの名前空間に CANCEL_EVENT を置く (ノートブックには無い)。"""
+    return globals().get("CANCEL_EVENT") is not None
+
+
+def _index_get_advice(series):
+    """足りない段の取り方。GUI は［準備］タブ、ノートブックは配布ページの zip とセル C の INDEX_DIR。"""
+    if _in_gui():
+        return (f"取得: ［準備］タブの段の一覧で index-{series} に印を付け、"
+                "「選んだ段を落とす」を押してください。")
+    if series in (5202, 5203, 5204):
+        z = f"AstrometryData-index-{series}.zip"
+    elif series >= 5205 or 4100 <= series < 5200:
+        z = "AstrometryData.zip (基本セット)"
+    else:
+        return (f"取得: この段は配布ページに zip がありません。原典 "
+                f"https://portal.nersc.gov/project/cosmo/temp/dstn/index-5200/LITE/ から "
+                f"index-{series}-00〜47.fits を落として、セル C の INDEX_DIR のフォルダーに"
+                "入れてください。")
+    return (f"取得: 配布ページ (README の 5 章) から {z} を落として展開し、"
+            "セル C の INDEX_DIR のフォルダーに index-*.fits が並ぶようにしてください。")
+
+
+def _index_place_advice():
+    """星図データの置き場所の直し方 (GUI とノートブックで違う)。"""
+    if _in_gui():
+        return "［準備］タブで星図データを落とすか、置き場所を指定し直してください。"
+    return ("配布ページ (README の 5 章) の zip を展開するか、"
+            "セル C の INDEX_DIR を星図データのある場所に直してください。")
 
 
 # 星図データの目録 (SvIndexCatalog) を覚えておく。作るときにヘッダーを 1 本ずつ
@@ -3643,8 +4236,7 @@ def solver_diagnostics(index_dir=None):
     rep = {"ok": False, "messages": [], "indexes": [], "cfg": "", "paths": [index_dir]}
     if not os.path.isdir(index_dir):
         rep["messages"].append(
-            f"星図データの置き場所 {index_dir} がありません。"
-            "［準備］タブで星図データを落とすか、置き場所を指定し直してください。")
+            f"星図データの置き場所 {index_dir} がありません。" + _index_place_advice())
         return rep
     try:
         catalog = index_catalog(index_dir)
@@ -3658,7 +4250,8 @@ def solver_diagnostics(index_dir=None):
     if problems:
         rep["messages"].append(
             f"使えない星図データが {len(problems)} 個あるので読み飛ばします。"
-            "［準備］タブで落とし直してください。")
+            + ("［準備］タブで落とし直してください。" if _in_gui() else
+               "配布ページの zip から入れ直してください。"))
         for p in problems[:5]:
             rep["messages"].append("  " + _problem_text(p))
         if len(problems) > 5:
@@ -3666,7 +4259,7 @@ def solver_diagnostics(index_dir=None):
     if not rep["indexes"]:
         rep["messages"].append(
             f"使える星図データ (index-*.fits) が {index_dir} に 1 つもありません。"
-            "［準備］タブで落としてください。")
+            + _index_place_advice())
         return rep
 
     rep["ok"] = True
@@ -3743,7 +4336,8 @@ def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
                   diagnostics=None, index_dir=None, prep=None, cancel=None):
     """
     オフライン (zahyou 自前の解析エンジン sv_solve) で解く。条件を変えながら粘り強く挑む。
-    戻り値: WCS ヘッダ (CRPIX は 1 始まり) or None。
+    星は深い検出 (detect_sources_deep) の星を先に、sources (図に出す標準の検出の星) を
+    予備に使う。戻り値: WCS ヘッダ (CRPIX は 1 始まり) or None。
 
     例外は投げない (中止したときも None)。全体の締め切りは timeout 秒の壁時計で、
     試行ごとに残り時間の一部を割り当て、その締め切りを sv_solve に渡す。
@@ -3760,6 +4354,16 @@ def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
     except Exception as e:
         _log(f"\n  ❌ オフライン解析が途中で失敗しました: {type(e).__name__}: {e}")
         return None
+    finally:
+        # 索引ファイルの mmap を放す (目録とヘッダーの検査結果は覚えたまま。次の解析で開き直す)。
+        # 開いたままだと、GUI を開いている間は Explorer やほかのプロセスから星図データを
+        # 消したり置き換えたりできない (Windows)
+        cat = _INDEX_CATALOG["catalog"]
+        if cat is not None:
+            try:
+                cat.close()
+            except Exception:
+                pass
 
 
 def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
@@ -3786,7 +4390,7 @@ def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
     catalog = index_catalog(index_dir)
     installed = _catalog_names(catalog)
     if not installed:
-        _log("  ❌ 使える星図データがありません。［準備］タブで落としてください。")
+        _log("  ❌ 使える星図データがありません。" + _index_place_advice())
         return None
     lo, hi = index_coverage(installed)
     if lo is not None:
@@ -3812,60 +4416,58 @@ def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
         _log(f"  - 探索するスケール: {wide[0]:.3f}〜{wide[1]:.3f}″/px "
              f"(画角 {wide[0] * nx / 60:.1f}′〜{wide[1] * nx / 60:.0f}′ 相当)")
 
-    # 試行のはしご: (ラベル, 星の検出, ヒント, スケールの範囲, 残り時間の何割まで使うか)
-    #   標準 = run() が検出した星 / 深い = 画像を 2x2 にまとめて暗い星まで拾い直した星
-    std = []
+    # 星の組は 2 つ。
+    #   深い = 解析エンジンのために暗い星まで拾い直した星 (detect_sources_deep)
+    #   標準 = run() が検出して図に緑の丸で出す星 (detect_sources)
+    # 深い検出の星を先に渡す。解析エンジンは quad に使わなかった星で検証するので、
+    # 星が多いほど対数オッズの余裕が増える。実測 (sv_solve にブラインドで直接):
+    #   3I は標準 8 個で 21.6 (合格 20.7 のぎりぎり) → 深い 15 個で 47.7、
+    #   c2025a6 は 159 → 317、ほかの実写は同等。標準の星は予備に回す。
+    if stopped():
+        _log("\n  ■ 中止しました。")
+        return None
+    deep_stars, dinfo = [], {}
+    try:
+        if prep is None:
+            prep = preprocess(bundle.data)[:3]
+        deep_stars, u = detect_sources_deep(*prep, info=dinfo)
+    except Exception as e:
+        _log(f"\n  ⚠️ 深い検出に失敗したので、標準の検出の星だけで解きます: {type(e).__name__}: {e}")
+    if deep_stars:
+        s_psf = dinfo.get("s_psf")
+        how = (f"星の幅 (FWHM {2.3548 * s_psf:.1f} px) に合わせてぼかし" if s_psf else
+               f"星の幅を測れなかったので σ {dinfo.get('s', 1.5):.1f} px でぼかし")
+        _log(f"\n  - 深い検出 (解析エンジンに渡す星): {how}、星を {len(deep_stars)} 個検出"
+             f" (しきい値 {u:g}σ)")
+    elif dinfo:
+        _log("\n  - 深い検出: 星が見つかりませんでした。")
+    star_sets = [(name, stars) for name, stars in (("深い検出", deep_stars), ("標準の検出", sources))
+                 if len(stars) >= 3]
+    if not star_sets:
+        n_max = max(len(sources), len(deep_stars))
+        _log("  ❌ 星が 1 つも無いので解析できません。" if n_max == 0 else
+             f"  ❌ 星が {n_max} 個しかないので解析できません (3 個以上要ります)。")
+        return None
+
+    # 試行のはしご: 探す範囲の狭い (速い) 条件から順に、条件ごとに 深い → 標準 の星で。
+    # (ラベル, 星, ヒント, スケールの範囲, 残り時間の何割まで使うか)
+    # sv_solve は quad を試し尽くせば締め切り前に戻るので、狭い条件は両方の星で試しても安い。
+    conds = []
     if hint and narrow:
-        std.append(("座標ヒント + スケール既知", "std", hint, narrow, 0.25))
+        conds.append(("座標ヒント + スケール既知", hint, narrow, 0.25))
     if hint:
-        std.append(("座標ヒント + スケール全域", "std", hint, wide, 0.25))
+        conds.append(("座標ヒント + スケール全域", hint, wide, 0.25))
     if narrow:
-        std.append(("全天 + スケール既知", "std", None, narrow, 0.25))
-    std.append(("全天 + スケール全域", "std", None, wide, 0.5))
-    deep = [
-        (f"深い検出 (2x2) + {'座標ヒント' if hint else '全天'} + "
-         f"{'スケール既知' if narrow else 'スケール全域'}", "deep", hint, narrow or wide, 1.0),
-        ("深い検出 (2x2) + 全天 + スケール全域", "deep", None, wide, 1.0),
-    ]
-    # 星が少ないときは、標準の星で粘っても当たりにくい。深い検出を先に回す。
-    # (v6 でも「画像を直接渡す」試行を先にして、星 8 個の画像が 154 秒 → 20 秒になった)
-    if len(sources) < 12:
-        deep = [(a[0], a[1], a[2], a[3], share) for a, share in zip(deep, (0.25, 0.5))]
-        attempts = deep + std
-    else:
-        attempts = std + deep
-    if not sources:                       # 標準の検出で 0 個なら、深い検出だけ
-        attempts = [a for a in attempts if a[1] == "deep"]
-    seen, uniq = set(), []                # 同じ条件を 2 度走らせない
-    for a in attempts:
-        key = (a[1], a[2], a[3])
-        if key not in seen:
-            seen.add(key)
-            uniq.append(a)
-    attempts = uniq
+        conds.append(("全天 + スケール既知", None, narrow, 0.25))
+    conds.append(("全天 + スケール全域", None, wide, 0.5))
+    attempts = [(f"{name}の星 {len(stars)} 個 + {cond}", stars, hint_i, rng, share)
+                for cond, hint_i, rng, share in conds for name, stars in star_sets]
 
     solver_log = (lambda m: _log(f"    · {m}")) if verbose else None
-    star_sets = {"std": sources}
-    for i, (label, kind, hint_i, (s_lo, s_hi), share) in enumerate(attempts, 1):
+    for i, (label, stars, hint_i, (s_lo, s_hi), share) in enumerate(attempts, 1):
         if stopped():
             _log("\n  ■ 中止しました。")
             return None
-        if t_end - time.monotonic() < 2.0:
-            _log("  ⏱ 制限時間に達したので、これ以上の再試行はしません。")
-            break
-        if kind not in star_sets:
-            if prep is None:
-                prep = preprocess(bundle.data)[:3]
-            found, thr = detect_sources_deep(*prep)
-            star_sets[kind] = found
-            if found:
-                _log(f"\n  - 深い検出: 画像を 2x2 にまとめて星を {len(found)} 個検出"
-                     f" (しきい値 {thr:g}σ)")
-            else:
-                _log("\n  - 深い検出: 画像を 2x2 にまとめても星が見つかりませんでした。")
-        stars = star_sets[kind]
-        if not stars:
-            continue
         left = t_end - time.monotonic()
         if left < 2.0:
             _log("  ⏱ 制限時間に達したので、これ以上の再試行はしません。")
@@ -3900,12 +4502,10 @@ def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
     if stopped():
         _log("\n  ■ 中止しました。")
         return None
-    if not sources and not star_sets.get("deep"):
-        _log("  ❌ 星が 1 つも無いので解析できません。")
-        return None
     _log("\n  ❌ すべての条件で解けませんでした。心当たりの順に:")
-    if len(sources) < 15:
-        _log(f"     ・写っている星が {len(sources)} 個と少なめです。"
+    n_best = max(len(sources), len(deep_stars))
+    if n_best < 15:
+        _log(f"     ・写っている星が {n_best} 個と少なめです。"
              "露出を伸ばすか、複数フレームを重ねてください。")
     lo_fov, hi_fov = index_coverage(installed)
     if lo_fov is not None:
@@ -3941,35 +4541,56 @@ def internet_available(timeout=4):
     return False
 
 
-def _with_deadline(fn, timeout, label):
+def _with_deadline(fn, timeout, label, cancel=None):
     """
-    指定時間で必ず戻る呼び出し。
+    指定時間で必ず戻る呼び出し。中止の合図 (cancel) が立てば 0.5 秒以内に None で戻る。
     v5 は with ThreadPoolExecutor(...) を使っていたため、タイムアウト後も
     ブロックの出口でワーカーの終了を待ってしまい、実際には打ち切れなかった。
+
+    fn 自身が TimeoutError を投げたとき (astroquery の solve_timeout 切れ) は、こちらの締め切りとは
+    区別して知らせる。Python 3.11 以降は concurrent.futures.TimeoutError と組み込みの TimeoutError が
+    同じクラスなので、区別しないと「〜秒で終わりませんでした」と誤って出る。
     """
+    stopped = _cancel_checker(cancel)
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     try:
         future = executor.submit(fn)
-        try:
-            return future.result(timeout=timeout)
-        except concurrent.futures.TimeoutError:
-            future.cancel()
-            _log(f"⚠️ {label}が {timeout:.0f} 秒で終わりませんでした。")
-            return None
+        t_end = time.monotonic() + float(timeout)
+        while True:
+            if stopped():
+                future.cancel()
+                _log(f"  ■ {label}を中止しました。")
+                return None
+            left = t_end - time.monotonic()
+            if left <= 0:
+                future.cancel()
+                _log(f"⚠️ {label}が {timeout:.0f} 秒で終わりませんでした。")
+                return None
+            try:
+                return future.result(timeout=min(0.5, left))
+            except concurrent.futures.TimeoutError as e:
+                if future.done():               # fn が投げた TimeoutError
+                    why = e.args[0] if e.args else "時間切れ"
+                    _log(f"⚠️ {label}: 時間内に解けませんでした ({why})。")
+                    return None
     finally:
         # wait=False にしないと、ここで居残りスレッドの終了を待ってしまう
         executor.shutdown(wait=False, cancel_futures=True)
 
 
 def solve_online(image_path, api_key, sources=None, shape=None, timeout=120,
-                 hint_radec=None, hint_radius_deg=5.0, scale_hint=None):
+                 hint_radec=None, hint_radius_deg=5.0, scale_hint=None, cancel=None):
     """
-    nova.astrometry.net に投げる。指定時間で必ず戻る。
+    nova.astrometry.net に投げる。指定時間で必ず戻る。解けなければ None。
 
     星のリストがあるならそれを送る。画像そのものより桁違いに軽く、
     オフラインとまったく同じ検出結果で解けるので結果もぶれない。
+    cancel (threading.Event か、呼ぶと True を返す関数) が立てば 0.5 秒以内に None で戻り、
+    画像そのものは送らない (中止を押した人の画像を、押したあとに外へ送らない)。
+    nova が「解けない」と空の結果を返したときも None (成功扱いにしてオフラインを飛ばさない)。
     """
     from astroquery.astrometry_net import AstrometryNet
+    stopped = _cancel_checker(cancel)
 
     ast = AstrometryNet()
     ast.api_key = api_key
@@ -3992,15 +4613,20 @@ def solve_online(image_path, api_key, sources=None, shape=None, timeout=120,
             lambda: ast.solve_from_source_list(
                 xs, ys, int(nx), int(ny),
                 solve_timeout=int(timeout), verbose=False, **settings),
-            timeout + 15, "オンライン解析")
+            timeout + 15, "オンライン解析", cancel)
         if hdr:
             return hdr
+        if stopped():
+            return None
         _log("  - 星の位置だけでは解けなかったので、画像そのものを送ります。")
 
-    return _with_deadline(
+    if stopped():
+        return None
+    hdr = _with_deadline(
         lambda: ast.solve_from_image(image_path, solve_timeout=int(timeout),
                                      verbose=False, **settings),
-        timeout + 30, "オンライン解析")
+        timeout + 30, "オンライン解析", cancel)
+    return hdr if hdr else None
 
 
 # ============================================================== 目標の座標 ===
@@ -4149,9 +4775,10 @@ def wcs_summary(wcs, shape, flip_y=None):
       画面の上   … flip_y なら配列の -y 方向 (行 0 が画面の上に来る画像)
       パリティ   … 画面 (x 右・y 上) で「北が上なら東が左」= 空を見上げたままの
                     向きを「正 (鏡像なし)」とする。画面での det(CD) < 0 がそれ
-    None (既定) のときは以前の動き (配列の +y を上、det(CD) > 0 を「正」) のまま。
-    これは flip_y=True の画像では画面の見た目と同じだが、下から上へ並んだ FITS
-    では位置角が 180° ずれ、パリティも逆に出ていた。
+    None (既定) のときは以前 (v6) の動き (配列の +y を上、det(CD) > 0 を「正」) のまま。
+    この動きは、flip_y=True の画像 (PNG・JPEG・上から下へ並んだ FITS) では位置角が 180° ずれ
+    (パリティは正しい)、下から上へ並んだ FITS (flip_y=False) では位置角は正しくパリティが逆に出ていた。
+    v6 の記録の位置角を直すなら、直すのは flip_y=True の画像のほう (180° を足し引きする)。
     """
     ny, nx = shape
     scales = proj_plane_pixel_scales(wcs.celestial) * 3600.0
@@ -4595,7 +5222,8 @@ def run():
                 wcs_header = solve_online(
                     img_path, API_KEY, sources=sources, shape=bundle.shape,
                     timeout=ONLINE_TIMEOUT, hint_radec=hint,
-                    hint_radius_deg=SEARCH_RADIUS_DEG, scale_hint=scale_hint)
+                    hint_radius_deg=SEARCH_RADIUS_DEG, scale_hint=scale_hint,
+                    cancel=globals().get("CANCEL_EVENT"))
             except Exception as e:
                 _log(f"⚠️ オンライン解析でエラー: {type(e).__name__}: {e}")
                 wcs_header = None

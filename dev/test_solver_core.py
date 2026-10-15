@@ -3,7 +3,8 @@
 部品: 星の並べ替え、newpoint の quad 作り(= 総当たり)、画像側のコード = 索引のコード(索引の星を既知の WCS で
 画像へ投影して quad を作り、正準化したコードの code_ball で元の quad が引けること。両方の向き・三角形の索引も)、
 4 点の当てはめ、小さい円の検索、検証の対数オッズ(真の WCS は ≥ ln 1e9、乱数の WCS は低い)、合成星野を解く、
-締め切り・中止・cancel() の間隔、trace の中身。
+締め切り・中止・cancel() の間隔、trace の中身、ヒントのタイルの絞り込みで仮説が減らないこと、改良(広い視野の
+中心と、quad に偽の星が入った仮説)。
 実写の回帰: dev/solver_truth.json の正解(WSL の astrometry.net)と比べる。解けるべき画像はブラインド・ヒントあり
 (正解の中心から 0.5° ずらした点、半径 5°)・スケール既知(±25%)で、中心 2″(0.5 px のほうが大きければそれ)、
 スケール 0.2%、回転 0.1°、鏡像の一致。解けてはいけない画像は締め切り(60 秒)まで探して解なし、超過 1 秒以内。
@@ -615,6 +616,347 @@ def case_11_accumulate():
                 f"偽物 {int(res['ndistract'].sum())}・取り合い {int(res['nconflict'].sum())}")
 
 
+def case_12_hint_tiles():
+    """ヒントのタイルの絞り込み(_sv_hint_tiles): 絞る前のタイル(catalog.select)全部に照合しても、ヒントの判定を
+    通る仮説は絞った後のタイルからしか出ないこと。画像の quad は乱数の星から作る(当たりが索引のあちこちに散る)。
+    ヒントはタイルの角・赤経 0°・極・乱数の位置、半径 1° と 5°、スケールは不明(全域)と既知。"""
+    cat = catalog()
+    r = np.random.default_rng(12)
+    p = sc.SvParams()
+    W, H = 968, 548
+    xy = np.column_stack([r.uniform(0, W - 1, 60), r.uniform(0, H - 1, 60)])
+    field = sc._SvField(xy, None, W, H, p)
+    L2, inside = sc.sv_quad_geometry(field.P, p.codetol)
+    lo = 0.1 * min(W, H)
+    quads = np.concatenate([sc.sv_quads_newest(n, 4, L2, inside, lo * lo, 1e12) for n in range(24)])
+    quads = quads[r.choice(len(quads), min(len(quads), 2500), replace=False)]
+    codes = sc.sv_field_codes(field.P, quads)
+    q, row, perm, mir = sc.sv_code_variants(codes, 4, p.codetol, p.parity)
+    ab = np.sqrt(((field.P[quads[:, 1]] - field.P[quads[:, 0]]) ** 2).sum(axis=1))
+    batch = dict(quads=quads, ab=ab, q=q, row=row, perm=perm, mirror=mir)
+    spots = [("タイルの角", tuple(sc.sv_xyz_to_radec(sc.sv_healpix_xy_point(5, 2, 0.0, 0.0)))),
+             ("赤経 0°", (0.0, 25.0)), ("極", (77.0, 89.95)),
+             ("乱数", (float(r.uniform(0, 360)), float(np.degrees(np.arcsin(r.uniform(-0.9, 0.9))))))]
+    b_lo, b_hi = sc.sv_blind_scale_bounds(cat, W)
+    ok = True
+    n_before = n_after = n_hyp = n_hyp_tiles = 0
+    bad = []
+    for label, (ra, dec) in spots:
+        for rad in (1.0, 5.0):
+            for s_lo, s_hi in ((b_lo, b_hi), (1.1, 1.8)):
+                hint_t = (sc.sv_radec_to_xyz(float(ra), float(dec)), math.radians(rad))
+                files = cat.select(s_lo, s_hi, W, H, hint_xyz=hint_t[0], hint_radius_rad=hint_t[1])
+                tiles = [f for f in files if f.tile_center_xyz is not None]
+                kept = {f.name for f in sc._sv_hint_tiles(tiles, field, s_hi, hint_t, p)}
+                n_before += len(tiles)
+                n_after += len(kept)
+                for f in tiles:
+                    fid = next(i for i, g in enumerate(cat.series[f.indexid]) if g is f)
+                    hy, _ = sc._sv_match_file(field, f, fid, batch, s_lo, s_hi, hint_t, None)
+                    if hy is None:
+                        continue
+                    n_hyp += hy["n"]
+                    n_hyp_tiles += 1
+                    if f.name not in kept:
+                        bad.append(f"{label} 半径 {rad}° スケール {s_lo:.2g}〜{s_hi:.3g}: {f.name} から {hy['n']} 個")
+    ok = not bad and n_hyp > 0 and n_after < n_before
+    return ok, (f"タイル {n_before} → {n_after}(16 通りの計)、仮説 {n_hyp} 個({n_hyp_tiles} タイル)はすべて残した"
+                f"タイルから" if ok else "絞りすぎ: " + "; ".join(bad[:5]) + f"(仮説 {n_hyp})")
+
+
+def case_13_refine():
+    """改良(_sv_refine): (1) 広い視野(段 4116 だけ、1200×800・85.7″/px = 短辺 19°、スケール既知)を解いて、
+    中心 0.5 px・スケール 0.05 %・回転 0.1° 以内(反復で CRPIX を当てた点の重心に置いていた版は、種 139 で
+    中心 9.8 px・スケール −1.5 % だった。点が画像の片側に寄ると接点の違う TAN になるため)。
+    (2) 正しい quad の C 星を 3.4 px ずらした仮説(偽の星が quad に入った形。合成星野 few20 と同じ)を改良して、
+    中心 0.3 px・スケール 0.1 %・回転 0.1° 以内で対数オッズ ≥ ln 1e9。比べるため、quad の星を重み 1 で入れた
+    当て直し(tune-up の形)の値も出す。"""
+    cat = catalog()
+    msgs = []
+    ok = True
+    # (1) 広い視野
+    wide = copy.copy(cat)
+    wide.series = {4116: cat.series[4116]}
+    wide.files = list(cat.series[4116])
+    W, H, s = 1200, 800, 85.7
+    worst = [0.0, 0.0, 0.0]
+    for seed in (131, 137, 139):
+        r = np.random.default_rng(seed)
+        ra, dec = float(r.uniform(0, 360)), float(np.degrees(np.arcsin(r.uniform(-0.8, 0.8))))
+        xy, fl, w = synth(cat, 4116, ra, dec, s, W, H, float(r.uniform(0, 360)), bool(seed % 2), n=60, noise=0.3,
+                          drop=0.15, fake=10, seed=seed)
+        sol = sc.sv_solve(xy, fl, W, H, wide, scale_lo=0.75 * s, scale_hi=1.25 * s,
+                          deadline=time.monotonic() + 60)
+        if sol is None:
+            ok = False
+            msgs.append(f"4116 種 {seed}: 解けず")
+            continue
+        _, d = compare(measure(sol.wcs, W, H), measure(w, W, H), CRIT)
+        worst = [max(worst[0], d["center_arcsec"] / s), max(worst[1], abs(d["scale_pct"])),
+                 max(worst[2], abs(d["rot_deg"]))]
+        ok &= d["center_arcsec"] / s <= 0.5 and abs(d["scale_pct"]) <= 0.05 and abs(d["rot_deg"]) <= 0.1             and d["parity_same"]
+    msgs.append(f"4116 1200×800 85.7″/px 3 枚: 最大で中心 {worst[0]:.3f} px・スケール {worst[1]:.4f}%・回転 {worst[2]:.4f}°")
+    # (2) quad の 1 星が 3.4 px ずれた仮説
+    W, H, s = 968, 548, 1.4616
+    p = sc.SvParams()
+    rad = 0.5 * math.hypot(W, H) * s / sc.SV_ARCSEC_PER_RAD
+    rows = []
+    for seed in (13, 14, 15):
+        xy, fl, w = synth(cat, 5205, 61.89, 41.96, s, W, H, 152.87, True, n=16, noise=0.25, seed=seed)
+        xyz_img = w.pix_to_xyz(xy[:, 0], xy[:, 1])
+        found = None
+        for fid, f in enumerate(cat.series[5205]):
+            if f not in cat.tiles_near(5205, w.crval_xyz, rad):
+                continue
+            sid = f.stars_in_cone(w.crval_xyz, rad)
+            dots = xyz_img @ f.star_xyz(sid).T
+            j = np.argmax(dots, axis=1)
+            near = dots[np.arange(len(xy)), j] >= math.cos(2.0 / sc.SV_ARCSEC_PER_RAD)
+            img_of = {int(sid[j[i]]): i for i in np.nonzero(near)[0]}
+            qs = f.quad_stars(np.arange(f.nquads))
+            for k in np.nonzero(np.isin(qs, list(img_of)).all(axis=1))[0]:
+                qfield = np.array([img_of[int(t)] for t in qs[k]])
+                if np.linalg.norm(xy[qfield[1]] - xy[qfield[0]]) >= 150:
+                    found = (fid, f, qs[k], qfield)
+                    break
+            if found:
+                break
+        if found is None:
+            ok = False
+            rows.append(f"種 {seed}: quad が見つからない")
+            continue
+        fid, f, qindex, qfield = found
+        xy2 = xy.copy()
+        xy2[qfield[2]] += np.array([3.4, 0.0])          # C 星を 3.4 px ずらす(偽の星が quad に入った形)
+        field = sc._SvField(xy2, fl, W, H, p)
+        P = xy2[qfield]
+        fit = sc.sv_fit_similarity_many(P[None], f.star_xyz(qindex)[None])
+        hy1 = dict(n=1, crval=fit["crval"], east=fit["east"], north=fit["north"], cd=fit["cd"], crpix=fit["crpix"],
+                   scale=fit["scale"], qfield=qfield[None], qindex=qindex[None], fid=np.array([fid]),
+                   qc=((P[0] + P[1]) / 2.0)[None], Q2=np.array([float(((P[1] - P[0]) ** 2).sum()) / 4.0]))
+        out = {}
+        for final in (True, False):
+            wcs, res = sc._sv_refine(field, cat, f, hy1, 2, final=final)
+            _, d = compare(measure(wcs, W, H), measure(w, W, H), CRIT)
+            out[final] = (d["center_arcsec"] / s, d["scale_pct"], d["rot_deg"], float(res["best"][0]),
+                          int(res["nmatch"][0]))
+        c1, s1, r1, lo1, nm1 = out[True]
+        ok &= c1 <= 0.3 and abs(s1) <= 0.1 and abs(r1) <= 0.1 and lo1 >= LN1E9
+        rows.append(f"種 {seed}(一致 {nm1}): 中心 {c1:.3f} px・スケール {s1:+.4f}%・回転 {r1:+.4f}°"
+                    f"(quad の星も入れると {out[False][0]:.3f} px・{out[False][1]:+.4f}%・{out[False][2]:+.4f}°)")
+    msgs.append("quad の C 星を 3.4 px ずらした仮説: " + "、".join(rows))
+    return ok, "; ".join(msgs)
+
+
+def _err_px(sol_wcs, truth, W, H, scale):
+    """画像の中心と 4 隅で、解と正解が指す向きの差(px)。"""
+    pts = np.array([[(W - 1) / 2, (H - 1) / 2], [0.0, 0.0], [W - 1.0, 0.0], [0.0, H - 1.0], [W - 1.0, H - 1.0]])
+    return (sc.sv_angle_between(sol_wcs.pix_to_xyz(pts[:, 0], pts[:, 1]), truth.pix_to_xyz(pts[:, 0], pts[:, 1]))
+            * sc.SV_ARCSEC_PER_RAD / scale)
+
+
+def _synth_region(cat, fov, ra, dec, seed, region, W=2000, H=1300, rot=20.0, mirror=False, sip=None, n=80,
+                  frac=0.3):
+    """solver_synth の合成星野(歪みなし TAN か sip)から、星を region(all・left = 左 1/3・corner = 左 1/3 × 上 1/2)
+    だけ残す。frac は全面のときの欠けと偽の星の割合。戻り値 (xy, flux, 正解, スケール)。"""
+    import solver_synth as ss
+    scale = fov * 3600.0 / W
+    if region == "all":
+        fld = ss.sv_synth_field(cat, ra, dec, scale, W, H, rotation_deg=rot, mirror=mirror, seed=seed, n_stars=n,
+                                sip=sip, drop_frac=frac, distractor_frac=frac)
+        return fld["xy"], fld["flux"], fld["truth"], scale
+    fld = ss.sv_synth_field(cat, ra, dec, scale, W, H, rotation_deg=rot, mirror=mirror, seed=seed, n_stars=None,
+                            distractor_frac=0.1, drop_frac=0.1, sip=sip)
+    m = fld["xy"][:, 0] < W / 3.0
+    if region == "corner":
+        m &= fld["xy"][:, 1] < H / 2.0
+    k = np.nonzero(m)[0][:n]
+    return fld["xy"][k], fld["flux"][k], fld["truth"], scale
+
+
+def case_14_wide_lopsided():
+    """広い視野(2000×1300、短辺 26°〜39° = 40°・60° の横幅、正解は歪みなしの TAN)で、星が全面・左 1/3・
+    左 1/3 × 上 1/2 にある合成星野をスケール既知(×0.8〜1.25)で解き、画像の中心のずれが 0.5 px 以内。
+    (改良の反復で CRPIX を一致した星の重心に置いていた版は、40° の全面で中心 5〜6 px、60° の左 1/3 で 7〜15 px
+    ずれた解を「解けた」として返した。接点の動かし直しが 3 回で打ち切りだった版は、60° の左 1/3 × 上 1/2 で
+    1〜2.6 px 残した)"""
+    cat = catalog()
+    runs = [(40.0, 2, "all"), (40.0, 5, "all"), (60.0, 3, "all"), (40.0, 1, "left"), (60.0, 1, "left"),
+            (60.0, 2, "left"), (40.0, 2, "corner"), (40.0, 3, "corner"), (60.0, 2, "corner"), (60.0, 3, "corner")]
+    worst = 0.0
+    rows = []
+    ok = True
+    for fov, seed, region in runs:
+        xy, fl, truth, s = _synth_region(cat, fov, 150.0, 20.0, seed, region)
+        W, H = 2000, 1300
+        sol = sc.sv_solve(xy, fl, W, H, cat, scale_lo=s * 0.8, scale_hi=s * 1.25, deadline=time.monotonic() + 60)
+        if sol is None:
+            ok = False
+            rows.append(f"{fov:g}° {region} 種 {seed}: 解けず")
+            continue
+        e = _err_px(sol.wcs, truth, W, H, s)
+        worst = max(worst, float(e[0]))
+        ok &= e[0] <= 0.5
+        if e[0] > 0.5:
+            rows.append(f"{fov:g}° {region} 種 {seed}: 中心 {e[0]:.2f} px")
+    return ok, f"{len(runs)} 枚の中心のずれの最大 {worst:.2f} px" + ("; NG: " + "; ".join(rows) if rows else "")
+
+
+def case_15_sip_decision():
+    """SIP を付けるかの判定: (1) 歪みなしの TAN で星が左 1/3 だけの 1.1° の星野(5 枚)には SIP を付けず、
+    tweak_order 2 の解が 1 の解と同じ(「自由度で割った残差が少しでも下がれば採る」版は 4 割ほどで SIP を付け、
+    星の無い側の隅が 7〜13 px 動いた)。(2) 2 次の歪み(隅で約 4 px)がある全面の 5° の星野(3 枚)には付き、
+    隅のずれが TAN のときより小さく 1 px 以内。"""
+    cat = catalog()
+    W, H = 2000, 1300
+    bad = []
+    n_sip_lop = 0
+    for seed in (11, 14, 15, 16, 18):
+        xy, fl, truth, s = _synth_region(cat, 1.1, 75.0, 35.0, seed, "left", rot=-35.0, mirror=True)
+        res = {}
+        for order in (1, 2):
+            sol = sc.sv_solve(xy, fl, W, H, cat, scale_lo=s * 0.8, scale_hi=s * 1.25, hint=(75.0, 35.0, 2.0),
+                              deadline=time.monotonic() + 60, params=sc.SvParams(tweak_order=order))
+            res[order] = sol
+        if res[1] is None or res[2] is None:
+            bad.append(f"左 1/3 種 {seed}: 解けず")
+            continue
+        n_sip_lop += res[2].wcs.has_sip
+        e1, e2 = _err_px(res[1].wcs, truth, W, H, s), _err_px(res[2].wcs, truth, W, H, s)
+        if res[2].wcs.has_sip or abs(e1[0] - e2[0]) > 1e-6:
+            bad.append(f"左 1/3 種 {seed}: SIP {res[2].wcs.has_sip}、中心 {e1[0]:.2f} → {e2[0]:.2f} px")
+    hd = 0.5 * math.hypot(W, H)
+    A = np.zeros((3, 3))
+    B = np.zeros((3, 3))
+    A[2, 0], A[1, 1], B[0, 2], B[2, 0] = 3.0 / hd ** 2, 2.0 / hd ** 2, -3.0 / hd ** 2, 1.5 / hd ** 2
+    rows = []
+    for seed in (1, 2, 3):
+        xy, fl, truth, s = _synth_region(cat, 5.0, 75.0, 35.0, seed, "all", rot=-35.0, mirror=True, sip=(A, B), n=150,
+                                         frac=0.1)
+        res = {}
+        for order in (1, 2):
+            res[order] = sc.sv_solve(xy, fl, W, H, cat, scale_lo=s * 0.8, scale_hi=s * 1.25, hint=(75.0, 35.0, 2.0),
+                                     deadline=time.monotonic() + 60, params=sc.SvParams(tweak_order=order))
+        if res[1] is None or res[2] is None:
+            bad.append(f"歪み 種 {seed}: 解けず")
+            continue
+        e1, e2 = _err_px(res[1].wcs, truth, W, H, s), _err_px(res[2].wcs, truth, W, H, s)
+        rows.append(f"{e1[1:].max():.2f} → {e2[1:].max():.2f}")
+        if not res[2].wcs.has_sip or e2[1:].max() > 1.0 or e2[1:].max() >= e1[1:].max():
+            bad.append(f"歪み 種 {seed}: SIP {res[2].wcs.has_sip}、隅 {e1[1:].max():.2f} → {e2[1:].max():.2f} px")
+    msg = (f"左 1/3 の 5 枚で SIP {n_sip_lop} 枚(解は TAN と同じ); 2 次の歪みの 3 枚は SIP が付き、隅の最大 "
+           + "、".join(rows) + " px(TAN → SIP)")
+    return not bad, msg + ("; NG: " + "; ".join(bad) if bad else "")
+
+
+def case_16_deadline_in_refine():
+    """solve を超えた仮説の改良の途中で締め切りが来ても、見つかった解を返す(改良に入った直後に締め切りを置き直す。
+    捨てていた版は None を返した)。改良を済ませた解は締め切りなしの解と同じ。"""
+    cat = catalog()
+    xy, fl, truth, s = _synth_region(cat, 1600 * 2.0 / 3600.0, 75.0, 35.0, 21, "all", W=1600, H=1000, rot=-35.0)
+    base = sc.sv_solve(xy, fl, 1600, 1000, cat, scale_lo=1.6, scale_hi=2.5, hint=(75.0, 35.0, 2.0),
+                       deadline=time.monotonic() + 60)
+    orig = sc._sv_refine
+    calls = []
+
+    def refine(field, catalog_, f, hy1, order, clock=None, **kw):
+        calls.append(order)
+        if clock is not None and len(calls) == 1:
+            clock.deadline = time.monotonic() + 0.003
+        return orig(field, catalog_, f, hy1, order, clock=clock, **kw)
+
+    logs = []
+    sc._sv_refine = refine
+    try:
+        sol = sc.sv_solve(xy, fl, 1600, 1000, cat, scale_lo=1.6, scale_hi=2.5, hint=(75.0, 35.0, 2.0),
+                          deadline=time.monotonic() + 60, log=logs.append)
+    finally:
+        sc._sv_refine = orig
+    ok = (base is not None and sol is not None and abs(sol.logodds - base.logodds) < 1e-9
+          and sol.index_name == base.index_name and any("締め切りを過ぎましたが" in m for m in logs))
+    return ok, (f"締め切りなし {base!r}; 改良の途中で締め切り → {sol!r}" if not ok else
+                f"{sol.index_name}・対数オッズ {sol.logodds:.1f}(締め切りなしと同じ)、改良 {len(calls)} 回")
+
+
+def case_17_corrupt_index():
+    """中身の壊れた索引(大きさとヘッダーは正しい。index-4116 の星の木の葉の範囲を入れ替えたもの、quad の表の
+    星番号を 1 万か所化けさせたもの)があっても sv_solve は例外を出さず、そのファイルを目録の problems へ回して、
+    ほかの索引で解く(壊れていない 4116 なら 4116 で解ける画像)。"""
+    import shutil
+    import test_solver_index as tsi
+    cat = catalog()
+    xy, fl, truth, s = _synth_region(cat, 40.0, 150.0, 20.0, 2, "all")
+    W, H = 2000, 1300
+    rows = []
+    bad = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for t in (4113, 4114, 4115, 4116, 4117):
+            shutil.copyfile(os.path.join(DATA, f"index-{t}.fits"), os.path.join(tmp, f"index-{t}.fits"))
+        for mode in ("lr", "quad"):
+            if mode == "quad":
+                shutil.copyfile(os.path.join(DATA, "index-4116.fits"), os.path.join(tmp, "index-4116.fits"))
+            tsi._corrupt(os.path.join(tmp, "index-4116.fits"), mode, count=10000)
+            c = sc.SvIndexCatalog(tmp)
+            logs = []
+            try:
+                sol = sc.sv_solve(xy, fl, W, H, c, scale_lo=s * 0.8, scale_hi=s * 1.25,
+                                  deadline=time.monotonic() + 60, log=logs.append)
+            except Exception as e:
+                sol = None
+                bad.append(f"{mode}: 例外 {type(e).__name__}: {e}")
+            names = [os.path.basename(p) for p, _ in c.problems]
+            if sol is None or names != ["index-4116.fits"] or not any("壊れている" in m for m in logs):
+                bad.append(f"{mode}: 解 {sol!r}、problems {names}")
+            else:
+                e = _err_px(sol.wcs, truth, W, H, s)
+                rows.append(f"{mode}: {sol.index_name} で解けた(中心 {e[0]:.2f} px)")
+            c.close()
+    return not bad, "; ".join(rows) + ("; NG: " + "; ".join(bad) if bad else "")
+
+
+def case_18_scale_point_hint_values():
+    """スケールを 1 つの値で渡しても解ける(4 点の当てはめのスケールの判定に許容が無かった版は、quad を
+    全部試して None)。ヒントの値がおかしい(半径が負・NaN・赤緯が ±90° の外)なら ValueError。"""
+    cat = catalog()
+    xy, fl, truth, s = _synth_region(cat, 1600 * 2.0 / 3600.0, 75.0, 35.0, 21, "all", W=1600, H=1000, rot=-35.0)
+    t0 = time.monotonic()
+    sol = sc.sv_solve(xy, fl, 1600, 1000, cat, scale_lo=2.0, scale_hi=2.0, hint=(75.0, 35.0, 2.0),
+                      deadline=t0 + 30)
+    dt = time.monotonic() - t0
+    bad = [] if sol is not None else [f"スケール 2.0〜2.0 で解けず({dt:.1f} 秒)"]
+    for hint in ((75.0, 35.0, -1.0), (75.0, 35.0, float("nan")), (float("nan"), 35.0, 2.0), (255.0, 145.0, 2.0)):
+        try:
+            sc.sv_solve(xy, fl, 1600, 1000, cat, scale_lo=1.6, scale_hi=2.5, hint=hint, deadline=time.monotonic() + 5)
+            bad.append(f"ヒント {hint} が通った")
+        except ValueError:
+            pass
+    return not bad, (f"2.0〜2.0″/px で {sol.index_name}({dt:.2f} 秒); おかしいヒント 4 通りは ValueError"
+                     if not bad else "NG: " + "; ".join(bad))
+
+
+def case_19_check_interval_hint():
+    """ヒントあり・スケール既知(1.5〜2.5″/px)の乱数の星野 150 個(解は無い)で、cancel() の間隔が 0.2 秒以内
+    (索引 1 本の照合の途中で確かめていなかった版は、束のコード 4 万個の照合で 0.44 秒あいた)。"""
+    cat = catalog()
+    r = np.random.default_rng(9)
+    W, H = 1200, 800
+    xy = np.column_stack([r.uniform(0, W - 1, 150), r.uniform(0, H - 1, 150)])
+    fl = r.uniform(1, 100, 150)
+    calls = []
+
+    def cancel():
+        calls.append(time.monotonic())
+        return False
+
+    t0 = time.monotonic()
+    sol = sc.sv_solve(xy, fl, W, H, cat, scale_lo=1.5, scale_hi=2.5, hint=(200.0, -10.0, 5.0),
+                      deadline=t0 + 20.0, cancel=cancel)
+    t1 = time.monotonic()
+    gaps = np.diff(np.array([t0] + calls + [t1]))
+    ok = sol is None and gaps.max() <= 0.2
+    return ok, f"解なし、{t1 - t0:.1f} 秒、cancel() {len(calls)} 回・間隔の最大 {gaps.max():.3f} 秒"
+
+
 UNIT = [
     ("01 星の並べ替え(明るい順 → 一様化)", case_01_order, ()),
     ("02 newpoint の quad 作り = 総当たり(4 星・3 星)", case_02_newpoint, ()),
@@ -628,6 +970,14 @@ UNIT = [
     ("09 中止(SvCancelled が 0.2 秒以内)", case_09_cancel, (5205,)),
     ("10 trace の中身", case_10_trace, (5205,)),
     ("11 検証の積み上げ(1 対 1 の付け替え)= 1 つずつの素直な書き方", case_11_accumulate, ()),
+    ("12 ヒントのタイルの絞り込みで仮説が減らない", case_12_hint_tiles, (5202, 5203, 5204, 5205, 5206)),
+    ("13 改良(広い視野の中心・quad の星のずれ)", case_13_refine, (4116, 5205)),
+    ("14 広い視野で星が片寄っても中心 0.5 px 以内(40°・60°)", case_14_wide_lopsided, (4113, 4114, 4115, 4116, 4117)),
+    ("15 SIP の判定(片寄った星には付けない・2 次の歪みには付ける)", case_15_sip_decision, (5206, 4107, 4108)),
+    ("16 改良の途中の締め切りでも見つかった解を返す", case_16_deadline_in_refine, (5206,)),
+    ("17 中身の壊れた索引を外して解く", case_17_corrupt_index, (4113, 4114, 4115, 4116, 4117)),
+    ("18 スケールを 1 つの値で・おかしいヒントは ValueError", case_18_scale_point_hint_values, (5206,)),
+    ("19 ヒントありの照合でも cancel() の間隔 0.2 秒以内", case_19_check_interval_hint, (4107,)),
 ]
 
 
@@ -653,8 +1003,19 @@ def load_detector():
     return m, "dev"
 
 
+def image_path(e):
+    """正解ファイルの path を、この PC のパスにする(test_solver_real.py の image_path と同じ)。"""
+    p = e["path"]
+    if p.startswith("$ZAHYOU_TEST_IMAGES/"):
+        base = os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~")
+        return os.path.join(base, *p[len("$ZAHYOU_TEST_IMAGES/"):].split("/"))
+    return os.path.join(REPO, *p.split("/"))
+
+
 def detect(zc, path):
     """標準の検出(detect_sources(min_sources=60))。12 個未満なら 2×2 にまとめた深い検出((2x+0.5, 2y+0.5) に戻す)。
+    (正解を作ったときの main の段取りを写したもの。今の zahyou_core の detect_sources_deep とは別物で、
+    この試験は検出ではなく sv_solve を確かめるためにこれを使う)
 
     戻り値 (xy, flux, W, H, どちらを使ったか, 標準の数, 深い数)。
     """
@@ -702,14 +1063,14 @@ def real_cases(doc):
         if sel and not any(s in tag for s in sel):
             continue
         e = imgs.get(tag)
-        if e is None or not os.path.exists(e["path"]):
+        if e is None or not os.path.exists(image_path(e)):
             record(f"R {tag}", None, "画像が無い" if e else "正解ファイルに無い")
             continue
         if cat is None:
             record(f"R {tag}", None, f"索引が無い({DATA})")
             continue
         try:
-            xy, fl, W, H, used, n_std, n_deep = detect(zc, e["path"])
+            xy, fl, W, H, used, n_std, n_deep = detect(zc, image_path(e))
         except Exception as ex:
             record(f"R {tag}", False, f"検出で例外: {type(ex).__name__}: {ex}")
             continue

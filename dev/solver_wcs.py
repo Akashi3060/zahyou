@@ -25,6 +25,9 @@ import numpy as np
 
 
 SV_ARCSEC_PER_RAD = 180.0 / math.pi * 3600.0
+SV_LSQ_MAX_SHIFTS = 40       # sv_fit_wcs_lsq で接点を動かす回数の上限(90° の視野で星が隅の 1/4 だけでも収まる)
+SV_LSQ_TOL_PX = 1e-8         # CRPIX に残る定数項(画素に直したもの)がこれ以下なら接点を動かすのをやめる
+SV_LSQ_FAIL_PX = 0.01        # 上限まで動かしてもこれを超えて残れば、当てはめは失敗(ValueError)
 
 
 def sv_radec_to_xyz(ra_deg, dec_deg):
@@ -482,15 +485,19 @@ def sv_fit_sip_inverse(wcs, width=None, height=None, order=None, bounds=None):
 
 
 def sv_fit_wcs_lsq(field_xy, star_xyz, weights=None, crpix=None, sip_order=0,
-                   crval_xyz=None, iterations=3, width=None, height=None):
+                   crval_xyz=None, iterations=SV_LSQ_MAX_SHIFTS, width=None, height=None):
     """対応する画像の点と星から、TAN(+SIP)を重みつき最小二乗で当てる(設計書 3.8 節)。
 
     CRPIX は固定(既定は画像の点の重みつき重心)。接点(既定は星の重みつきの和の方向)のまわりで星を
     投影し、ξ と η をそれぞれ u, v(画素 − CRPIX)の多項式(0 ≤ p+q ≤ 次数、次数 = max(1, sip_order))で当てる。
-    定数項は接点のずれなので、接点をそのぶん動かして当て直す(iterations 回動かし、当てるのは iterations+1 回。
-    ずれは 1 回ごとにおよそ「視野の広さ(ラジアン)の 2 乗」倍に縮む)。1 次の項が CD、2 次以上に
-    CD⁻¹ を掛けたものが SIP の A, B。sip_order ≥ 2 なら逆変換 AP, BP(次数 sip_order+1)も、画像全体
-    (width, height。無ければ点の範囲)の格子で当てる。重み 0 の点は使わない。点が足りなければ ValueError。
+    定数項は接点のずれなので、接点をそのぶん動かして当て直す。定数項を CD⁻¹ で画素に直した大きさが
+    SV_LSQ_TOL_PX 以下になるまで繰り返す(iterations は動かす回数の上限)。ずれの縮み方は星の配置しだいで、
+    星が CRPIX のまわりに散っていれば 1 回ごとにおよそ「視野の広さ(ラジアン)の 2 乗」倍だが、CRPIX から離れて
+    固まっていると遅い(60° の視野で星が隅の 1/4 だけだと、3 回動かしても中心で 5 px 残り、10 回で 0.000 px。
+    90° の隅の 1/4 では 30 回近く要る)。上限まで動かしても SV_LSQ_FAIL_PX を超えるずれが残れば ValueError
+    (その WCS は CRPIX の位置が定まっていない)。1 次の項が CD、2 次以上に CD⁻¹ を掛けたものが SIP の A, B。
+    sip_order ≥ 2 なら逆変換 AP, BP(次数 sip_order+1)も、画像全体(width, height。無ければ点の範囲)の
+    格子で当てる。重み 0 の点は使わない。点が足りなければ ValueError。
     """
     f = np.asarray(field_xy, dtype=np.float64).reshape(-1, 2)
     s = np.asarray(star_xyz, dtype=np.float64).reshape(-1, 3)
@@ -527,16 +534,19 @@ def sv_fit_wcs_lsq(field_xy, star_xyz, weights=None, crpix=None, sip_order=0,
         ww = np.where(ok, w, 0.0)
         t = np.column_stack([np.where(ok, np.degrees(xi), 0.0), np.where(ok, np.degrees(eta), 0.0)])
         coef = _sv_poly_lstsq(u, v, t, order, 0, ww)
-        if k == nshift:
+        cd = np.array([[coef[0, 1, 0], coef[0, 0, 1]],
+                       [coef[1, 1, 0], coef[1, 0, 1]]])
+        if abs(float(np.linalg.det(cd))) < 1e-300 or not np.all(np.isfinite(coef)):
+            raise ValueError("CD が特異(点が一直線に並んでいる)")
+        # 定数項 = CRPIX が写る (ξ, η)。画素に直して十分小さければ終わり
+        left = float(np.hypot(*np.linalg.solve(cd, coef[:, 0, 0])))
+        if left <= SV_LSQ_TOL_PX or k == nshift:
             break
-        # 定数項 = CRPIX が写る (ξ, η)。接点をそこへ動かして当て直す。最後の当てはめのあとには動かさない
-        # (CD は接点の東・北に対する値で、極のそばでは接点をわずかに動かすだけで東・北の向きが大きく回るため。
-        # 残る定数項は、動かした回数ぶん小さくなったずれで、捨てる)
+        # 接点をそこへ動かして当て直す。最後の当てはめのあとには動かさない(CD は接点の東・北に対する値で、
+        # 極のそばでは接点をわずかに動かすだけで東・北の向きが大きく回るため。残る定数項は捨てる)
         r = sv_tan_deproject(np.radians(coef[0, 0, 0]), np.radians(coef[1, 0, 0]), r)
-    cd = np.array([[coef[0, 1, 0], coef[0, 0, 1]],
-                   [coef[1, 1, 0], coef[1, 0, 1]]])
-    if abs(float(np.linalg.det(cd))) < 1e-300:
-        raise ValueError("CD が特異(点が一直線に並んでいる)")
+    if left > SV_LSQ_FAIL_PX:
+        raise ValueError(f"接点が定まりません({nshift} 回動かしても CRPIX に {left:.3g} px のずれが残る)")
     if order < 2:
         return SvWcs(r, crpix, cd)
     hi = coef.copy()

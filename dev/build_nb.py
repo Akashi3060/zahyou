@@ -1,4 +1,11 @@
-"""dev/*.py を組み立てて zahyou.ipynb (markdown + 3 セル) と zahyou_engine.py を作る。"""
+"""dev/*.py を組み立てて zahyou.ipynb (markdown + 3 セル) と zahyou_engine.py を作る。
+
+  python dev/build_nb.py            dev/zahyou.ipynb と dev/zahyou_engine.py (試験用。git には入れない) を作り、
+                                    リポジトリ直下の zahyou_engine.py と zahyou_v6.ipynb も書き換える
+                                    (直下のノートブックはセルの中身だけを id ごとに差し替え、出力の例は残す。
+                                    改行は今のファイルに合わせる)
+  python dev/build_nb.py 出力.ipynb  指定したノートブックと、その隣の zahyou_engine.py だけを新しく書く
+"""
 import ast
 import io
 import json
@@ -7,6 +14,9 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(HERE)
+ROOT_NB = os.path.join(REPO, "zahyou_v6.ipynb")
+ROOT_ENGINE = os.path.join(REPO, "zahyou_engine.py")
 
 # 自前の解析エンジン。この順につなぐ (後ろのものが前のものの名前を使う)。
 # solver_synth.py は試験用なので入れない。
@@ -14,6 +24,41 @@ SOLVER_MODULES = ("solver_wcs.py", "solver_index.py", "solver_core.py")
 # 1 つの名前空間に入るので、solver_*.py の最上位の名前はこの接頭辞で始める
 # (sv_ / Sv / SV_ と、その頭に _ を付けた内部用。_SV_ のような定数も通す)
 SOLVER_PREFIXES = ("sv_", "Sv", "SV_", "_sv_", "_Sv", "_SV_")
+
+
+def _newline_of(path, default="\n"):
+    """今のファイルの改行 (CRLF か LF)。無ければ default。"""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(1 << 16)
+    except OSError:
+        return default
+    return "\r\n" if b"\r\n" in head else "\n"
+
+
+def write_text(path, text, newline=None):
+    """text (改行は LF) を、newline (省略時は今のファイルに合わせる) で書く。"""
+    nl = newline or _newline_of(path)
+    with open(path, "wb") as f:
+        f.write(text.replace("\r\n", "\n").replace("\n", nl).encode("utf-8"))
+
+
+def sync_notebook(path, nb):
+    """既存のノートブックのセルの中身 (source) だけを id ごとに差し替える (出力の例と実行番号は残す)。
+    セルの並び (id) が違えば ValueError (そのときは手で確かめる)。戻り値は差し替えたセルの id。"""
+    with open(path, "rb") as f:
+        cur = json.loads(f.read().decode("utf-8"))
+    if [c.get("id") for c in cur["cells"]] != [c["id"] for c in nb["cells"]]:
+        raise ValueError(f"{path} のセルの並びが組み立てたものと違います")
+    by_id = {c["id"]: c for c in nb["cells"]}
+    changed = []
+    for c in cur["cells"]:
+        src = by_id[c["id"]]["source"]
+        if c["source"] != src:
+            c["source"] = src
+            changed.append(c["id"])
+    write_text(path, json.dumps(cur, ensure_ascii=False, indent=1) + "\n")
+    return changed
 
 
 def read(name):
@@ -292,7 +337,8 @@ def build():
         },
         "nbformat": 4, "nbformat_minor": 5,
     }
-    out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "zahyou.ipynb")
+    explicit = len(sys.argv) > 1
+    out = sys.argv[1] if explicit else os.path.join(HERE, "zahyou.ipynb")
     with io.open(out, "w", encoding="utf-8", newline="\n") as f:
         json.dump(nb, f, ensure_ascii=False, indent=1)
         f.write("\n")
@@ -317,6 +363,17 @@ def build():
         print(f"  セル {label:18s} {n:5d} 行")
     print(f"  ノートブック合計 {total:20d} 行")
     print(f"wrote {engine_path}  ({len(engine.splitlines())} 行)")
+
+    if not explicit:
+        # リポジトリ直下 (GUI・exe・ノートブックが使うもの) も書き換える
+        write_text(ROOT_ENGINE, engine)
+        print(f"wrote {ROOT_ENGINE}")
+        if os.path.exists(ROOT_NB):
+            changed = sync_notebook(ROOT_NB, nb)
+            print(f"wrote {ROOT_NB}  (中身を差し替えたセル: {', '.join(changed) or 'なし'})")
+        else:
+            write_text(ROOT_NB, json.dumps(nb, ensure_ascii=False, indent=1) + "\n")
+            print(f"wrote {ROOT_NB}")
 
 
 if __name__ == "__main__":

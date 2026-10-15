@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import os
 import queue
 import sys
@@ -1058,7 +1059,8 @@ class App(tk.Tk):
         add("zahyou 自身は MIT ライセンスです。自由に使って、書き換えて、")
         add("配ってかまいません。著作権表示だけ残してください。")
         add("星の並びから向きを割り出す解き方は、Lang et al. (2010, AJ 139, 1782) の", "m")
-        add("論文をもとに zahyou 用に自前で書き直したものです。", "m")
+        add("論文と、astrometry.net の公開文書と BSD-3 の部分のソースを読んでまとめた", "m")
+        add("調べ物 (コードは写していません) をもとに、zahyou 用に自前で書き直したものです。", "m")
         add("astrometry.net のプログラム (コード) は含んでいません。", "m")
         add("星図データ (index ファイル) は Tycho-2 と Gaia DR2 から作られたもので、", "m")
         add("この exe には同梱していません ([準備] タブが配布元から落とします)。", "m")
@@ -1254,15 +1256,22 @@ class App(tk.Tk):
         for w in (self.e_ra, self.e_dec):
             w.configure(state="normal" if mode == "COORDS" else "disabled")
 
+    @staticmethod
+    def _num(s, default=None, positive=False):
+        """欄の文字を数にする。空・数でない・無限・NaN(positive なら 0 以下も)は default。"""
+        s = (s or "").strip()
+        if not s:
+            return default
+        try:
+            v = float(s)
+        except ValueError:
+            return default
+        if not math.isfinite(v) or (positive and v <= 0.0):
+            return default
+        return v
+
     def _params(self):
-        def num(s, default=None):
-            s = (s or "").strip()
-            if not s:
-                return default
-            try:
-                return float(s)
-            except ValueError:
-                return default
+        num = self._num
 
         mode = SOLVE_CHOICES.get(self.v_solve.get(), "AUTO")
         return {
@@ -1275,7 +1284,7 @@ class App(tk.Tk):
             "ONLINE_TIMEOUT": int(num(self.v_t_online.get(), 120)),
             "OFFLINE_TIMEOUT": int(num(self.v_t_offline.get(), 300)),
             "USE_TARGET_AS_HINT": bool(self.v_hint.get()),
-            "SEARCH_RADIUS_DEG": num(self.v_radius.get(), 5.0),
+            "SEARCH_RADIUS_DEG": num(self.v_radius.get(), 5.0, positive=True),
             "IGNORE_EXISTING_WCS": bool(self.v_ignore.get()),
             "SHOW_DETECTED_SOURCES": bool(self.v_marks.get()),
             "IMAGE_PATH": self.image_path.get().strip() or None,
@@ -1300,6 +1309,13 @@ class App(tk.Tk):
                 "目標の天体名を入れてください。\n"
                 "目標を決めずに画像の向きだけ知りたいときは"
                 "「指定しない (完全ブラインド)」を選んでください。")
+            return
+        r = self.v_radius.get().strip()
+        if r and self._num(r, positive=True) is None:
+            messagebox.showwarning(
+                APP_NAME,
+                f"探索半径の「{r}」は使えません。\n"
+                "0 より大きい数 (度) を入れてください。空欄なら 5° で探します。")
             return
         self.txt_log.delete("1.0", "end")
         self._clear_figures()
@@ -1601,8 +1617,8 @@ class App(tk.Tk):
         入っていないぶんだけを落とす。
         """
         want = env.recommended_scales()
-        have = list((self.env_state or {}).get("index", {}).get("scales", []))
-        need = [s for s in want if s not in have]
+        need = [s for s in want if s not in self._have_scales()]
+        before = {scale: var.get() for scale, var in self.scale_vars.items()}
         for scale, var in self.scale_vars.items():
             var.set(scale in need)
         if not need:
@@ -1620,6 +1636,9 @@ class App(tk.Tk):
                 f"{self.v_indexdir.get()} へ落とします。よろしいですか?\n\n"
                 "回線にもよりますが、数十分かかります。\n"
                 "途中で中止しても、次に押せば続きから再開します。"):
+            # やめたら印も押す前に戻す (残すと、続けて「まとめて準備する」を押したときにその段を落とす)
+            for scale, var in self.scale_vars.items():
+                var.set(before.get(scale, False))
             self.v_status.set("やめました。")
             return
         self._bg(lambda: self._download_worker(need),
@@ -1644,7 +1663,8 @@ class App(tk.Tk):
         self._release_indexes()
         ok = env.fetch_index(scales, self.index_dir, self.log_env,
                              progress=self._progress,
-                             stop=lambda: self.cancel_flag)
+                             stop=lambda: self.cancel_flag,
+                             validate=self._index_validator())
         st = env.survey(self.index_dir, self._index_validator())
         self.env_state = st
         if not ok and self.cancel_flag:
@@ -1666,42 +1686,52 @@ class App(tk.Tk):
                               f"  ({pct:.0f}%)")
         self._post(set_it)
 
+    def _have_scales(self):
+        """押したときの置き場所で、そろって検査に通っている段を数え直す。
+
+        起動時や「状態を確認」のときの結果 (env_state) は使わない。置き場所を変えた直後や、
+        Explorer で星図データを消したあとは古いので、それで「足りない段なし」と判断すると
+        確認なしで何 GB も落とし始めた。検査はファイルの大きさと更新時刻で覚えているので、2 回目からは速い。
+        """
+        st = env.survey(self.index_dir, self._index_validator())
+        return list(st["index"]["scales"])
+
     def _prepare_all(self):
         """
         「まとめて準備する」= 足りない星図データを落として、中身を検査する。
 
         段に印を付けてあればその段を、無ければおすすめの段 (画角 4′ 以上) を
-        そろえる。そろっていれば検査だけ。落とす段があるときは容量を見せて聞く。
+        そろえる。そろっていれば検査だけ。落とす段があるときは、印の有無にかかわらず
+        押したときの置き場所で数え直して容量を見せて聞く。聞いた段より多く足りなくなって
+        いたら (聞いている間に消したなど)、ワーカーは落とさずに止める。
         """
         scales = [s for s, v in self.scale_vars.items() if v.get()]
-        if not scales:
-            want = env.recommended_scales()
-            if self.env_state is not None:
-                have = list(self.env_state.get("index", {}).get("scales", []))
-            else:
-                have = env.index_state(self.v_indexdir.get())["scales"]
-            need = [s for s in want if s not in have]
-            if need:
-                mb = env.scales_mb(need)
-                if not messagebox.askokcancel(
-                        APP_NAME,
-                        "段が選ばれていないので、おすすめ (画角 "
-                        f"{env.RECOMMENDED_MIN_FOV:g}′ 以上) をそろえます。\n"
-                        f"足りない {len(need)} 段 / 約 {mb/1024:.1f} GB を\n"
-                        f"{self.v_indexdir.get()} へ落とします。よろしいですか?\n\n"
-                        "(段は下のチェックか「必要な段を選ぶ」で指定できます。\n"
-                        "途中で中止しても、次に押せば続きから再開します)"):
-                    self.v_status.set("やめました。")
-                    return
-        self._bg(lambda: self._prepare_worker(scales), "準備しています...",
+        want = sorted(scales) if scales else env.recommended_scales()
+        need = [s for s in want if s not in self._have_scales()]
+        if need:
+            mb = env.scales_mb(need)
+            head = ("印を付けた段をそろえます。\n" if scales else
+                    "段が選ばれていないので、おすすめ (画角 "
+                    f"{env.RECOMMENDED_MIN_FOV:g}′ 以上) をそろえます。\n")
+            if not messagebox.askokcancel(
+                    APP_NAME,
+                    head +
+                    f"足りない {len(need)} 段 / 約 {mb/1024:.1f} GB を\n"
+                    f"{self.v_indexdir.get()} へ落とします。よろしいですか?\n\n"
+                    "(段は下のチェックか「必要な段を選ぶ」で指定できます。\n"
+                    "途中で中止しても、次に押せば続きから再開します)"):
+                self.v_status.set("やめました。")
+                return
+        self._bg(lambda: self._prepare_worker(scales, need), "準備しています...",
                  log=self.log_env)
 
-    def _prepare_worker(self, scales):
+    def _prepare_worker(self, scales, allowed=None):
         self._release_indexes()
         st = env.prepare_all(self.index_dir, scales, self.log_env,
                              progress=self._progress,
                              stop=lambda: self.cancel_flag,
-                             validate=self._index_validator())
+                             validate=self._index_validator(),
+                             allowed=allowed)
         self.env_state = st
         if self.cancel_flag:
             self._final_msg = "中止しました。"

@@ -633,6 +633,66 @@ def case_12_speed():
     return ok, "、".join(rows)
 
 
+def _corrupt(path, mode, count=50):
+    """大きさとヘッダーはそのままで中身を壊す。lr: 星の木の葉の表の前半と後半を入れ替える(単調でなくなる)。
+    quad: quad の表の星番号の上位バイトを count か所化けさせる。"""
+    hdus, _, _ = si._sv_read_fits_hdus(path)
+    want = "kdtree_lr_stars" if mode == "lr" else "quads"
+    h = next(h for h in hdus if h["header"].get("TTYPE1") == want)
+    o, n = h["offset"], h["size"]
+    with open(path, "r+b") as f:
+        f.seek(o)
+        b = bytearray(f.read(n))
+        if mode == "lr":
+            a = np.frombuffer(bytes(b), dtype="<u4")
+            m = len(a) // 2
+            b = bytearray(np.concatenate([a[m:], a[:m]]).astype("<u4").tobytes())
+        else:
+            r = np.random.default_rng(7)
+            for k in r.integers(0, n // 4, int(count)):
+                b[4 * int(k) + 3] ^= 0x10
+        f.seek(o)
+        f.write(bytes(b))
+
+
+def case_13_corrupt_contents():
+    """大きさとヘッダーは正しいが中身が壊れた索引: ヘッダーの検査は通る(読まない)が、開くとき(木の葉の範囲)と
+    quad の星番号を引くときに SvIndexCorrupt になり、mark_broken で目録から外れて problems に入る。"""
+    bad = []
+    rows = []
+    with tempfile.TemporaryDirectory() as tmp:
+        for mode in ("lr", "quad"):
+            d = os.path.join(tmp, mode)
+            os.makedirs(d)
+            for t in ("4115", "4116"):
+                shutil.copyfile(path_of(t), os.path.join(d, f"index-{t}.fits"))
+            p = os.path.join(d, "index-4116.fits")
+            _corrupt(p, mode)
+            if not si.sv_validate_index_file(p)[0]:
+                bad.append(f"{mode}: ヘッダーの検査で落ちた(この試験の前提が違う)")
+            cat = si.SvIndexCatalog(d)
+            f = next(x for x in cat.files if x.indexid == 4116)
+            try:
+                f.quad_stars(np.arange(f.nquads))
+                f.startree
+                bad.append(f"{mode}: 例外にならない")
+            except si.SvIndexCorrupt as e:
+                if e.file is not f:
+                    bad.append(f"{mode}: 例外のファイルが違う")
+                cat.mark_broken(f, str(e))
+                rows.append(f"{mode}: {e}")
+            names = [x.name for x in cat.files]
+            sel = [x.name for x in cat.select(80.0, 120.0, 2000, 1300)]
+            if names != ["index-4115"] or "index-4116" in sel or len(cat.problems) != 1 or f.is_open:
+                bad.append(f"{mode}: 外れていない(files {names}、select {sel}、problems {len(cat.problems)})")
+            if 4116 not in cat.series:
+                bad.append(f"{mode}: series から消えた(仮説の位置がずれる)")
+            ok_f = next(x for x in cat.files if x.indexid == 4115)
+            ok_f.quad_stars(np.arange(ok_f.nquads))     # 壊れていないほうは通る
+            cat.close()
+    return not bad, ("; ".join(rows) if not bad else "NG: " + "; ".join(bad))
+
+
 CASES = [
     ("01 253 本の走査(problems 0)", case_01_scan, ()),
     ("02 壊れた・名前の違うファイルを検査で見分ける", case_02_validate,
@@ -647,6 +707,7 @@ CASES = [
     ("10 select(段とタイルの選び方)", case_10_select, ("4107", "5205-00")),
     ("11 tiles_near(境界をまたぐ視野)", case_11_tiles_near, ("5206-00", "4107")),
     ("12 速さとメモリ(4107 に 1000 問 0.5 秒以内)", case_12_speed, ("4107",)),
+    ("13 中身の壊れた索引(葉の範囲・quad の星番号)を見分けて外す", case_13_corrupt_contents, ("4115", "4116")),
 ]
 
 

@@ -155,7 +155,8 @@ def run():
                 wcs_header = solve_online(
                     img_path, API_KEY, sources=sources, shape=bundle.shape,
                     timeout=ONLINE_TIMEOUT, hint_radec=hint,
-                    hint_radius_deg=SEARCH_RADIUS_DEG, scale_hint=scale_hint)
+                    hint_radius_deg=SEARCH_RADIUS_DEG, scale_hint=scale_hint,
+                    cancel=globals().get("CANCEL_EVENT"))
             except Exception as e:
                 _log(f"⚠️ オンライン解析でエラー: {type(e).__name__}: {e}")
                 wcs_header = None

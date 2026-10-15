@@ -326,8 +326,8 @@ def _remote_size(url, timeout=60):
         return int(r.headers["Content-Length"])
 
 
-def _finish(part, path, log):
-    """落とし終えた .part を本来の名前へ付け替えて、ヘッダーを検査する。"""
+def _finish(part, path, log, validate=None):
+    """落とし終えた .part を本来の名前へ付け替えて、ヘッダーを検査する (validate は survey と同じ検査)。"""
     name = os.path.basename(path)
     try:
         os.replace(part, path)
@@ -335,7 +335,7 @@ def _finish(part, path, log):
         log(f"    {name}: 名前を付け替えられません ({e})。"
             "解析で使っている最中なら、終わってからもう一度押してください。")
         return False
-    ok, why = check_index_file(path)
+    ok, why = check_index_file(path, validate)
     if ok:
         return True
     log(f"    {name}: 落としたファイルの中身がおかしいので消します ({why})。")
@@ -346,14 +346,15 @@ def _finish(part, path, log):
     return False
 
 
-def _download(url, path, log, on_bytes=None, stop=None, retries=5):
+def _download(url, path, log, on_bytes=None, stop=None, retries=5, validate=None):
     """
     途中まで落ちていれば Range で続きから。戻り値 True/False
 
     書き込みは「名前.part」へ。最後まで落ちて大きさが合い、ヘッダーの検査に
     通ってから本来の名前へ付け替える。v6 は本来の名前へ直接書いていたので、
     途中で止めると中途半端なファイルが残り、オフラインの「状態を確認」が
-    そろっていると誤って答えた。
+    そろっていると誤って答えた。validate (エンジンの検査) は survey と同じものを渡す
+    (渡さないと、エンジンの検査だけで落ちるファイルを「完成済み」として何度押しても落とし直さない)。
     """
     name = os.path.basename(path)
     part = path + ".part"
@@ -364,7 +365,7 @@ def _download(url, path, log, on_bytes=None, stop=None, retries=5):
         return False
     if os.path.exists(path):
         if os.path.getsize(path) == total:
-            ok, why = check_index_file(path)
+            ok, why = check_index_file(path, validate)
             if ok:
                 return True
             log(f"    {name}: 中身がおかしいので落とし直します ({why})")
@@ -407,7 +408,7 @@ def _download(url, path, log, on_bytes=None, stop=None, retries=5):
                             if on_bytes:
                                 on_bytes(len(chunk))
             if os.path.getsize(part) == total:
-                return _finish(part, path, log)
+                return _finish(part, path, log, validate)
         except Exception as e:
             if stop is not None and stop():
                 return False
@@ -453,11 +454,13 @@ def remote_sizes(jobs, log=None, stop=None, workers=8):
     return out
 
 
-def fetch_index(scales, dest, log, progress=None, stop=None):
+def fetch_index(scales, dest, log, progress=None, stop=None, validate=None):
     """
     選んだ段の index ファイルを dest へ落とす。
 
     progress(done, total) が呼ばれる (byte)。stop() が True を返したら止める。
+    validate (エンジンの sv_validate_index_file) を渡すと、「完成済み」の判定と落としたあとの検査に
+    survey と同じ検査を使う。
 
     数え方をひとつに揃えてある ―― 見出しの「N ファイル」、途中の [i/N]、
     最後の「完了 M/N」は、すべて<b>これから落とすぶん</b>の数。
@@ -494,7 +497,7 @@ def fetch_index(scales, dest, log, progress=None, stop=None):
                          / len(index_names(s)))
             continue
         if done_file and got == want:
-            if check_index_file(path)[0]:
+            if check_index_file(path, validate)[0]:
                 already += 1
                 continue
             got = 0                         # 中身がおかしいので最初から落とし直す
@@ -530,7 +533,7 @@ def fetch_index(scales, dest, log, progress=None, stop=None):
             log("  中止しました。")
             return False
         path = os.path.join(dest, name)
-        if _download(index_url(s, tile), path, log, on_bytes, stop):
+        if _download(index_url(s, tile), path, log, on_bytes, stop, validate=validate):
             ok += 1
             log(f"    [{i}/{len(todo)}] {name}  "
                 f"{human(os.path.getsize(path))}")
@@ -559,21 +562,30 @@ def report(st, log):
         log("  ⚠️ " + m)
 
 
-def prepare_all(index_dir, scales, log, progress=None, stop=None, validate=None):
+def prepare_all(index_dir, scales, log, progress=None, stop=None, validate=None, allowed=None):
     """
     「まとめて準備」。足りない段を落として、検査する。戻り値は survey()。
 
     scales を渡せばその段を、空ならおすすめの段 (画角 4′ 以上) をそろえる。
     すでに全部そろって検査に通っている段は落とさない。
+    allowed: 利用者に容量を見せて了承を得た段 (GUI が押したときに数え直したもの)。渡されていて、
+    ここで数え直した足りない段がそれより多ければ、落とさずに止める (了承していない量を落とさない)。
     """
     log("=" * 56)
     log("1. 星図データ")
     st = survey(index_dir, validate)
     want = sorted(scales) if scales else recommended_scales()
     need = [s for s in want if s not in st["index"]["scales"]]
+    extra = [s for s in need if allowed is not None and s not in allowed]
+    if extra:
+        log("  確認したあとで足りない段が増えました ("
+            + ", ".join(str(s) for s in extra) + ")。落とさずに止めます。"
+            "もう一度押すと、増えたぶんも含めて容量を確かめます。")
+        report(st, log)
+        return st
     if need:
         log("  足りない段: " + ", ".join(str(s) for s in need))
-        if not fetch_index(need, index_dir, log, progress, stop):
+        if not fetch_index(need, index_dir, log, progress, stop, validate=validate):
             st = survey(index_dir, validate)
             report(st, log)
             return st

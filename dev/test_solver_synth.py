@@ -6,7 +6,7 @@ docs/design-native-solver.md の 8 節。星野は dev/solver_synth.py が作る
   鏡像(配列座標の det CD の符号)の一致。一様乱数の星野は締め切りまで探して解なし(超過 1 秒以内)。
 
   python dev/test_solver_synth.py                  全部
-  python dev/test_solver_synth.py --quick          代表 13 件(全部は 51 件)
+  python dev/test_solver_synth.py --quick          代表 13 件(全部は 59 件。ほかに物差しの自己検査 5 項目)
   python dev/test_solver_synth.py --case s52*,ra0  名前で選ぶ(ワイルドカード可、カンマ区切り)
   --json 結果.json   --deadline 60(1 件の締め切り [秒])   --deadline-random 30(乱数の星野)
   --index-dir C:\\AstrometryData(環境変数 ZAHYOU_INDEX_DIR でも)   --dump-fields フォルダー(星野を JSON に)
@@ -150,6 +150,14 @@ for _n, _q in (("tile_edge", False), ("tile_corner", True), ("ra0", True), ("pol
     _b = next(c for c in CASES if c["name"] == _n)
     case(f"{_n}_h", _b["what"] + " + ヒント(0.36° ずれ・半径 1°)", _b["center"], _b["scale"], size=_b["size"],
          rot=_b["rot"], mirror=_b["mirror"], seed=_b["seed"], hint=(0.3, -0.2, 1.0), quick=_q)
+
+# 対応画角の上端近く(短辺 25°・30°、全部の目録、スケール既知・ヒントなし)。改良の当て直しが収束しきらず、
+# 中心が許容の 2〜13 倍(125〜750″)・スケールが −0.4〜−1.1 % ずれた解を「解けた」として返したことがある
+# (2026-10-16 の直す前、種 1〜15 × 短辺 25°・30° の 24 回中 6 回)。種は明示する
+for _seed in (3, 10, 12, 13):
+    for _short in (1500.0, 1800.0):
+        case(f"wide{int(_short / 60)}_s{_seed}", f"短辺 {_short / 60:g}°(上端近く、種 {_seed})", (80.0, 40.0),
+             _short * 60.0 / 800.0, size=(1200, 800), rot=30.0, seed=_seed, scale_known=True)
 
 
 # ------------------------------------------------------------------ 道具 ---

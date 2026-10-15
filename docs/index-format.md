@@ -8,7 +8,9 @@ astrometry.net のソースコードは読んでいない。根拠は (1) ファ
 - **[推定]** = 実測で裏づけていない、または間接的な根拠しかないもの
 
 参照実装は `anindex.py`(numpy だけ。FITS の読み取りも自前)、検証は `verify_format.py`
-(実行ログ `verify_run.log`、数値 `verify_results.json`)。
+(実行ログ `verify_run.log`、数値 `verify_results.json`)。どれも [`docs/index-format/`](index-format/) にある
+(この文書を書いたときの実行の記録をそのまま入れてある。`projcenter_check.py`(8.4 節)と `rawread.py`(13 節の読み出しの速さ)も同じ場所)。
+エンジン(`dev/solver_index.py`)はこれとは別に書いたもので、これらを読み込まない。
 
 ---
 
@@ -326,5 +328,7 @@ A.canonical_code(pixel_xy)                          # 画像側の正準コー�
 A.sweep_group(d)                                    # スイープ番号 1..10
 ```
 
-検証のやり直し: `python verify_format.py`(既定の 9 本 + 全 253 本のヘッダー + 5204〜5206 の 144 本の HEALPix。数分)、
-`python verify_format.py --quick 4119 4115` のように個別にも回せる。
+検証のやり直し(リポジトリ直下から。索引は `C:\AstrometryData` を読む):
+`python docs/index-format/verify_format.py`(既定の 9 本 + 全 253 本のヘッダー + 5204〜5206 の 144 本の HEALPix。数分)、
+`python docs/index-format/verify_format.py --quick 4119 4115` のように個別にも回せる。
+`verify_format.py` の一部の項目は `astropy`・`astropy_healpix`・`scipy`・`psutil` を使う。実行すると同じ場所の `verify_results.json`(この文書の根拠の記録)を上書きするので、比べるなら先に写しを取る。

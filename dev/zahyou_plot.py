@@ -50,9 +50,10 @@ def wcs_summary(wcs, shape, flip_y=None):
       画面の上   … flip_y なら配列の -y 方向 (行 0 が画面の上に来る画像)
       パリティ   … 画面 (x 右・y 上) で「北が上なら東が左」= 空を見上げたままの
                     向きを「正 (鏡像なし)」とする。画面での det(CD) < 0 がそれ
-    None (既定) のときは以前の動き (配列の +y を上、det(CD) > 0 を「正」) のまま。
-    これは flip_y=True の画像では画面の見た目と同じだが、下から上へ並んだ FITS
-    では位置角が 180° ずれ、パリティも逆に出ていた。
+    None (既定) のときは以前 (v6) の動き (配列の +y を上、det(CD) > 0 を「正」) のまま。
+    この動きは、flip_y=True の画像 (PNG・JPEG・上から下へ並んだ FITS) では位置角が 180° ずれ
+    (パリティは正しい)、下から上へ並んだ FITS (flip_y=False) では位置角は正しくパリティが逆に出ていた。
+    v6 の記録の位置角を直すなら、直すのは flip_y=True の画像のほう (180° を足し引きする)。
     """
     ny, nx = shape
     scales = proj_plane_pixel_scales(wcs.celestial) * 3600.0

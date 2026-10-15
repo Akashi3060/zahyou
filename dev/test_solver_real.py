@@ -1,9 +1,13 @@
 """実写の画像を自前の解析エンジンで解き、WSL 版(astrometry.net)の正解 dev/solver_truth.json と比べるテスト。
 
-docs/design-native-solver.md の 8 節。合格の基準(solver_truth.json の criteria):
+docs/design-native-solver.md の 7 節・8 節。合格の基準(solver_truth.json の criteria):
   中心のずれ 2″ 以内(0.5 px のほうが大きければそれ)、画素スケール 0.2 %、回転(配列の +y の位置角)0.1°、
   鏡像(配列座標の det CD の符号)の一致。陰性の画像(ピンぼけ・光条・乱数の星野)は締め切りまで探して解なし、
   締め切りの超過 1 秒以内。画像はリポジトリに入れていない(手元に無ければ SKIP)。
+  正解ファイルの path は、リポジトリからの相対パス(dev/tcase は test_robust.py が作る)か、
+  $ZAHYOU_TEST_IMAGES/ で始まるパス(環境変数 ZAHYOU_TEST_IMAGES。無ければホームフォルダー)。
+  陽性の画像が 1 枚も解かれなかった(全部 SKIP)ときは、最後にそう出して終了コード 2 で終わる
+  (自己検査だけが PASS して「合格」に見えないように)。
 
   python dev/test_solver_real.py             利用者の経路: load_image_any → preprocess →
                                              detect_sources(min_sources=60) → solve_offline(ヒントなし・焦点距離なし)
@@ -50,6 +54,17 @@ QUICK = ("real_orig", "real_flip_fits", "3I_00010", "phaethon_00001", "imx432_16
          "capture_005514", "tcase_basic16")
 RESULTS = []                   # (名前, True / False / None(SKIP), 説明, 記録)
 ARGS = None
+REPO = os.path.dirname(HERE)
+IMAGES_VAR = "$ZAHYOU_TEST_IMAGES/"
+
+
+def image_path(e):
+    """正解ファイルの path を、この PC のパスにする(リポジトリからの相対か $ZAHYOU_TEST_IMAGES/ から)。"""
+    p = e["path"]
+    if p.startswith(IMAGES_VAR):
+        base = os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~")
+        return os.path.join(base, *p[len(IMAGES_VAR):].split("/"))
+    return os.path.join(REPO, *p.split("/"))
 
 
 def record(name, ok, msg, rec=None):
@@ -100,11 +115,17 @@ def truth_measure(t):
             "scale_arcsec": t["scale_arcsec"], "pa_up_deg": t["pa_up_deg"], "parity": int(t["parity"])}
 
 
+def effective_criteria(e, crit):
+    """正解そのものの不確かさが基準と同じ大きさの画像は、solver_truth.json の criteria_override で基準を広げる(理由もそこに書く)。"""
+    return {**crit, **{k: v for k, v in e.get("criteria_override", {}).items() if k != "reason"}}
+
+
 def evaluate(e, fn_or_wcs, crit):
     """解(SvWcs か画素 → 単位ベクトルの関数)を正解と比べる。accept に truth_tan があればそれも。
 
     戻り値 (ok, 比べた結果, どの正解に合ったか)。"""
     W, H = e["width"], e["height"]
+    crit = effective_criteria(e, crit)
     tol = {k: crit[k] for k in ("center_arcsec", "center_px", "scale_rel", "rot_deg")}
     want = truth_measure(e["truth"])
     got = ss.sv_synth_measure(fn_or_wcs, W, H, ref_xyz=want["center_xyz"])
@@ -176,8 +197,9 @@ def selfcheck_file(doc):
                     bad.append(f"{e['tag']}: truth.{k} が無い")
             if not e.get("wcs"):
                 bad.append(f"{e['tag']}: wcs が無い")
-            if not os.path.isabs(e["path"]):
-                bad.append(f"{e['tag']}: パスが絶対パスでない")
+        p = e.get("path", "")
+        if os.path.isabs(p) or "\\" in p or ":" in p:
+            bad.append(f"{e.get('tag')}: パスが PC に依存する形({p})")
     npos = sum(1 for e in imgs if e.get("expect_solve"))
     nneg = len(imgs) - npos
     b = doc.get("target_offset_baseline") or {}
@@ -256,16 +278,17 @@ def selfcheck_fake(doc):
             if ok != expect:
                 bad.append(f"{e['tag']}: TAN の参考値の扱いが違う")
         s = base.pixel_scale_arcsec()
-        ctol = max(crit["center_arcsec"], crit["center_px"] * s)
+        ec = effective_criteria(e, crit)
+        ctol = max(ec["center_arcsec"], ec["center_px"] * s)
         for kind, k, expect in (("center", 1.5, ["center"]), ("scale", 2.0, ["scale"]), ("rot", 2.0, ["rot"]),
                                 ("parity", 1, ["parity"]), ("center", 0.4, []), ("rot", 0.4, [])):
             crpix, cd = base.crpix.copy(), base.cd.copy()
             if kind == "center":
                 crpix -= np.array([1.0, 1.0]) / math.sqrt(2.0) * k * ctol / s
             elif kind == "scale":
-                cd *= 1.0 + k * crit["scale_rel"]
+                cd *= 1.0 + k * ec["scale_rel"]
             elif kind == "rot":
-                r = math.radians(k * crit["rot_deg"])
+                r = math.radians(k * ec["rot_deg"])
                 cd = np.array([[math.cos(r), math.sin(r)], [-math.sin(r), math.cos(r)]]) @ cd
             else:
                 cd[:, 0] = -cd[:, 0]
@@ -343,7 +366,7 @@ _SHA = {}
 
 
 def sha_ok(e):
-    p = e["path"]
+    p = image_path(e)
     if p not in _SHA:
         h = hashlib.sha256()
         with open(p, "rb") as f:
@@ -358,7 +381,7 @@ def run_image(e, mode, hint, zc, solve, catalog, crit, base):
     W, H = e["width"], e["height"]
     rec = {"tag": e["tag"], "mode": mode, "hint": hint, "expect_solve": e["expect_solve"]}
     t0 = time.perf_counter()
-    b = zc.load_image_any(e["path"])
+    b = zc.load_image_any(image_path(e))
     if tuple(b.shape) != (H, W):
         return False, f"画像の大きさ {b.shape} が正解 ({H}, {W}) と違う", rec
     sub, mask, sigma, info = zc.preprocess(b.data)
@@ -384,7 +407,7 @@ def run_image(e, mode, hint, zc, solve, catalog, crit, base):
         how = "標準の検出"
         if len(src) < 12 and hasattr(zc, "detect_sources_deep"):
             stars, _ = zc.detect_sources_deep(sub, mask, sigma)
-            how = "深い検出(2x2)"
+            how = "深い検出(detect_sources_deep)"
         rec["direct_stars"] = f"{how} {len(stars)} 個"
         xy = np.array([[s["x"], s["y"]] for s in stars], dtype=np.float64).reshape(-1, 2)
         flux = np.array([s["flux"] for s in stars], dtype=np.float64)
@@ -520,8 +543,8 @@ def main():
         for e, hint in jobs:
             label = {"user": "利用者の経路", "direct": "sv_solve 直接"}[mode]
             name = f"{e['tag'] + ('+hint' if hint else ''):<20s} {label}  {e.get('kind', '')}"
-            if not os.path.isfile(e["path"]):
-                record(name, None, f"画像が無い({e['path']})")
+            if not os.path.isfile(image_path(e)):
+                record(name, None, f"画像が無い({image_path(e)})", {"positive": e["expect_solve"]})
                 continue
             if not sha_ok(e):
                 record(name, None, "画像の中身が正解を作ったときと違う(sha256)")
@@ -536,6 +559,8 @@ def main():
                 ok, msg, rec = run_image(e, mode, hint, zc, solve, catalog, crit, base)
             except Exception as ex:
                 ok, msg, rec = False, f"{type(ex).__name__}: {ex}\n{traceback.format_exc()}", {}
+            rec = dict(rec or {})
+            rec["positive"] = e["expect_solve"]
             record(name, ok, msg, rec)
     return finish(t_all)
 
@@ -551,13 +576,19 @@ def finish(t_all):
         print(f"  {tag}  {name.ljust(width)}  {msg.splitlines()[0] if msg else ''}")
     total = time.perf_counter() - t_all
     print(f"\n  {n_ok}/{n_run} passed, {n_skip} skipped  ({total:.0f} s)")
+    n_pos = sum(1 for r in RESULTS if r[1] is not None and r[3].get("positive"))
+    if n_pos == 0:
+        print("  ⚠️ 実写の陽性の画像を 1 枚も解いていません(画像が無いか索引が無い)。"
+              "自己検査だけの結果なので、終了コード 2 で終わります。")
     if ARGS is not None and ARGS.json:
         out = [{"name": n, "status": "SKIP" if ok is None else ("PASS" if ok else "FAIL"), "message": m, **rec}
                for n, ok, m, rec in RESULTS]
         with open(ARGS.json, "w", encoding="utf-8") as fp:
             json.dump({"index_dir": DATA, "deadline_s": ARGS.deadline, "seconds": round(total, 1),
                        "results": out}, fp, ensure_ascii=False, indent=1, default=str)
-    return 0 if n_ok == n_run else 1
+    if n_ok != n_run:
+        return 1
+    return 0 if n_pos else 2
 
 
 if __name__ == "__main__":

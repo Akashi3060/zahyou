@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
+import math
 import os
 import shutil
 import tempfile
 import time
+import warnings
 
 import numpy as np
 from astropy.io import fits
@@ -453,8 +455,13 @@ def detect_sources(sub, mask, sigma, min_sources=12, max_sources=400,
     min_snr を 3.0 に下げると暗い画像で星は増えるが (実測 8 → 15 個)、
     疎な星野では雑音のこぶも同じだけ増える (合成テストで純度 100% → 30%)。
     どの値でも「本物だけ増やす」ことはできなかったので 5.0 のままにしてある。
-    星が少ない画像は、画像を 2x2 にまとめてから検出し直す「深い検出」に任せる
-    (solve_offline がその試行を先に回す)。
+    これは図に緑の丸で出す星で、確かなものだけを残す。解析エンジンには、暗い星まで
+    拾う detect_sources_deep の星を先に渡す (solve_offline)。
+
+    しきい値の段の「σ」は smooth_sigma = sigma / 2 を単位にしているが、σ=1 の
+    ガウスでぼかした白色雑音の実際の標準偏差は sigma / (2√π) ≈ 0.28 sigma
+    (3I の画像の実測 0.31 sigma)。つまり最後の段 2.0 は実際には約 3.2σ で、
+    書いてある値より 1.6〜1.8 倍高い。図の星を変えないために、このままにしてある。
     """
     if ndimage is None:
         raise RuntimeError("scipy が必要です:  pip install scipy")
@@ -500,36 +507,328 @@ def detect_sources(sub, mask, sigma, min_sources=12, max_sources=400,
     return best[:max_sources], used
 
 
-def detect_sources_deep(sub, mask, sigma):
-    """
-    深い検出。画像を 2x2 にまとめてから同じ detect_sources をかけ、座標を元の画素へ戻す。
+# ------------------------------------------------ 解析エンジンに渡す星 (深い検出) ---
+#
+# detect_sources は図に出す星なので、領域の面積と開口 SNR で確かなものだけを残す。
+# 星の少ない画像ではそれが数個にとどまり、解析エンジンの検証 (対数オッズ) の
+# 証拠が足りなくなる (3I: 星 8 個で対数オッズ 21.6〜21.9、合格は 20.7。この検出の星 15 個で 47.7)。
+# 解析エンジンに渡す星は次の考え方で別に拾う (solve-field の image2xy と同じ方針。コードは自前):
+#   背景を引く → 星の幅に合わせてガウスでぼかす (整合フィルター) →
+#   局所の雑音の u 倍を超える局所の極大を星とする。
+# u は「雑音だけの画像で偽の極大が画像全体で 2 個ほど」になる値にする (下の式)。
+# 偽の星が多いと検証で不利になるので、数は増やしすぎない。
 
-    4 画素を足すと星の光は 4 倍、白色雑音は 2 倍なので、SNR が 2 倍になって
-    暗い星まで拾える (solve-field の --downsample 2 の代わり)。星が数個しか
-    写っていない画像 (3I など) を解くための経路。
-    まとめた画素 (bx, by) は元の画素 2bx, 2bx+1 の真ん中なので、戻すと (2bx+0.5, 2by+0.5)。
-    戻り値は detect_sources と同じ (星のリスト, しきい値)。
+_DEEP_FALSE_RATE = 0.045        # 偽の極大の数の係数 (白色雑音で数えて合わせた値)
+
+
+def _block_map(img, valid, box, fn):
     """
+    box 画素の升ごとに fn (升の値を最後の軸に並べた配列 → 升ごとの値) を計算し、
+    3x3 の中央値でならしてから升の中心を節点に双一次で引き伸ばす (外側は端の値)。
+    マスクの画素は NaN にして渡す。升が縦横 3 つ未満なら None。
+    """
+    ny, nx = img.shape
+    by, bx = ny // box, nx // box
+    if by < 3 or bx < 3:
+        return None
+    h, w = by * box, bx * box
+    oy, ox = (ny - h) // 2, (nx - w) // 2
+    t = np.where(valid, img, np.nan)[oy:oy + h, ox:ox + w].astype(np.float32)
+    t = t.reshape(by, box, bx, box).transpose(0, 2, 1, 3).reshape(by, bx, box * box)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")              # 全部マスクの升 (All-NaN slice)
+        coarse = fn(t)
+    good = np.isfinite(coarse)
+    if not good.any():
+        return None
+    coarse = np.where(good, coarse, float(np.median(coarse[good])))
+    coarse = ndimage.median_filter(coarse, size=3, mode="nearest")
+    fy = np.clip((np.arange(ny) - (oy + 0.5 * box - 0.5)) / box, 0, by - 1)
+    fx = np.clip((np.arange(nx) - (ox + 0.5 * box - 0.5)) / box, 0, bx - 1)
+    iy = np.minimum(fy.astype(int), by - 2)
+    wy = (fy - iy)[:, None]
+    rows = coarse[iy] * (1 - wy) + coarse[iy + 1] * wy
+    ix = np.minimum(fx.astype(int), bx - 2)
+    wx = (fx - ix)[None, :]
+    return (rows[:, ix] * (1 - wx) + rows[:, ix + 1] * wx).astype(np.float32)
+
+
+def _median_last(t):
+    """最後の軸の中央値 (NaN を除く)。NaN が無ければ速い np.median で済ませる。"""
+    if np.isnan(t).any():
+        return np.nanmedian(t, axis=-1)
+    return np.median(t, axis=-1)
+
+
+def _mad_sigma_last(t):
+    """最後の軸の MAD から出した標準偏差。有効な画素が 1/4 未満の升は NaN。"""
+    med = _median_last(t)
+    mad = _median_last(np.abs(t - med[..., None]))
+    n = np.sum(np.isfinite(t), axis=-1)
+    return np.where(n >= t.shape[-1] // 4, 1.4826 * mad, np.nan)
+
+
+def _clipped_stats(values, limit=500_000):
+    """sigma_clipped_stats (3σ) の (中央値, 標準偏差)。多いときは等間隔に間引いて速くする。"""
+    values = np.ravel(values)
+    if values.size > limit:
+        values = values[::int(math.ceil(values.size / limit))]
+    _, med, std = sigma_clipped_stats(values, sigma=3.0, maxiters=5)
+    return float(med), float(std)
+
+
+def _sharpness(work, y, x):
+    """中心の値 / 上下左右の平均。ベイヤーの補間で十字に広がったホットピクセルは大きい。"""
+    n4 = (float(work[y - 1, x]) + float(work[y + 1, x])
+          + float(work[y, x - 1]) + float(work[y, x + 1])) / 4.0
+    return float(work[y, x]) / n4 if n4 > 0 else math.inf
+
+
+def _psf_sigma(sm1, work, valid, ns1, sigma, max_stars=40, min_snr=10.0):
+    """
+    明るい星 (σ=1 でぼかした画像で雑音の min_snr 倍以上) の半値の面積から、
+    星像の σ を測る。ぼかした分 (σ=1) は二乗で引く。
+    戻り値 (σ [画素] か None, 使った星の数, 鋭さの上限)。
+    鋭さ (_sharpness) が明るい星の典型 (下から 1/4) の 2 倍を超える点は
+    ホットピクセルとみなして幅の計算に使わない。頂が平ら (飽和) な星も使わない。
+    """
+    ny, nx = sm1.shape
+    mx = ndimage.maximum_filter(sm1, size=7)
+    pk = (sm1 == mx) & (sm1 > min_snr * ns1) & valid
+    pk[:2] = pk[-2:] = False
+    pk[:, :2] = pk[:, -2:] = False
+    ys, xs = np.nonzero(pk)
+    if len(ys) < 3:
+        return None, 0, math.inf
+    found = []                                      # (σ, 鋭さ か None)
+    for i in np.argsort(-sm1[ys, xs])[:max_stars]:
+        y, x = int(ys[i]), int(xs[i])
+        v = float(sm1[y, x])
+        sharp = _sharpness(work, y, x) if work[y, x] > 10.0 * sigma else None
+        for r in (8, 16, 32):                       # 半値の領域が窓に収まるまで広げる
+            y0, y1 = max(0, y - r), min(ny, y + r + 1)
+            x0, x1 = max(0, x - r), min(nx, x + r + 1)
+            t = sm1[y0:y1, x0:x1]
+            lab, _ = ndimage.label(t > 0.5 * v)
+            k = lab[y - y0, x - x0]
+            if k == 0:
+                break
+            reg = lab == k
+            rr, cc = np.nonzero(reg)
+            touches = (rr.min() == 0 or cc.min() == 0 or rr.max() == reg.shape[0] - 1
+                       or cc.max() == reg.shape[1] - 1)
+            if touches:
+                if r < 32:
+                    continue
+                break                               # 65 画素の窓より大きい = 星ではない
+            if int((t[reg] > 0.98 * v).sum()) > 4:  # 頂が平ら = 飽和
+                break
+            fwhm = 2.0 * math.sqrt(float(reg.sum()) / math.pi)
+            found.append((math.sqrt(max((fwhm / 2.3548) ** 2 - 1.0, 0.0)), sharp))
+            break
+    sharps = [s for _, s in found if s is not None]
+    limit = max(2.5, 2.0 * float(np.percentile(sharps, 25))) if len(sharps) >= 3 else math.inf
+    widths = [w for w, s in found if (s is None or s <= limit) and w > 0.3]
+    if len(widths) < 3:
+        return None, len(widths), limit
+    return float(np.percentile(widths, 40)), len(widths), limit
+
+
+def _false_peaks(u, area, s):
+    """
+    雑音だけの画像を σ=s でぼかしたとき、雑音の u 倍を超える局所の極大の数の見込み。
+    ガウス場の極大の数の式 (面積 / s² · u · exp(-u²/2) に比例) の係数を、
+    白色雑音で数えて合わせた (s = 1〜3、968x548 と 1608x1104 で係数 0.04〜0.045)。
+    """
+    return _DEEP_FALSE_RATE * area / (s * s) * u * math.exp(-0.5 * u * u)
+
+
+def _peak_offset(a, b, c):
+    """
+    3 点 (左, 中央, 右) の極大の位置を -0.5〜0.5 で返す。値が全部正ならガウスに
+    ちょうど合う対数の放物線、そうでなければ普通の放物線を当てる。
+    """
+    if a > 0.0 and b > 0.0 and c > 0.0:
+        la, lb, lc = math.log(a), math.log(b), math.log(c)
+        den = la - 2.0 * lb + lc
+        if den < 0.0:
+            return min(max(0.5 * (la - lc) / den, -0.5), 0.5)
+    den = a - 2.0 * b + c
+    if den < 0.0:
+        return min(max(0.5 * (a - c) / den, -0.5), 0.5)
+    return 0.0
+
+
+def detect_sources_deep(sub, mask, sigma, max_sources=400, target_false=2.0, min_u=4.0,
+                        info=None):
+    """
+    深い検出 (解析エンジンに渡す星)。detect_sources より暗い星まで拾う。
+
+      1. σ=1 でぼかした画像の明るい星から、星像の幅 (σ_psf) を測る
+      2. 画像を σ = 1.25 σ_psf (測れなければ 1.5、1〜8 に収める) のガウスでぼかし、
+         升ごとの中央値で背景を引く。雑音は升ごとの MAD で場所ごとに測る
+      3. 局所の極大のうち、その場所の雑音の u 倍を超えるものを候補にする。
+         u は _false_peaks が target_false 個 (画像全体) になる値 (min_u 以上)
+      4. 明るい順に見て、次のものは捨てる:
+         ・もっと明るい星との間の谷が雑音の 3 倍より浅い (同じ星の肩・光条のこぶ)
+         ・ぼかした像の曲率で見た伸びが 4 倍を超える (光跡・線)
+         ・鋭さが明るい星の典型の 2 倍を超える (ベイヤーで十字に広がったホットピクセル)
+         ・まわりの輪 (ぼかした星像の σ の 3 倍の半径) の中央値より雑音の 3 倍以上高くない
+           (大きなかぶりの上で、背景の当てはめの残りに雑音が乗っただけの極大。月明かりの
+           合成画像で偽の星が 42 → 5 個。前処理の背景は 64 画素の升を双一次で引き伸ばすので、
+           急なかぶりでは升の節点に折れ目のこぶが残る)
+      5. 位置はぼかした像の 3x3 に (対数の) 放物線を当てて小数まで出す
+
+    戻り値は detect_sources と同じ形 (星のリスト, しきい値 u)。リストは明るい順。
+    flux はぼかした像の頂の値から出したガウスの全光量 (並べ替えの目安)、
+    snr は頂の値 / その場所の雑音、area は FWHM の円の面積 (目安)。
+    info に dict を渡すと、測った値 (s_psf, s, u, 候補の数, 捨てた理由ごとの数, 秒) を入れる。
+
+    以前の版は画像を 2x2 にまとめて detect_sources をかけていたが、効くのは FWHM が
+    7 画素以上の星だけだった。ここでは星の幅に合わせてぼかすので、細い星でも太い星でも
+    同じように効く。
+    """
+    if ndimage is None:
+        raise RuntimeError("scipy が必要です:  pip install scipy")
+    from scipy.spatial import cKDTree
+
+    t_start = time.perf_counter()
     ny, nx = sub.shape
-    h, w = ny // 2 * 2, nx // 2 * 2              # 奇数の端の 1 行・1 列は捨てる
-    if h < 16 or w < 16:
+    valid = ~np.asarray(mask, dtype=bool)
+    if ny < 16 or nx < 16 or int(valid.sum()) < 256:
         return [], None
-    s2 = np.asarray(sub[:h, :w], dtype=np.float32).reshape(
-        h // 2, 2, w // 2, 2).sum(axis=(1, 3))
-    m2 = np.asarray(mask[:h, :w]).reshape(h // 2, 2, w // 2, 2).any(axis=(1, 3))
-    # 雑音は測り直す。ベイヤーの平滑化などで隣どうしの雑音がそろっていると、
-    # まとめた後の雑音は 2σ より大きくなる (2σ と決め打ちすると偽の星が増える)。
-    ref = s2[~m2] if (~m2).any() else s2
-    sigma2 = float(sigma_clipped_stats(ref, sigma=3.0)[2])
-    if not np.isfinite(sigma2) or sigma2 <= 0:
-        sigma2 = 2.0 * float(sigma)
-    found, thr = detect_sources(s2, m2, sigma2, min_sources=60)
-    for c in found:
-        c["x"] = 2.0 * c["x"] + 0.5
-        c["y"] = 2.0 * c["y"] + 0.5
-        c["fwhm"] *= 2.0
-        c["area"] *= 4
-    return found, thr
+    work = np.where(valid, sub, 0.0).astype(np.float32)
+    sigma = float(sigma)
+
+    # 1. 星像の幅
+    sm1 = ndimage.gaussian_filter(work, 1.0)
+    back = _block_map(sm1, valid, 32, _median_last)
+    sm1 = sm1 - (back if back is not None else float(np.median(sm1[valid])))
+    ns1 = _clipped_stats(sm1[valid])[1]
+    if not np.isfinite(ns1) or ns1 <= 0:
+        ns1 = 0.28 * sigma
+    s_psf, n_psf, sharp_max = _psf_sigma(sm1, work, valid, ns1, sigma)
+    del sm1, back
+    s = min(max(1.25 * s_psf if s_psf else 1.5, 1.0), 8.0)
+
+    # 2. ぼかす・背景を引く・雑音を測る
+    sm = ndimage.gaussian_filter(work, s)
+    box = int(max(16, round(8 * s)))
+    back = _block_map(sm, valid, box, _median_last)
+    sm = sm - (back if back is not None else float(np.median(sm[valid])))
+    del back
+    # マスクの縁はぼかしでマスクの 0 が混ざって沈むので、ぼかしの幅だけ広げて除く
+    bad = (ndimage.binary_dilation(~valid, iterations=int(math.ceil(2 * s)) + 1)
+           if not valid.all() else np.zeros(valid.shape, dtype=bool))
+    if int((~bad).sum()) < 256:
+        return [], None
+    med, ns = _clipped_stats(sm[~bad])
+    if not np.isfinite(ns) or ns <= 0:
+        ns = max(ns1, 1e-12)
+    sm -= med
+    nmap = _block_map(sm, ~bad, int(max(32, round(16 * s))), _mad_sigma_last)
+    if nmap is None:
+        nmap = np.full(sm.shape, ns, dtype=np.float32)
+    nmap = np.maximum(nmap, 0.7 * ns)              # 星で埋まった升で雑音を低く見積もらない
+
+    # 3. しきい値と候補
+    area = float((~bad).sum())
+    u = float(min_u)
+    while u < 8.0 and _false_peaks(u, area, s) > target_false:
+        u += 0.05
+    u = round(u, 2)
+    mx = ndimage.maximum_filter(sm, size=2 * int(math.ceil(s)) + 1)
+    pk = (sm == mx) & (sm > u * nmap) & ~bad
+    edge = max(2, int(math.ceil(s)))
+    pk[:edge] = False
+    pk[-edge:] = False
+    pk[:, :edge] = False
+    pk[:, -edge:] = False
+    ys, xs = np.nonzero(pk)
+    del mx, pk
+    vals = sm[ys, xs]
+    order = np.argsort(-vals)[:max(4000, 10 * max_sources)]
+    ys, xs, vals = ys[order], xs[order], vals[order].astype(np.float64)
+    n = len(ys)
+
+    # 4. 明るい順に選ぶ
+    keep = np.zeros(n, dtype=bool)
+    rejected = {"saddle": 0, "elong": 0, "sharp": 0, "ring": 0}
+    # 局所の背景を測る輪: ぼかした星像の σ (√(σ_psf² + s²)) の 3 倍の半径。星の光はそこで頂の 1% まで落ちる
+    sp = s_psf if s_psf else s / 1.25
+    r_ring = 3.0 * math.sqrt(sp * sp + s * s)
+    ang = np.linspace(0.0, 2.0 * math.pi, max(16, int(2.0 * math.pi * r_ring)), endpoint=False)
+    ring_dx = np.round(r_ring * np.cos(ang)).astype(int)
+    ring_dy = np.round(r_ring * np.sin(ang)).astype(int)
+
+    def reach(v):
+        # 明るい星の像が雑音に沈むまでの半径の目安 (肩のこぶを探す範囲)
+        return min(max(4.0 * s, 2.0 * s * math.sqrt(max(v / (u * ns), 1.0))), 40.0 * s)
+
+    if n:
+        pts = np.column_stack([xs, ys]).astype(np.float64)
+        tree = cKDTree(pts)
+        r_max = reach(vals[0])
+        for i in range(n):
+            y, x, v = int(ys[i]), int(xs[i]), float(vals[i])
+            if work[y, x] > 10.0 * sigma and _sharpness(work, y, x) > sharp_max:
+                rejected["sharp"] += 1
+                continue
+            shoulder = False
+            for j in tree.query_ball_point(pts[i], r_max):
+                if j >= i or not keep[j]:
+                    continue
+                d = math.hypot(x - xs[j], y - ys[j])
+                if d > reach(vals[j]):
+                    continue
+                m = int(math.ceil(2 * d)) + 2
+                line = ndimage.map_coordinates(
+                    sm, [np.linspace(y, ys[j], m), np.linspace(x, xs[j], m)], order=1)
+                if v - float(line.min()) < 3.0 * float(nmap[y, x]):
+                    shoulder = True
+                    break
+            if shoulder:
+                rejected["saddle"] += 1
+                continue
+            c = sm[y - 1:y + 2, x - 1:x + 2].astype(np.float64)
+            dxx = c[1, 2] - 2.0 * c[1, 1] + c[1, 0]
+            dyy = c[2, 1] - 2.0 * c[1, 1] + c[0, 1]
+            dxy = (c[2, 2] - c[2, 0] - c[0, 2] + c[0, 0]) / 4.0
+            tr, det = dxx + dyy, dxx * dyy - dxy * dxy
+            elong = math.inf
+            if det > 0 and tr < 0:
+                root = math.sqrt(max(tr * tr / 4.0 - det, 0.0))
+                l1, l2 = tr / 2.0 - root, tr / 2.0 + root   # どちらも負。l1 が急なほう
+                if l2 < 0:
+                    elong = math.sqrt(l1 / l2)
+            if elong > 4.0:
+                rejected["elong"] += 1
+                continue
+            ry = np.clip(y + ring_dy, 0, ny - 1)
+            rx = np.clip(x + ring_dx, 0, nx - 1)
+            ring = sm[ry, rx][~bad[ry, rx]]               # マスクの側は沈んでいるので使わない
+            if len(ring) >= 8 and v - float(np.median(ring)) < 3.0 * float(nmap[y, x]):
+                rejected["ring"] += 1
+                continue
+            keep[i] = True
+
+    # 5. 位置と明るさ
+    fwhm = 2.3548 * sp
+    out = []
+    for i in np.flatnonzero(keep):
+        y, x, v = int(ys[i]), int(xs[i]), float(vals[i])
+        c = sm[y - 1:y + 2, x - 1:x + 2].astype(np.float64)
+        ox = _peak_offset(c[1, 0], c[1, 1], c[1, 2])
+        oy = _peak_offset(c[0, 1], c[1, 1], c[2, 1])
+        out.append(dict(x=x + ox, y=y + oy, flux=v * 2.0 * math.pi * (sp * sp + s * s),
+                        peak=float(sub[y, x]), area=int(round(math.pi * fwhm * fwhm / 4.0)),
+                        elong=1.0, fwhm=fwhm, snr=v / float(nmap[y, x])))
+    out.sort(key=lambda c: -c["flux"])
+    if info is not None:
+        info.update(s_psf=s_psf, n_psf=n_psf, s=s, u=u, noise=ns, candidates=n,
+                    kept=len(out), rejected=rejected, sharp_max=sharp_max,
+                    seconds=time.perf_counter() - t_start)
+    return out[:max_sources], u
 
 
 # ============================================================ スケール推定 ===
@@ -713,9 +1012,39 @@ def missing_index_advice(fov_arcmin, index_names):
     return False, [
         f"画角 {fov_arcmin:.1f}′ に対応する星図データ ({lo:g}′〜{hi:g}′ 段) がありません。",
         f"必要なファイル: {files}",
-        f"取得: ［準備］タブの段の一覧で index-{series} に印を付け、"
-        "「選んだ段を落とす」を押してください。",
+        _index_get_advice(series),
     ]
+
+
+def _in_gui():
+    """GUI から動いているか。GUI はエンジンの名前空間に CANCEL_EVENT を置く (ノートブックには無い)。"""
+    return globals().get("CANCEL_EVENT") is not None
+
+
+def _index_get_advice(series):
+    """足りない段の取り方。GUI は［準備］タブ、ノートブックは配布ページの zip とセル C の INDEX_DIR。"""
+    if _in_gui():
+        return (f"取得: ［準備］タブの段の一覧で index-{series} に印を付け、"
+                "「選んだ段を落とす」を押してください。")
+    if series in (5202, 5203, 5204):
+        z = f"AstrometryData-index-{series}.zip"
+    elif series >= 5205 or 4100 <= series < 5200:
+        z = "AstrometryData.zip (基本セット)"
+    else:
+        return (f"取得: この段は配布ページに zip がありません。原典 "
+                f"https://portal.nersc.gov/project/cosmo/temp/dstn/index-5200/LITE/ から "
+                f"index-{series}-00〜47.fits を落として、セル C の INDEX_DIR のフォルダーに"
+                "入れてください。")
+    return (f"取得: 配布ページ (README の 5 章) から {z} を落として展開し、"
+            "セル C の INDEX_DIR のフォルダーに index-*.fits が並ぶようにしてください。")
+
+
+def _index_place_advice():
+    """星図データの置き場所の直し方 (GUI とノートブックで違う)。"""
+    if _in_gui():
+        return "［準備］タブで星図データを落とすか、置き場所を指定し直してください。"
+    return ("配布ページ (README の 5 章) の zip を展開するか、"
+            "セル C の INDEX_DIR を星図データのある場所に直してください。")
 
 
 # 星図データの目録 (SvIndexCatalog) を覚えておく。作るときにヘッダーを 1 本ずつ
@@ -795,8 +1124,7 @@ def solver_diagnostics(index_dir=None):
     rep = {"ok": False, "messages": [], "indexes": [], "cfg": "", "paths": [index_dir]}
     if not os.path.isdir(index_dir):
         rep["messages"].append(
-            f"星図データの置き場所 {index_dir} がありません。"
-            "［準備］タブで星図データを落とすか、置き場所を指定し直してください。")
+            f"星図データの置き場所 {index_dir} がありません。" + _index_place_advice())
         return rep
     try:
         catalog = index_catalog(index_dir)
@@ -810,7 +1138,8 @@ def solver_diagnostics(index_dir=None):
     if problems:
         rep["messages"].append(
             f"使えない星図データが {len(problems)} 個あるので読み飛ばします。"
-            "［準備］タブで落とし直してください。")
+            + ("［準備］タブで落とし直してください。" if _in_gui() else
+               "配布ページの zip から入れ直してください。"))
         for p in problems[:5]:
             rep["messages"].append("  " + _problem_text(p))
         if len(problems) > 5:
@@ -818,7 +1147,7 @@ def solver_diagnostics(index_dir=None):
     if not rep["indexes"]:
         rep["messages"].append(
             f"使える星図データ (index-*.fits) が {index_dir} に 1 つもありません。"
-            "［準備］タブで落としてください。")
+            + _index_place_advice())
         return rep
 
     rep["ok"] = True
@@ -895,7 +1224,8 @@ def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
                   diagnostics=None, index_dir=None, prep=None, cancel=None):
     """
     オフライン (zahyou 自前の解析エンジン sv_solve) で解く。条件を変えながら粘り強く挑む。
-    戻り値: WCS ヘッダ (CRPIX は 1 始まり) or None。
+    星は深い検出 (detect_sources_deep) の星を先に、sources (図に出す標準の検出の星) を
+    予備に使う。戻り値: WCS ヘッダ (CRPIX は 1 始まり) or None。
 
     例外は投げない (中止したときも None)。全体の締め切りは timeout 秒の壁時計で、
     試行ごとに残り時間の一部を割り当て、その締め切りを sv_solve に渡す。
@@ -912,6 +1242,16 @@ def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
     except Exception as e:
         _log(f"\n  ❌ オフライン解析が途中で失敗しました: {type(e).__name__}: {e}")
         return None
+    finally:
+        # 索引ファイルの mmap を放す (目録とヘッダーの検査結果は覚えたまま。次の解析で開き直す)。
+        # 開いたままだと、GUI を開いている間は Explorer やほかのプロセスから星図データを
+        # 消したり置き換えたりできない (Windows)
+        cat = _INDEX_CATALOG["catalog"]
+        if cat is not None:
+            try:
+                cat.close()
+            except Exception:
+                pass
 
 
 def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
@@ -938,7 +1278,7 @@ def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
     catalog = index_catalog(index_dir)
     installed = _catalog_names(catalog)
     if not installed:
-        _log("  ❌ 使える星図データがありません。［準備］タブで落としてください。")
+        _log("  ❌ 使える星図データがありません。" + _index_place_advice())
         return None
     lo, hi = index_coverage(installed)
     if lo is not None:
@@ -964,60 +1304,58 @@ def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
         _log(f"  - 探索するスケール: {wide[0]:.3f}〜{wide[1]:.3f}″/px "
              f"(画角 {wide[0] * nx / 60:.1f}′〜{wide[1] * nx / 60:.0f}′ 相当)")
 
-    # 試行のはしご: (ラベル, 星の検出, ヒント, スケールの範囲, 残り時間の何割まで使うか)
-    #   標準 = run() が検出した星 / 深い = 画像を 2x2 にまとめて暗い星まで拾い直した星
-    std = []
+    # 星の組は 2 つ。
+    #   深い = 解析エンジンのために暗い星まで拾い直した星 (detect_sources_deep)
+    #   標準 = run() が検出して図に緑の丸で出す星 (detect_sources)
+    # 深い検出の星を先に渡す。解析エンジンは quad に使わなかった星で検証するので、
+    # 星が多いほど対数オッズの余裕が増える。実測 (sv_solve にブラインドで直接):
+    #   3I は標準 8 個で 21.6 (合格 20.7 のぎりぎり) → 深い 15 個で 47.7、
+    #   c2025a6 は 159 → 317、ほかの実写は同等。標準の星は予備に回す。
+    if stopped():
+        _log("\n  ■ 中止しました。")
+        return None
+    deep_stars, dinfo = [], {}
+    try:
+        if prep is None:
+            prep = preprocess(bundle.data)[:3]
+        deep_stars, u = detect_sources_deep(*prep, info=dinfo)
+    except Exception as e:
+        _log(f"\n  ⚠️ 深い検出に失敗したので、標準の検出の星だけで解きます: {type(e).__name__}: {e}")
+    if deep_stars:
+        s_psf = dinfo.get("s_psf")
+        how = (f"星の幅 (FWHM {2.3548 * s_psf:.1f} px) に合わせてぼかし" if s_psf else
+               f"星の幅を測れなかったので σ {dinfo.get('s', 1.5):.1f} px でぼかし")
+        _log(f"\n  - 深い検出 (解析エンジンに渡す星): {how}、星を {len(deep_stars)} 個検出"
+             f" (しきい値 {u:g}σ)")
+    elif dinfo:
+        _log("\n  - 深い検出: 星が見つかりませんでした。")
+    star_sets = [(name, stars) for name, stars in (("深い検出", deep_stars), ("標準の検出", sources))
+                 if len(stars) >= 3]
+    if not star_sets:
+        n_max = max(len(sources), len(deep_stars))
+        _log("  ❌ 星が 1 つも無いので解析できません。" if n_max == 0 else
+             f"  ❌ 星が {n_max} 個しかないので解析できません (3 個以上要ります)。")
+        return None
+
+    # 試行のはしご: 探す範囲の狭い (速い) 条件から順に、条件ごとに 深い → 標準 の星で。
+    # (ラベル, 星, ヒント, スケールの範囲, 残り時間の何割まで使うか)
+    # sv_solve は quad を試し尽くせば締め切り前に戻るので、狭い条件は両方の星で試しても安い。
+    conds = []
     if hint and narrow:
-        std.append(("座標ヒント + スケール既知", "std", hint, narrow, 0.25))
+        conds.append(("座標ヒント + スケール既知", hint, narrow, 0.25))
     if hint:
-        std.append(("座標ヒント + スケール全域", "std", hint, wide, 0.25))
+        conds.append(("座標ヒント + スケール全域", hint, wide, 0.25))
     if narrow:
-        std.append(("全天 + スケール既知", "std", None, narrow, 0.25))
-    std.append(("全天 + スケール全域", "std", None, wide, 0.5))
-    deep = [
-        (f"深い検出 (2x2) + {'座標ヒント' if hint else '全天'} + "
-         f"{'スケール既知' if narrow else 'スケール全域'}", "deep", hint, narrow or wide, 1.0),
-        ("深い検出 (2x2) + 全天 + スケール全域", "deep", None, wide, 1.0),
-    ]
-    # 星が少ないときは、標準の星で粘っても当たりにくい。深い検出を先に回す。
-    # (v6 でも「画像を直接渡す」試行を先にして、星 8 個の画像が 154 秒 → 20 秒になった)
-    if len(sources) < 12:
-        deep = [(a[0], a[1], a[2], a[3], share) for a, share in zip(deep, (0.25, 0.5))]
-        attempts = deep + std
-    else:
-        attempts = std + deep
-    if not sources:                       # 標準の検出で 0 個なら、深い検出だけ
-        attempts = [a for a in attempts if a[1] == "deep"]
-    seen, uniq = set(), []                # 同じ条件を 2 度走らせない
-    for a in attempts:
-        key = (a[1], a[2], a[3])
-        if key not in seen:
-            seen.add(key)
-            uniq.append(a)
-    attempts = uniq
+        conds.append(("全天 + スケール既知", None, narrow, 0.25))
+    conds.append(("全天 + スケール全域", None, wide, 0.5))
+    attempts = [(f"{name}の星 {len(stars)} 個 + {cond}", stars, hint_i, rng, share)
+                for cond, hint_i, rng, share in conds for name, stars in star_sets]
 
     solver_log = (lambda m: _log(f"    · {m}")) if verbose else None
-    star_sets = {"std": sources}
-    for i, (label, kind, hint_i, (s_lo, s_hi), share) in enumerate(attempts, 1):
+    for i, (label, stars, hint_i, (s_lo, s_hi), share) in enumerate(attempts, 1):
         if stopped():
             _log("\n  ■ 中止しました。")
             return None
-        if t_end - time.monotonic() < 2.0:
-            _log("  ⏱ 制限時間に達したので、これ以上の再試行はしません。")
-            break
-        if kind not in star_sets:
-            if prep is None:
-                prep = preprocess(bundle.data)[:3]
-            found, thr = detect_sources_deep(*prep)
-            star_sets[kind] = found
-            if found:
-                _log(f"\n  - 深い検出: 画像を 2x2 にまとめて星を {len(found)} 個検出"
-                     f" (しきい値 {thr:g}σ)")
-            else:
-                _log("\n  - 深い検出: 画像を 2x2 にまとめても星が見つかりませんでした。")
-        stars = star_sets[kind]
-        if not stars:
-            continue
         left = t_end - time.monotonic()
         if left < 2.0:
             _log("  ⏱ 制限時間に達したので、これ以上の再試行はしません。")
@@ -1052,12 +1390,10 @@ def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
     if stopped():
         _log("\n  ■ 中止しました。")
         return None
-    if not sources and not star_sets.get("deep"):
-        _log("  ❌ 星が 1 つも無いので解析できません。")
-        return None
     _log("\n  ❌ すべての条件で解けませんでした。心当たりの順に:")
-    if len(sources) < 15:
-        _log(f"     ・写っている星が {len(sources)} 個と少なめです。"
+    n_best = max(len(sources), len(deep_stars))
+    if n_best < 15:
+        _log(f"     ・写っている星が {n_best} 個と少なめです。"
              "露出を伸ばすか、複数フレームを重ねてください。")
     lo_fov, hi_fov = index_coverage(installed)
     if lo_fov is not None:
@@ -1093,35 +1429,56 @@ def internet_available(timeout=4):
     return False
 
 
-def _with_deadline(fn, timeout, label):
+def _with_deadline(fn, timeout, label, cancel=None):
     """
-    指定時間で必ず戻る呼び出し。
+    指定時間で必ず戻る呼び出し。中止の合図 (cancel) が立てば 0.5 秒以内に None で戻る。
     v5 は with ThreadPoolExecutor(...) を使っていたため、タイムアウト後も
     ブロックの出口でワーカーの終了を待ってしまい、実際には打ち切れなかった。
+
+    fn 自身が TimeoutError を投げたとき (astroquery の solve_timeout 切れ) は、こちらの締め切りとは
+    区別して知らせる。Python 3.11 以降は concurrent.futures.TimeoutError と組み込みの TimeoutError が
+    同じクラスなので、区別しないと「〜秒で終わりませんでした」と誤って出る。
     """
+    stopped = _cancel_checker(cancel)
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     try:
         future = executor.submit(fn)
-        try:
-            return future.result(timeout=timeout)
-        except concurrent.futures.TimeoutError:
-            future.cancel()
-            _log(f"⚠️ {label}が {timeout:.0f} 秒で終わりませんでした。")
-            return None
+        t_end = time.monotonic() + float(timeout)
+        while True:
+            if stopped():
+                future.cancel()
+                _log(f"  ■ {label}を中止しました。")
+                return None
+            left = t_end - time.monotonic()
+            if left <= 0:
+                future.cancel()
+                _log(f"⚠️ {label}が {timeout:.0f} 秒で終わりませんでした。")
+                return None
+            try:
+                return future.result(timeout=min(0.5, left))
+            except concurrent.futures.TimeoutError as e:
+                if future.done():               # fn が投げた TimeoutError
+                    why = e.args[0] if e.args else "時間切れ"
+                    _log(f"⚠️ {label}: 時間内に解けませんでした ({why})。")
+                    return None
     finally:
         # wait=False にしないと、ここで居残りスレッドの終了を待ってしまう
         executor.shutdown(wait=False, cancel_futures=True)
 
 
 def solve_online(image_path, api_key, sources=None, shape=None, timeout=120,
-                 hint_radec=None, hint_radius_deg=5.0, scale_hint=None):
+                 hint_radec=None, hint_radius_deg=5.0, scale_hint=None, cancel=None):
     """
-    nova.astrometry.net に投げる。指定時間で必ず戻る。
+    nova.astrometry.net に投げる。指定時間で必ず戻る。解けなければ None。
 
     星のリストがあるならそれを送る。画像そのものより桁違いに軽く、
     オフラインとまったく同じ検出結果で解けるので結果もぶれない。
+    cancel (threading.Event か、呼ぶと True を返す関数) が立てば 0.5 秒以内に None で戻り、
+    画像そのものは送らない (中止を押した人の画像を、押したあとに外へ送らない)。
+    nova が「解けない」と空の結果を返したときも None (成功扱いにしてオフラインを飛ばさない)。
     """
     from astroquery.astrometry_net import AstrometryNet
+    stopped = _cancel_checker(cancel)
 
     ast = AstrometryNet()
     ast.api_key = api_key
@@ -1144,15 +1501,20 @@ def solve_online(image_path, api_key, sources=None, shape=None, timeout=120,
             lambda: ast.solve_from_source_list(
                 xs, ys, int(nx), int(ny),
                 solve_timeout=int(timeout), verbose=False, **settings),
-            timeout + 15, "オンライン解析")
+            timeout + 15, "オンライン解析", cancel)
         if hdr:
             return hdr
+        if stopped():
+            return None
         _log("  - 星の位置だけでは解けなかったので、画像そのものを送ります。")
 
-    return _with_deadline(
+    if stopped():
+        return None
+    hdr = _with_deadline(
         lambda: ast.solve_from_image(image_path, solve_timeout=int(timeout),
                                      verbose=False, **settings),
-        timeout + 30, "オンライン解析")
+        timeout + 30, "オンライン解析", cancel)
+    return hdr if hdr else None
 
 
 # ============================================================== 目標の座標 ===

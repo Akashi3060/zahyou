@@ -123,9 +123,11 @@ zahyou.exe --update-apply --out apply.txt     # 入れ替えまで (起動し直
 `%LOCALAPPDATA%\zahyou` (設定と記憶) / `C:\AstrometryData` (星図データ)。
 
 v6 の [準備] タブが WSL へ入れた astrometry.net は、この版では使わない。
-消すなら `sudo apt remove --purge astrometry.net` (設定は
-`/etc/astrometry.cfg.bak-zahyou` から戻せる)。WSL 自体はほかの用事にも使うので、
-`wsl --unregister` する前に、ほかに使っていないことを確かめること。
+片付けはどちらか一方: (1) 消すなら `sudo apt remove --purge astrometry.net` と
+`sudo rm /etc/astrometry.cfg.bak-zahyou` (purge で設定ファイルも消えるので書き戻さない)、
+(2) astrometry.net をほかの用事に残すなら `sudo cp /etc/astrometry.cfg.bak-zahyou /etc/astrometry.cfg`
+で設定だけ戻す (戻したら .bak は消してよい)。README の「v6 で WSL に入れた astrometry.net」と同じ。
+WSL 自体はほかの用事にも使うので、`wsl --unregister` する前に、ほかに使っていないことを確かめること。
 
 ## オフライン解析のつなぎ方
 
@@ -134,6 +136,10 @@ v6 の [準備] タブが WSL へ入れた astrometry.net は、この版では�
   (`_params` の `INDEX_DIR`)。v6 は WSL の `/etc/astrometry.cfg` を経由していた。
 - 中止は `threading.Event` を立てて渡す (`CANCEL_EVENT`)。エンジンは quad の束を 1 つ処理するごと・
   検証 1 回ごとにこれと締め切りを確かめる。v6 は WSL の `solve-field` を `pkill` していて、ほとんど効かなかった。
+  オンライン解析 (`solve_online`) も同じ合図を 0.5 秒ごとに見て、立てば戻る。中止のあとに画像そのものを
+  nova へ送ることはしない (以前は星の位置で解けないと、中止したあとでも画像を送っていた)。
+- 解析が終わるたびに、エンジンは索引ファイルの mmap を放す (目録は覚えたまま)。GUI を開いたままでも、
+  Explorer やほかのプロセスから星図データを消したり置き換えたりできる。
 - 解析の方法の選択肢は「オフラインのみ」。`gui.json` に残っている v6 の「オフライン (WSL) のみ」はそのまま読み替える。
 
 ## 建て方
@@ -220,7 +226,10 @@ dist\onefile\zahyou.exe --selftest "画像パス" --out selftest.txt --online   
 向きが数字で出る / ボタンが見切れていない / 配色を切り替えられる。
 
 v6 の固めた exe では全部通り、オンライン経路とも、ノートブック版とも同じ答えでした。
-試作版の結果と所要時間は、自前のエンジンで測り直します。
+試作版 (v7-dev) は、2026-10-16 に Core Ultra 7 265K (20 論理コア)・Python 3.13 で
+`python gui/zahyou_gui.py --selftest dev/realcase/real16.fits --offline` を走らせて 17/17 通り、
+解析は 2.6 秒 (状態バーの表示は 2.2 秒。機材の画素スケールを覚えている状態) でした
+(exe ではなく Python から。exe は解析エンジンを直したあと建て直していません)。
 
 「ボタンが見切れていない」は、入れ物が狭くて Tk がラベルを削っていないかを
 `winfo_width()` と `winfo_reqwidth()` の差で見ています

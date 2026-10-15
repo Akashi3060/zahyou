@@ -3,10 +3,15 @@
 `zahyou_v6.ipynb` はここのファイルから **生成** している。ノートブックを直接編集すると
 次の生成で上書きされるので、直すときはこちらを直すこと。
 
-`build_nb.py` は **2 つの成果物**を書き出す。
+`build_nb.py` は **2 つの成果物**を書き出す（引数なしで走らせると、リポジトリ直下の 2 つを書き換える）。
 
-* `zahyou_v6.ipynb` … markdown + 3 つの短いセル（合計 90 行ほど）
-* `zahyou_engine.py` … 解析の中身（オフライン解析の自前のエンジンを含む）。セル A がこれを読み込む
+* `zahyou_v6.ipynb` … markdown + 3 つの短いセル（合計 90 行ほど）。直下のものは**セルの中身だけを id ごとに
+  差し替え**、出力の例は残す
+* `zahyou_engine.py` … 解析の中身（オフライン解析の自前のエンジンを含む）。セル A がこれを読み込む。
+  GUI・exe・`test_solver_real.py --engine` も直下のこれを使う
+
+あわせて試験用に `dev/zahyou.ipynb` と `dev/zahyou_engine.py` も書く（git には入れない。`test_notebook_run.py` が使う）。
+直下に残っている `zahyou.ipynb` は WSL 時代の別物で、生成物ではない。
 
 **なぜ分けたか**: 1500 行をノートブックに貼ると、画像を選ぶ場所と結果が出る場所が
 遠く離れてスクロールが大変になる。cell metadata の `jupyter.source_hidden` で
@@ -57,15 +62,15 @@
 ## 試験
 
 ```
-python build_nb.py               # dev/zahyou.ipynb と dev/zahyou_engine.py を生成
-#                                  → リポジトリ直下へコピーする
+python build_nb.py               # 直下の zahyou_engine.py・zahyou_v6.ipynb (セルの中身だけ) と、
+#                                    試験用の dev/zahyou.ipynb・dev/zahyou_engine.py を書く
 python test_solver_wcs.py        # solver_wcs:   TAN の往復・当てはめ・FITS ヘッダー
 python test_solver_index.py      # solver_index: 索引の読み込み・kd-tree の探索・ファイルの検査
 python test_solver_core.py       # solver_core:  quad 作り・コード・照合・検証・改良
 python test_solver_synth.py      # 合成星野をブラインドとヒントで解く
 python test_solver_real.py       # 実写を解いて、v6 で求めた正解と比べる
 python test_solver_real.py --engine --both   # 同じことを、組み立てた直下の zahyou_engine.py と sv_solve 直接で
-python test_robust.py            # いろいろな画像で星が検出できるか (33 ケース)
+python test_robust.py            # いろいろな画像で星が検出できるか (38 ケース)
 python test_notebook_run.py      # 本物のカーネルでセル A/B を実行し、画面に出るものを数える
 ```
 
@@ -77,8 +82,8 @@ python test_notebook_run.py      # 本物のカーネルでセル A/B を実行�
 |---|---|---|
 | `test_solver_index.py` | 索引の読み込み（コードを星から計算し直して保存値と整数まで一致）、kd-tree の探索 = 総当たり | 全件一致 |
 | `test_solver_synth.py` | 索引の星から作った合成星野（5202〜5206・4107〜4110・三角形の 4111〜4119、回転・鏡像・スケール・タイル境界・赤経 0°・極付近、星の欠け 30%・偽の星 30%）をブラインドとヒントで解く | 中心 2″（か 0.5 px）以内、スケール 0.2%、回転 0.1°、鏡像一致。一様乱数の星野は 1 つも解けない |
-| `test_solver_real.py` | v6 の WSL 版で解いた正解（`solver_truth.json`）と同じ画像を解く（画像が手元にあるときだけ） | 中心 2″、スケール 0.2%、回転 0.1°、鏡像一致。ピンぼけ・光条・乱数の星野は解けず、締め切りを守る |
-| `test_robust.py` | 読み込み・前処理・検出 | 33 ケース（うち 2 つは `Downloads` に画像があるときだけ走る） |
+| `test_solver_real.py` | v6 の WSL 版で解いた正解（`solver_truth.json`）と同じ画像を解く（画像が手元にあるときだけ。パスはリポジトリからの相対か `$ZAHYOU_TEST_IMAGES/` から。陽性の画像が 1 枚も走らなければ終了コード 2） | 中心 2″、スケール 0.2%、回転 0.1°、鏡像一致。ピンぼけ・光条・乱数の星野は解けず、締め切りの超過 1 秒以内 |
+| `test_robust.py` | 読み込み・前処理・検出（図の星と、解析エンジンに渡す深い検出の星） | 38 ケース（うち 3 つは手元に実写があるときだけ走る。置き場所は `ZAHYOU_TEST_IMAGES`（既定はホームフォルダー）の下の `Downloads`） |
 
 画面の試験（`gui/test_*.py`）は [../gui/README.md](../gui/README.md) にある。
 
@@ -153,7 +158,9 @@ python make_index_zips.py 5204 5203 5202 --out C:\AstrometryData\dist
 なので、`C:\` 直下に展開すればマニュアル 2.3 の配置になる。
 段ごとの README と `SHA256SUMS.txt` も一緒に出力する。
 中身の星のデータには元の星表（Tycho-2 / Gaia DR2）の条件がかかる
-（[../THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)）。
+（[../THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)）。zip の中の README には、その条件
+（Gaia は CC BY-NC 3.0 IGO・商用は ESA の許可）・クレジット ESA/Gaia/DPAC・Gaia の定型の謝辞・論文を入れてある。
+**README を直したら zip を作り直して、配布ページの zip も差し替える**（人の作業）。
 
 ## マニュアル PDF
 

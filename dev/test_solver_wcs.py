@@ -610,6 +610,40 @@ def case_16_errors():
     record("16 縮退した入力は ValueError", not bad, ("NG: " + ", ".join(bad)) if bad else f"{len(tries)} 通り")
 
 
+def case_17_lsq_converge():
+    """接点の動かし直しは収束するまで: 星が CRPIX から離れて固まった広い視野(60°・90° の左 1/3 と隅 1/4、
+    2000×1300、雑音なし)を既定の上限で当てて、中心と隅が 1e-6 px 以内(上限 3 回の固定だった版は 60° の隅 1/4 で
+    中心 5.7 px、90° の隅 1/4 で 37 px ずれた)。上限を 3 回にして収まらなければ ValueError。"""
+    W, H = 2000, 1300
+    cen = np.array([(W - 1) / 2.0, (H - 1) / 2.0])
+    corners = np.array([cen, [0.0, 0.0], [W - 1.0, 0.0], [0.0, H - 1.0], [W - 1.0, H - 1.0]])
+    worst = 0.0
+    raised = []
+    bad = []
+    for fov in (40.0, 60.0, 90.0):
+        scale = fov * 3600.0 / W
+        for seed in (5, 6):
+            rng = np.random.default_rng(1700 + seed)
+            truth = SvWcs(sv_radec_to_xyz(200.0, -35.0), cen, random_cd(rng, scale, -1 if seed % 2 else 1))
+            for x1, y1 in ((W / 3.0, H), (W / 4.0, H / 4.0)):
+                xy = np.column_stack([rng.uniform(0, x1, 80), rng.uniform(0, y1, 80)])
+                s = truth.pix_to_xyz(xy[:, 0], xy[:, 1])
+                fit = sv_fit_wcs_lsq(xy, s, crpix=cen, sip_order=0)
+                d = sv_angle_between(fit.pix_to_xyz(corners[:, 0], corners[:, 1]),
+                                     truth.pix_to_xyz(corners[:, 0], corners[:, 1])) * ARCSEC / scale
+                worst = max(worst, float(d.max()))
+                if fov == 60.0 and x1 < W / 3.0:
+                    try:
+                        sv_fit_wcs_lsq(xy, s, crpix=cen, sip_order=0, iterations=3)
+                        bad.append(f"60° 種 {seed} 隅 1/4 で上限 3 回が通った")
+                    except ValueError:
+                        raised.append(seed)
+    ok = worst < 1e-6 and not bad and len(raised) == 2
+    record("17 最小二乗の接点は収束するまで動かす (広い視野・星が片寄る)", ok,
+           f"中心と隅のずれの最大 {worst:.1e} px(12 通り); 上限 3 回で収まらない 60° の隅 1/4 → ValueError "
+           f"{len(raised)}/2" + (("; NG: " + ", ".join(bad)) if bad else ""))
+
+
 def main():
     for fn in sorted(k for k in globals() if k.startswith("case_")):
         try:
