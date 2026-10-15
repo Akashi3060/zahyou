@@ -1,0 +1,25 @@
+[package]
+name = "zahyou-plot"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+zahyou-wcs = { workspace = true }
+# Image2D・Source と、numpy / astropy とビット一致する σ クリップ(伸張の範囲に使う)
+zahyou-image = { workspace = true }
+rayon = { workspace = true }
+# PNG の書き出し(BSD-3-Clause)。png の符号化も tiny-skia の既定の機能で行う
+tiny-skia = { workspace = true }
+# 文字の輪郭(Apache-2.0)。フォントは同梱せず C:\Windows\Fonts の游ゴシックを読む
+ab_glyph = { workspace = true }
+
+[dev-dependencies]
+# 試験で Python 基準実装の値(rs/testdata/plot_*.json)を読むだけ。float_roundtrip で小数の読み取りを正確にする
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[[example]]
+name = "bench_plot"

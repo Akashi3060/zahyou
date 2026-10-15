@@ -1,0 +1,3 @@
+# zahyou-image の整形(ほかの crate と同じく 1 行 120 文字まで)
+max_width = 120
+use_small_heuristics = "Max"

@@ -1,0 +1,23 @@
+[package]
+name = "zahyou-index"
+description = "astrometry.net の索引ファイル(index-41xx / index-52xx-NN)を mmap して、保存済みの kd-tree をそのまま探す"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+zahyou-wcs = { workspace = true }
+# どれも MIT / Apache-2.0 / Zlib の許容型
+memmap2 = "0.9"
+bytemuck = "1"
+rayon = "1.10"
+
+[dev-dependencies]
+# 試験で Python の基準値(JSON)を読む。float_roundtrip で実数をビットまで同じに戻す
+serde_json = { version = "1", features = ["float_roundtrip"] }
+sha2 = "0.10"
+# 速さの物差し(examples/bench_index.rs)でプライベートメモリを読む
+memory-stats = "1"
