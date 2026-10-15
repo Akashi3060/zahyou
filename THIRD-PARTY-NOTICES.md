@@ -7,9 +7,10 @@
 
     zahyou_engine.py / zahyou.ipynb / zahyou_v6.ipynb / gui/ / dev/ / docs/
 
-`zahyou.exe` に同梱した第三者のライブラリ、astrometry.net、星図データ
-(index ファイル)とその元になった星表は含みません。それぞれの扱いを
-以下にまとめます。
+オフライン解析のエンジン(`dev/solver_*.py`。`zahyou_engine.py` に組み込まれる)も
+zahyou 自身のコードです。`zahyou.exe` に同梱した第三者のライブラリ、星図データ
+(index ファイル)とその元になった星表は含みません。それぞれの扱いと、
+解き方の出典を以下にまとめます。
 
 ## 実行ファイルに入っているもの
 
@@ -130,36 +131,72 @@
   チェックサムの符号化器は使っていないので、ビルド時に外しました。
   外しても小分け再投影の結果は変わりません(平均も有効画素数も一致)。
 
+## オフライン解析の解き方 — astrometry.net の方式
+
+オフライン解析は、zahyou の中の自前のエンジン(`dev/solver_wcs.py`・
+`dev/solver_index.py`・`dev/solver_core.py`)が行います。zahyou 自身のコードとして
+MIT ライセンスで配ります。
+
+以前の版(v6 まで)は、[準備]タブが WSL の Ubuntu へ入れた astrometry.net
+(GPL-3.0-or-later)の `solve-field` を、別のプロセスとして呼んでいました。
+**この版は呼びません。** WSL も astrometry.net の実行ファイルも使いません。
+
+解き方(星 4 つ(広い段は 3 つ)の並びの幾何ハッシュ → 照合 → ベイズの検証 → 改良)は、
+下の論文と、astrometry.net の公開文書と BSD-3 の部分のソース(`solver.c`・`verify.c`・
+`tweak2.c` など)を読んでまとめた調べ物をもとに、自分で書き直したものです。
+調べ物はソースの表現を写さず、式と条件を自分の言葉で書き直したもので、
+エンジンを書くときにはソースを読んでいません。GPL の部分(FITS の入出力層
+`qfits-an` など)は、調べ物でも読んでいません。
+**astrometry.net のコードは含んでいません**(取り込みも移植もしていません)。
+FITS の読み込みは FITS 規格から書きました。
+索引ファイルの形式は、実物のファイルを読んで調べました
+([docs/index-format.md](docs/index-format.md))。
+
+- Lang, D., Hogg, D. W., Mierle, K., Blanton, M., & Roweis, S. (2010),
+  "Astrometry.net: Blind astrometric calibration of arbitrary astronomical
+  images", *AJ* **139**, 1782
+- <https://astrometry.net/>
+
 ## 同梱していないもの
 
 次のものは**実行ファイルに入っていません**。使う人の PC に、使う人自身が
 入れるか、実行時に取ってくるものです。
 
-### astrometry.net — GPL-3.0-or-later
-
-オフライン解析の計算そのものを担うプログラムです。
-[準備]タブが WSL の Ubuntu へ `apt install astrometry.net` で入れ、
-zahyou は `solve-field` を**別のプロセスとして呼ぶ**だけです。
-zahyou の中にコードを取り込んでいないので、zahyou 自身のライセンスとは
-独立しています。
-
-- <https://astrometry.net/> / <https://github.com/dstndstn/astrometry.net>
-- Lang, D., Hogg, D. W., Mierle, K., Blanton, M., Roweis, S. (2010),
-  "Astrometry.net: Blind astrometric calibration of arbitrary astronomical
-  images", *AJ* **139**, 1782
-
 ### 星図データ(index ファイル)
 
-[準備]タブが下記から直接ダウンロードします。zahyou には同梱していません。
+zahyou の実行ファイルには同梱していません。exe は[準備]タブが下記の原典から
+落とします。ノートブック版の人向けには、作者が原典をそのまま詰め直した zip を
+配布ページに置いています(この節の最後)。中身の星のデータには、元になった星表の
+条件がかかります。
 
 - 4100 シリーズ … Tycho-2 星表から作られたもの。<https://data.astrometry.net/4100/>
-- 5200 シリーズ … Tycho-2 と Gaia DR2 から作られたもの。
+- 5200 シリーズ … Gaia DR2 と Tycho-2 から作られたもの。
   <https://portal.nersc.gov/project/cosmo/temp/dstn/index-5200/LITE/>
+
+**Gaia のデータは CC BY-NC 3.0 IGO です。商用利用には ESA の許可が要ります。**
+クレジットは ESA/Gaia/DPAC です。
+
+- Høg, E., et al. (2000), "The Tycho-2 Catalogue of the 2.5 million brightest
+  stars", *A&A* **355**, L27
+- Gaia Collaboration, Prusti, T., et al. (2016), "The Gaia mission",
+  *A&A* **595**, A1
+- Gaia Collaboration, Brown, A. G. A., et al. (2018), "Gaia Data Release 2.
+  Summary of the contents and survey properties", *A&A* **616**, A1
+
+> This work has made use of data from the European Space Agency (ESA) mission
+> Gaia (https://www.cosmos.esa.int/gaia), processed by the Gaia Data Processing
+> and Analysis Consortium (DPAC,
+> https://www.cosmos.esa.int/web/gaia/dpac/consortium). Funding for the DPAC
+> has been provided by national institutions, in particular the institutions
+> participating in the Gaia Multilateral Agreement.
 
 **配布ページ(Nextcloud)に置いてある `AstrometryData*.zip` は、この
 index ファイルをそのまま詰め直したものです。** 中身は上記の原典と同一で、
 回線の細い場所でまとめて取れるようにしてあるだけです。
-元データの権利は Gaia(ESA/Gaia/DPAC)および Tycho-2 の各制作者にあります。
+元データの権利は Gaia(ESA/Gaia/DPAC)および Tycho-2 の各制作者にあり、
+上の条件(Gaia は非商用・クレジット)はこの zip にもそのままかかります。
+`dev/make_index_zips.py` で作る zip の中の README にも、この条件・クレジット・謝辞を
+入れています。
 
 ### 天体名から座標を引くとき
 

@@ -63,6 +63,33 @@ hiddenimports = [
 # FITS の圧縮まわりは動的 import があるので、この配下だけは総ざらいする
 hiddenimports += collect_submodules("astropy.io.fits")
 
+
+def _engine_stdlib_imports(path):
+    """
+    エンジンが import する標準ライブラリを、エンジンのソースから拾う。
+
+    v7 から自前の解析エンジン (dev/solver_*.py) がエンジンに入り、mmap・struct・
+    dataclasses などの標準ライブラリを使う。エンジンは exec で読むので PyInstaller には
+    見えず、ほかの誰も import していないモジュールは exe に入らない (入れ忘れると
+    exe だけが「エンジンを読み込めない」で落ちる)。手で並べると solver_*.py を直す
+    たびに漏れるので、ソースから毎回拾う。サードパーティは上で名指ししたものだけ。
+    """
+    import ast
+    import sys
+    with open(path, encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    found = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found.update(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            found.add(node.module)
+    return sorted(m for m in found
+                  if m.split(".")[0] in sys.stdlib_module_names and m != "__future__")
+
+
+hiddenimports += _engine_stdlib_imports(os.path.join(ROOT, "zahyou_engine.py"))
+
 # --- 要らないもの ---------------------------------------------------------
 #  ここに書いたものは「解析には使わないと確かめたうえで」外している。
 #  外し忘れると 4 GB 級になり、配れなくなる。

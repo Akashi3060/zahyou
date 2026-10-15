@@ -1,4 +1,12 @@
-"""どんな画像でも「星のリストが作れる」ことを確認するテスト。"""
+"""どんな画像でも「星のリストが作れる」ことを確認するテスト。
+
+星のリストは 2 つ。detect_sources (図に緑の丸で出す星) と detect_sources_deep
+(解析エンジンに渡す、暗い星まで拾った星)。各ケースで両方を確かめる。
+34 番以降は深い検出だけのケース (暗い星・雑音だけ・十字のホットピクセル・位置の精度・実写)。
+
+ここで書き出す tcase/*.fits の一部は test_solver_real.py の陰性の画像 (sha256 で照合) なので、
+共通の乱数 rng を使う順番を変えないこと。新しいケースは自分の seed を使う。
+"""
 import os
 import sys
 import warnings
@@ -7,11 +15,14 @@ warnings.filterwarnings("ignore")
 import numpy as np
 from astropy.io import fits
 from PIL import Image
+from scipy import ndimage
 
 import zahyou_core as zc
 
 rng = np.random.default_rng(20260831)
 TMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tcase")
+# 手元の実写 (あるときだけ走る)。test_solver_real.py と同じく ZAHYOU_TEST_IMAGES (無ければホームフォルダー) から
+IMAGES = os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~")
 os.makedirs(TMP, exist_ok=True)
 
 RESULTS = []
@@ -51,11 +62,25 @@ def burn_timestamp(img, where="top"):
     return img
 
 
+def match_planted(src, planted, tol):
+    """(植えた星から tol 画素以内にある検出の数, 検出の数)。"""
+    if not src:
+        return 0, 0
+    det = np.array([[s["x"], s["y"]] for s in src])
+    d = np.linalg.norm(det[:, None, :] - planted[None, :, :], axis=2)
+    return int((d.min(axis=1) < tol).sum()), len(src)
+
+
 def check(name, path, expect_sources=8, planted=None, tol=2.0, expect_fail=False):
+    """
+    標準の検出で expect_sources 個以上・純度 80% 以上 (planted があるとき)。
+    深い検出も同じ数・同じ純度を求める (解析エンジンに渡す星が図の星より劣らないこと)。
+    """
     try:
         b = zc.load_image_any(path)
         sub, mask, sigma, info = zc.preprocess(b.data)
         src, thr = zc.detect_sources(sub, mask, sigma)
+        deep, u = zc.detect_sources_deep(sub, mask, sigma)
     except Exception as e:
         ok = expect_fail
         RESULTS.append((name, ok, f"{type(e).__name__}: {e}"))
@@ -67,19 +92,24 @@ def check(name, path, expect_sources=8, planted=None, tol=2.0, expect_fail=False
     msg = f"{len(src):4d} sources thr={thr}  [{b.note[:58]}]"
     ok = len(src) >= expect_sources
     if planted is not None and src:
-        det = np.array([[s["x"], s["y"]] for s in src])
-        d = np.linalg.norm(det[:, None, :] - planted[None, :, :], axis=2)
-        matched = int((d.min(axis=1) < tol).sum())
-        frac = matched / len(src)
-        msg += f"  一致 {matched}/{len(src)} ({frac:.0%})"
-        ok = ok and frac >= 0.80
-    RESULTS.append((name, ok, msg))
+        matched, n = match_planted(src, planted, tol)
+        msg += f"  一致 {matched}/{n} ({matched / n:.0%})"
+        ok = ok and matched / n >= 0.80
+    msg += f"  | 深い {len(deep)} 個 u={u}"
+    ok_deep = len(deep) >= expect_sources
+    if planted is not None and deep:
+        matched, n = match_planted(deep, planted, tol)
+        msg += f" 一致 {matched}/{n} ({matched / n:.0%})"
+        ok_deep = ok_deep and matched / n >= 0.80
+    if not ok_deep:
+        msg += "  ← 深い検出が基準に届かない"
+    RESULTS.append((name, ok and ok_deep, msg))
     return b
 
 
 # --------------------------------------------------------------- ケース群 ---
 def case_real():
-    p = r"C:\Users\yoshi\Downloads\Capture_00001 00_10_33.fits"
+    p = os.path.join(IMAGES, "Downloads", "Capture_00001 00_10_33.fits")
     if os.path.exists(p):
         check("01 実データ SharpCap 8bit + 焼き込み時刻", p, expect_sources=10)
 
@@ -293,9 +323,12 @@ def case_starless_noise():
     b = zc.load_image_any(p)
     sub, mask, sigma, _ = zc.preprocess(b.data)
     src, thr = zc.detect_sources(sub, mask, sigma)
-    ok = len(src) < 40      # ノイズだけの画像で大量に「星」を作らないこと
+    deep, u = zc.detect_sources_deep(sub, mask, sigma)
+    # ノイズだけの画像で大量に「星」を作らないこと。深い検出は偽の極大が 2 個ほどに
+    # なるしきい値を選ぶので、数個まで (ポアソン分布で 9 個以上になる見込みは 0.03%)
+    ok = len(src) < 40 and len(deep) <= 8
     RESULTS.append(("26 ノイズだけ (曇天) → 誤検出が暴走しない", ok,
-                    f"{len(src)} sources thr={thr}"))
+                    f"{len(src)} sources thr={thr}  | 深い {len(deep)} 個 u={u}"))
 
 
 def case_tiny_but_valid():
@@ -353,10 +386,100 @@ def case_star_chart():
 
 def case_real_star_chart():
     """実物の星図 (Occult などが描くもの)。手元にあるときだけ。"""
-    p2 = (r"C:\Users\yoshi\Downloads"
-          r"\20261031 3200 Phaethon StarChart 40arcmin.png")
+    p2 = os.path.join(IMAGES, "Downloads", "20261031 3200 Phaethon StarChart 40arcmin.png")
     if os.path.exists(p2):
         check("33 実物の星図 (40 分角)", p2, expect_sources=50)
+
+
+# ---------------------------------------------------- 深い検出だけのケース ---
+# 共通の rng は使わない (上の tcase/*.fits が変わらないように)。名前は既存のケースの後に並べる。
+
+def _detect_both(img):
+    sub, mask, sigma, _ = zc.preprocess(np.asarray(img, dtype=np.float64))
+    std, _ = zc.detect_sources(sub, mask, sigma)
+    info = {}
+    deep, u = zc.detect_sources_deep(sub, mask, sigma, info=info)
+    return std, deep, info
+
+
+def case_zz34_deep_faint():
+    """暗い星 (頂が雑音の 2〜6 倍) だけの星野。深い検出は標準より多く、純度を保って拾う。"""
+    img, pl = make_field(n=60, noise=12.0, peak=(25, 70), fwhm=3.5, seed=34)
+    std, deep, info = _detect_both(img)
+    ms, ns = match_planted(std, pl, 2.0)
+    md, nd = match_planted(deep, pl, 2.0)
+    ok = md >= 50 and md >= ms + 15 and nd and md / nd >= 0.90
+    RESULTS.append(("34 暗い星だけ (60 個) → 深い検出が標準より多く拾う", ok,
+                    f"標準 {ms}/{ns}  深い {md}/{nd} (植えた星と一致/検出、u={info['u']}、"
+                    f"星の σ {info['s_psf'] and round(info['s_psf'], 2)} px)"))
+
+
+def case_zz35_deep_noise():
+    """雑音だけの画像 4 種。隣どうしがそろった雑音 (ベイヤーの補間・縮小の後) でも偽の星は数個まで。"""
+    r = np.random.default_rng(35)
+    imgs = (("白色 900x600", r.normal(500, 20, (600, 900))),
+            ("白色 1608x1104", r.normal(500, 20, (1104, 1608))),
+            ("3x3 平均", ndimage.uniform_filter(r.normal(500, 20, (600, 900)), 3)),
+            ("σ=1 ぼかし", ndimage.gaussian_filter(r.normal(500, 20, (600, 900)), 1.0)))
+    ok, counts = True, []
+    for label, img in imgs:
+        std, deep, info = _detect_both(img)
+        ok = ok and len(deep) <= 8
+        counts.append(f"{label}: 深い {len(deep)} (参考: 標準 {len(std)})")
+    RESULTS.append(("35 雑音だけ 4 種 → 深い検出の偽の星は 8 個以下", ok, " / ".join(counts)))
+
+
+def case_zz36_deep_hot_cross():
+    """
+    ベイヤーの補間で十字に広がったホットピクセル (中心と上下左右)。前処理の 1 画素だけの
+    ホットピクセル消しにはかからないので、深い検出は「鋭さ」で捨てる。
+    (標準の検出はこれを星として拾う。図の星はこのケースの対象外)
+    """
+    img, pl = make_field(seed=36)
+    r = np.random.default_rng(1036)
+    ny, nx = img.shape
+    for y, x in zip(r.integers(3, ny - 3, 300), r.integers(3, nx - 3, 300)):
+        img[y, x] += 12000
+        img[y - 1, x] += 3000
+        img[y + 1, x] += 3000
+        img[y, x - 1] += 3000
+        img[y, x + 1] += 3000
+    std, deep, info = _detect_both(img)
+    ms, ns = match_planted(std, pl, 2.0)
+    md, nd = match_planted(deep, pl, 2.0)
+    ok = md >= 35 and nd and md / nd >= 0.80
+    RESULTS.append(("36 十字のホットピクセル 300 個 → 深い検出は拾わない", ok,
+                    f"深い {md}/{nd} (一致/検出、鋭さで捨てた {info['rejected']['sharp']} 個)  "
+                    f"参考: 標準 {ms}/{ns}"))
+
+
+def case_zz37_deep_position():
+    """深い検出の位置の精度。植えた星 (FWHM 3 px) との差の中央値が 0.05 px 以下。"""
+    errs = []
+    for seed in (37, 137):
+        img, pl = make_field(seed=seed)
+        _, deep, _ = _detect_both(img)
+        xy = np.array([[s["x"], s["y"]] for s in deep])
+        d = np.linalg.norm(xy[:, None, :] - pl[None, :, :], axis=2)
+        errs += list(d.min(axis=1)[d.min(axis=1) < 2.0])
+    med = float(np.median(errs)) if errs else float("inf")
+    ok = len(errs) >= 70 and med <= 0.05
+    RESULTS.append(("37 深い検出の位置の精度 (FWHM 3 px)", ok,
+                    f"一致 {len(errs)} 個、植えた位置との差 中央値 {med:.3f} px・"
+                    f"90% 点 {float(np.percentile(errs, 90)) if errs else float('inf'):.3f} px"))
+
+
+def case_zz38_deep_real_few_stars():
+    """実写の 3I (星の少ない画像)。標準の検出は 8 個。深い検出で 12 個以上。手元にあるときだけ。"""
+    p = os.path.join(IMAGES, "Downloads", "02013I_00010 20_47_25.fits")
+    if not os.path.exists(p):
+        return
+    b = zc.load_image_any(p)
+    std, deep, info = _detect_both(b.data)
+    ok = len(deep) >= 12 and len(deep) >= len(std) + 4
+    RESULTS.append(("38 実写 3I (星が少ない) → 深い検出で 12 個以上", ok,
+                    f"標準 {len(std)} 個  深い {len(deep)} 個 (u={info['u']}、星の σ "
+                    f"{info['s_psf'] and round(info['s_psf'], 2)} px、{info['seconds']:.2f} 秒)"))
 
 
 def main():

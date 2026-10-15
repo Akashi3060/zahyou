@@ -88,7 +88,14 @@ def main():
     # =========================================================== ボタン本体 ===
     asked = []
     started = []
-    g.messagebox.askokcancel = lambda *a, **k: asked.append(a) or False
+    marked_at_ask = []
+
+    def ask(*a, **k):
+        asked.append(a)
+        marked_at_ask.append([s for s, v in app.scale_vars.items() if v.get()])
+        return False                                # いつも「いいえ」
+
+    g.messagebox.askokcancel = ask
     g.messagebox.showinfo = lambda *a, **k: asked.append(a)
 
     app = g.App()
@@ -100,35 +107,65 @@ def main():
     app._bg = lambda *a, **k: started.append(a)
 
     def press(have):
+        """置き場所に have の段がそろっている (押したときに数え直した結果がそれ) として押す。
+        戻り値 (確認のときに印が付いていた段, 押し終わったあとの印)。"""
         asked.clear()
         started.clear()
-        app.env_state = {"index": {"scales": list(have)}}
+        marked_at_ask.clear()
+        for v in app.scale_vars.values():
+            v.set(False)
+        app._have_scales = lambda: list(have)       # 押したときに置き場所を数え直す (env_state は見ない)
+        app.env_state = {"index": {"scales": [s for s in rec if s not in have]}}   # わざと違う古い結果
         app._download_recommended()
         app.update()
-        return [s for s, v in app.scale_vars.items() if v.get()]
+        at_ask = marked_at_ask[0] if marked_at_ask else []
+        return at_ask, [s for s, v in app.scale_vars.items() if v.get()]
 
     # --- まっさら ---
-    got = press([])
-    check("何も無いときは、おすすめを全部選ぶ", sorted(got) == rec,
-          f"{len(got)} 段に印")
+    at_ask, got = press([])
+    check("何も無いときは、おすすめを全部選ぶ", sorted(at_ask) == rec,
+          f"確認のとき {len(at_ask)} 段に印")
     check("まっさらなら確認ダイアログが出る", len(asked) == 1)
     check("「いいえ」なら落とし始めない", not started)
+    check("「いいえ」なら印を押す前に戻す", got == [], f"残った印 {len(got)} 段")
 
     # --- 途中まで持っている ---
     have = [4107, 4108, 5205, 5206]
-    got = press(have)
+    at_ask, got = press(have)
     check("持っている段は選び直さない",
-          sorted(got) == [s for s in rec if s not in have],
-          f"{len(got)} 段だけ")
-    check("5200 / 5201 に印は付かない",
-          not app.scale_vars[5200].get() and not app.scale_vars[5201].get())
+          sorted(at_ask) == [s for s in rec if s not in have],
+          f"{len(at_ask)} 段だけ")
+    check("5200 / 5201 に印は付かない", 5200 not in at_ask and 5201 not in at_ask)
 
     # --- 全部そろっている ---
-    got = press(rec)
-    check("そろっていれば何も選ばない", got == [])
+    at_ask, got = press(rec)
+    check("そろっていれば何も選ばない", got == [] and at_ask == [])
     check("そろっていれば聞きもしない", not asked and not started)
     check("そろっていても状態バーに一言残る",
           "そろって" in app.v_status.get(), app.v_status.get())
+
+    # =================================================== まとめて準備する ===
+    # 古い確認の結果 (env_state) では全部そろっていても、押したときの置き場所が空なら容量を見せて聞く
+    # (置き場所を変えた直後・Explorer で消した直後に、確認なしで 9.5 GB を落とし始めていた)
+    def press_prepare(have, marks=()):
+        asked.clear()
+        started.clear()
+        marked_at_ask.clear()
+        for s, v in app.scale_vars.items():
+            v.set(s in marks)
+        app._have_scales = lambda: list(have)
+        app.env_state = {"index": {"scales": list(rec)}}         # 古い結果は「全部ある」
+        app._prepare_all()
+        app.update()
+
+    press_prepare([])
+    check("まとめて準備: 置き場所が空なら (古い結果が全部ありでも) 聞く", len(asked) == 1 and not started,
+          f"確認 {len(asked)} 回")
+    press_prepare([], marks=rec)
+    check("まとめて準備: 段に印が付いていても聞く", len(asked) == 1 and not started,
+          f"確認 {len(asked)} 回")
+    press_prepare(rec)
+    check("まとめて準備: そろっていれば聞かずに検査へ", not asked and len(started) == 1)
 
     app.destroy()
 
