@@ -82,11 +82,16 @@ def _sanity_ok(wcs, shape):
         return False
 
 
+# ログの見出しの版。exe と同じ版(rs/Cargo.toml の [workspace.package] version に "v" を付けたもの)にする。
+# 食い違うと rs/tools/make_release_assets.py の notebook の検査が止める。
+NB_VERSION = "v7.0.0-beta.1"
+
+
 def run():
     t0 = time.time()
     img_path, img_name = _pick_image_path()
     _log("=" * 62)
-    _log(f"  zahyou v7-dev   {img_name}")
+    _log(f"  zahyou {NB_VERSION}   {img_name}")
     _log("=" * 62)
 
     # ---------------------------------------------------------------- 画像 ---

@@ -162,6 +162,19 @@ class NotebookTest(unittest.TestCase):
         self.assertEqual(mra.compare_engines(a, b), [])
         self.assertTrue(mra.compare_engines(a, c))
 
+    def test_notebook_version(self):
+        e = self.dir / "e.py"
+        e.write_bytes(b'x = 1\r\nNB_VERSION = "v7.0.0-beta.2"\r\n')
+        self.assertEqual(mra.notebook_version(mra._norm(e.read_text(encoding="utf-8"))), "v7.0.0-beta.2")
+        self.assertEqual(mra.check_notebook_version(e, "7.0.0-beta.2"), [])
+        self.assertIn("NB_VERSION", mra.check_notebook_version(e, "7.0.0-beta.3")[0])
+        e.write_bytes(b"x = 1\n")
+        self.assertTrue(mra.check_notebook_version(e, "7.0.0-beta.2"))
+
+    def test_real_notebook_version(self):
+        # 直下の zahyou_engine.py の見出しの版が rs/Cargo.toml の版と同じ
+        self.assertEqual(mra.check_notebook_version(mra.REPO_DIR / "zahyou_engine.py", mra.cargo_version()), [])
+
 
 class AssembleTest(unittest.TestCase):
     def setUp(self):

@@ -32,10 +32,10 @@ main に統合してふつうの Release で出す。** 1〜7 節がβ版、8 �
 | | 何を決めるか | 今の状態 |
 |---|---|---|
 | 1 | 本物の nova へキーで送る道の確かめ | 偽の nova でだけ試した(rust-port.md 10.8)。β の間に一度、ユーザーの判断で「オンラインのみ」で解いて確かめる(星の位置と、解けなければ画像が nova へ送られる)。そのとき、送ったものが公開しない扱いになっているか(画像のページが他人から見えないか、「最近送られた画像」の一覧に出るか)も見る(0.1 節の注意は実サイトでは未確認) |
-| 2 | ノートブック版のログの見出しの版の文字 | `dev/nb_main.py` は `zahyou v7-dev` のまま(β の版 7.0.0-beta.N と合っていない)。直したら `python dev/build_nb.py` |
 
 (以前ここにあった「GitHub の latest とプレリリースの扱いの確かめ」と「nova が API で送った画像を公開するか」は、0.1 節で確かめて
-決着した。nova は 3 回目の決定で公開しない指定を付けることになった。)
+決着した。nova は 3 回目の決定で公開しない指定を付けることになった。「ノートブック版のログの見出しの版の文字」は 2 節の
+`NB_VERSION` で直した。)
 
 ### 0.1 確かめた事実(2026-10-16。claude-research のセッションが公式の文書とソースを読んだ結果)
 
@@ -85,6 +85,8 @@ Release を作って試したり、nova へ送ったりはしていない。ソ�
 プレリリースなら VS_FF_PRERELEASE)も付いて変わる。`-beta.N` などのプレリリースの版は、題・起動のログ・［使い方］に「(β版)」が付く。
 
 - β の N を上げるたびにここを直す(`Cargo.lock` の zahyou 自身の版も変わる)。
+- **ノートブック版の版も一緒に直す**: `dev/nb_main.py` の `NB_VERSION`(`"v"` + 同じ版。ログの見出しに出る)→ `python dev/build_nb.py`。
+  食い違うと 6 節の notebook の検査が止める。
 - 解析ログの見出しの版名は、Python の基準値と比べるときに伏せてある(10.4 節)ので、版を上げても `run_solver_vs_python` は落ちない。
 - 版を上げた exe を Release より前に動かしても、更新の確認は v6 を勧めない(β は同じ大きな版の新しいものだけを探す。正式版は
   latest が今より古ければ「最新版です」。10.4 節)。
@@ -179,7 +181,7 @@ python rs/tools/make_release_assets.py --exe "$(cygpath -w $EXE)" --out "$(cygpa
 |---|---|---|
 | `zahyou.exe` | 4 節の `$EXE`(**名前は必ず `zahyou.exe`**。更新の確認はこの名前で探す) | 版情報(FileVersion・ProductVersion・数の版・プレリリースの印)と `--engine-check` の version= が `rs/Cargo.toml` の版と同じ |
 | `zahyou_v7_beta.ipynb` | リポジトリ直下の `zahyou_v6.ipynb`(v6 と紛れないよう版の名前で。正式版なら `zahyou_v7.ipynb`) | セルの並びと中身が `dev/build_nb.py` の出力と同じ(出力の例はリポジトリのものを残す) |
-| `zahyou_engine.py` | リポジトリ直下 | `dev/build_nb.py` の出力と同じ |
+| `zahyou_engine.py` | リポジトリ直下 | `dev/build_nb.py` の出力と同じ・`NB_VERSION` が `"v"` + `rs/Cargo.toml` の版 |
 | `zahyou-manual-v4.pdf` | `天体画像解析プログラム「zahyou」導入・運用マニュアルv4.pdf` | `dev/make_manual.py` で組み直したものとバイト単位で同じ |
 | `LICENSE.txt` | `LICENSE` | — |
 | `THIRD-PARTY-NOTICES.md` | `rs/THIRD-PARTY-NOTICES.md`(exe の［使い方］タブでも読める) | exe に埋め込んだものと同じ・`gen_notices.py --check` で最新 |

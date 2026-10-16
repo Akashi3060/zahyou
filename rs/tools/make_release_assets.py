@@ -260,7 +260,20 @@ def compare_engines(built: Path, repo: Path) -> list[str]:
     return []
 
 
-def check_notebook(work: Path) -> list[str]:
+def notebook_version(engine_text: str) -> str | None:
+    """ノートブック版のログの見出しの版(dev/nb_main.py の NB_VERSION)。見つからなければ None"""
+    m = re.search(r'^NB_VERSION = "([^"]*)"$', engine_text, re.M)
+    return m.group(1) if m else None
+
+
+def check_notebook_version(engine: Path, version: str) -> list[str]:
+    got = notebook_version(_norm(engine.read_text(encoding="utf-8")))
+    if got != f"v{version}":
+        return [f"{engine.name} の NB_VERSION が {got!r}(期待は 'v{version}'。dev/nb_main.py を直して python dev/build_nb.py)"]
+    return []
+
+
+def check_notebook(work: Path, version: str) -> list[str]:
     out_nb = work / "zahyou.ipynb"
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
     r = subprocess.run([sys.executable, "-B", str(DEV_DIR / "build_nb.py"), str(out_nb)], cwd=DEV_DIR, env=env,
@@ -268,7 +281,8 @@ def check_notebook(work: Path) -> list[str]:
     if r.returncode != 0 or not out_nb.exists():
         return ["build_nb.py が動きません: " + " / ".join((r.stdout + r.stderr).strip().splitlines()[-3:])]
     return (compare_engines(work / "zahyou_engine.py", REPO_DIR / "zahyou_engine.py")
-            + compare_notebooks(out_nb, REPO_DIR / "zahyou_v6.ipynb"))
+            + compare_notebooks(out_nb, REPO_DIR / "zahyou_v6.ipynb")
+            + check_notebook_version(REPO_DIR / "zahyou_engine.py", version))
 
 
 # ---------------------------------------------------------------- そろえる ---
@@ -374,7 +388,7 @@ def main(argv: list[str] | None = None) -> int:
             "version": lambda: check_version(a.exe, version),
             "notices": lambda: check_notices(a.exe),
             "manual": lambda: check_manual(manual_ver, work / "manual"),
-            "notebook": lambda: check_notebook(work / "notebook"),
+            "notebook": lambda: check_notebook(work / "notebook", version),
         }
         for name, run in steps.items():
             if name in a.skip:
