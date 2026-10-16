@@ -426,7 +426,7 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
   (本文は β1 の本文に「β1 からの変更」の節を足し、SHA256・大きさ・試験の表を直したもの。リポジトリには入れていない)
 - 建て方: 4 節のとおり `CARGO_ENCODED_RUSTFLAGS`(置き換え 2 つ)を付けて `target-release` で `cargo clean --release -p zahyou` →
   `cargo build --release -p zahyou --locked`(2 分 36 秒)。exe 14,033,408 バイト `ae4bc3c9…4a41`。作者のホームのパス 0 か所
-  (UTF-8・UTF-16)、置き換えた位置情報 `/cargoegistry\src\…` 501・`/zahyou\…` 2
+  (UTF-8・UTF-16)、置き換えた位置情報 `/cargo\registry\src\…` 501・`/zahyou\…` 2
 - 試験(同じフラグ・同じ `target-release` で): `cargo test --workspace -- --include-ignored` **279 本通過・失敗 0**(16 分 48 秒)、clippy 指摘 0、
   check_licenses・`gen_notices --check`(213 個、作り直し不要)・test_tools OK、`test_make_release_assets.py` 31 本(この exe を渡して)、
   Python の `dev/test_online_settings.py` 14/14。exe: `--engine-check` の version= v7.0.0-beta.2、`--selftest --offline` 25/25、
