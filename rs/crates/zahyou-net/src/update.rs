@@ -18,10 +18,26 @@
 //!   5. 次の起動で zahyou.exe.old を消す(古いプロセスが閉じるまでは消せない)
 //!
 //! v6 は PowerShell に任せていたが、PyInstaller の目印の受け渡しで起動に失敗したことがある(#23)。こちらは PowerShell を使わない。
+//!
+//! # どの版を探すか(版名 = 画面の APP_VER で決まる)
+//!
+//! | いまの版 | 問い合わせ先 | 新しい版の見つけ方 |
+//! |---|---|---|
+//! | `-dev` で終わる(試作版) | 問い合わせない | — |
+//! | プレリリース(`v7.0.0-beta.1` など。β版) | Releases の一覧(プレリリースも含む、`?per_page=100`) | 大きな版(major)が同じで、semver で今より新しいもののうち最も新しいもの |
+//! | 正式版(`v6`・`v7.0.0` など) | Releases の latest(プレリリースを含まない) | latest の 1 つ |
+//!
+//! どちらも最後は資産 zahyou.exe の digest(SHA256)と動いている exe を比べる。
+//!
+//! v7 のβ版は GitHub の<b>プレリリース</b>として出す。v6 の更新係(gui/zahyou_update.py)は latest しか見ないので、
+//! v6 の利用者にβ版は出てこない。β版の利用者は一覧から次のβ版・v7 の正式版を受け取る。
+//! 一覧では、下書き・`-dev` で終わるタグ・資産 zahyou.exe の無いもの・大きな版の違うもの(v6 など)は使わない。
+//! 正式版の latest が今より古い版(semver で比べて)を指していたら、入れ替えに誘わない(古い版へ戻さない)。
 
 use crate::NetError;
 use crate::http::{self, ResumeOpts};
 use sha2::{Digest, Sha256};
+use std::cmp::Ordering;
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::Read;
@@ -29,11 +45,139 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub const REPO: &str = "Akashi3060/zahyou";
+/// 最新の正式版(プレリリース・下書きを含まない)
 pub const API_URL: &str = "https://api.github.com/repos/Akashi3060/zahyou/releases/latest";
+/// Releases の一覧(プレリリースを含む。新しい順に 100 件まで)。β版の更新の確認で使う。[`releases_list_url`]`(API_URL)` と同じ
+pub const RELEASES_API_URL: &str = "https://api.github.com/repos/Akashi3060/zahyou/releases?per_page=100";
 pub const RELEASES_PAGE: &str = "https://github.com/Akashi3060/zahyou/releases/latest";
 pub const ASSET: &str = "zahyou.exe";
 const USER_AGENT: &str = "zahyou-updater";
 const ACCEPT: &str = "application/vnd.github+json";
+/// 一覧の応答の上限(100 件ぶんの説明文と資産の表。latest の 1 件は 8 MiB)
+const LIST_LIMIT: u64 = 16 << 20;
+
+// ================================================================== 版の比べ方 ===
+
+/// 版(semver 2.0 の形)。先頭の "v" は省ける。"v6"・"v6.2" のように欠けた数は 0 とみなす。
+/// ビルドの情報("+…")は読み飛ばし、比べるときにも使わない。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Version {
+    pub major: u64,
+    pub minor: u64,
+    pub patch: u64,
+    /// プレリリースの部分を "." で分けたもの("beta.1" なら ["beta", "1"])。空なら正式版
+    pub pre: Vec<String>,
+}
+
+impl Version {
+    /// プレリリース(-beta.1・-rc.1・-dev など)か
+    pub fn is_prerelease(&self) -> bool {
+        !self.pre.is_empty()
+    }
+}
+
+/// 版名を読む。semver の形でなければ None(壊れた文字列でも panic しない)。
+///
+/// 読めるもの: "7.0.0-beta.1"・"v7.0.0-beta.1"・"v7.0.0"・"v6.2"・"v6"・"v7-dev"・"7.0.0+build.5"。
+/// 読めないもの: 空・数でない部分・数が 4 つ以上・空の区切り("7..0"・"7.0.0-beta..1")・先頭が 0 の数のプレリリース("-01")・
+/// 英数字と "-" 以外の文字(全角の数字や「β」)。
+pub fn parse_version(s: &str) -> Option<Version> {
+    let s = s.trim();
+    let s = s.strip_prefix(['v', 'V']).unwrap_or(s);
+    let s = s.split_once('+').map_or(s, |(a, _)| a);
+    let (core, pre) = match s.split_once('-') {
+        Some((c, p)) => (c, Some(p)),
+        None => (s, None),
+    };
+    let parts: Vec<&str> = core.split('.').collect();
+    if parts.len() > 3 {
+        return None;
+    }
+    let mut nums = [0u64; 3];
+    for (n, p) in nums.iter_mut().zip(&parts) {
+        if p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        *n = p.parse().ok()?;
+    }
+    let pre = match pre {
+        None => Vec::new(),
+        Some(p) => {
+            let ids: Vec<String> = p.split('.').map(str::to_string).collect();
+            let bad = |x: &String| {
+                x.is_empty()
+                    || !x.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                    || (x.len() > 1 && x.starts_with('0') && x.bytes().all(|b| b.is_ascii_digit()))
+            };
+            if ids.iter().any(bad) {
+                return None;
+            }
+            ids
+        }
+    };
+    Some(Version { major: nums[0], minor: nums[1], patch: nums[2], pre })
+}
+
+/// プレリリースの 1 区切りを比べる(数だけのものは数として、数は英字を含むものより前)
+fn cmp_pre_id(a: &str, b: &str) -> Ordering {
+    let num = |x: &str| x.bytes().all(|c| c.is_ascii_digit());
+    match (num(a), num(b)) {
+        // 先頭の 0 は読むときに拒んでいるので、桁数・文字の順で数の大小になる(u64 を超える数でも)
+        (true, true) => a.len().cmp(&b.len()).then_with(|| a.cmp(b)),
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        (false, false) => a.cmp(b),
+    }
+}
+
+impl Ord for Version {
+    /// semver 2.0 の順: 7.0.0-alpha < 7.0.0-alpha.1 < 7.0.0-beta.1 < 7.0.0-beta.2 < 7.0.0-beta.11 < 7.0.0-rc.1 < 7.0.0 < 7.0.1
+    fn cmp(&self, other: &Self) -> Ordering {
+        (self.major, self.minor, self.patch).cmp(&(other.major, other.minor, other.patch)).then_with(|| {
+            match (self.pre.is_empty(), other.pre.is_empty()) {
+                (true, true) => Ordering::Equal,
+                // 正式版はプレリリースより新しい
+                (true, false) => Ordering::Greater,
+                (false, true) => Ordering::Less,
+                (false, false) => self
+                    .pre
+                    .iter()
+                    .zip(&other.pre)
+                    .map(|(a, b)| cmp_pre_id(a, b))
+                    .find(|o| *o != Ordering::Equal)
+                    .unwrap_or_else(|| self.pre.len().cmp(&other.pre.len())),
+            }
+        })
+    }
+}
+
+impl PartialOrd for Version {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// 試作版(版名が "-dev" で終わる)か。試作版は更新の確認をしない
+pub fn is_dev_version(version: &str) -> bool {
+    version.trim().ends_with("-dev")
+}
+
+/// 版名に添える言葉。β版(-dev 以外のプレリリース。-beta.N・-rc.N など)なら "β版"、正式版・試作版・読めない版名は None。
+/// 画面の題や［使い方］の「いまの版」に「v7.0.0-beta.1 (β版)」のように添えるためのもの。
+pub fn prerelease_label(version: &str) -> Option<&'static str> {
+    if is_dev_version(version) {
+        return None;
+    }
+    parse_version(version).filter(Version::is_prerelease).map(|_| "β版")
+}
+
+/// latest の URL(…/releases/latest)から一覧の URL(…/releases?per_page=100)を作る。
+/// 末尾が /latest でなければ、そのまま per_page を足す(試験の偽の GitHub でも同じ形で問い合わせる)。
+pub fn releases_list_url(latest_url: &str) -> String {
+    let base = latest_url.strip_suffix("/latest").unwrap_or(latest_url);
+    let sep = if base.contains('?') { '&' } else { '?' };
+    format!("{base}{sep}per_page=100")
+}
 
 /// 確認の結果の種類(Python の state)。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,6 +250,11 @@ pub fn sha256_file(path: &Path, stop: &dyn Fn() -> bool) -> Result<Option<String
 /// GitHub の API の応答から資産を取り出す(Python の `latest()`)。
 pub fn parse_release(json: &str) -> Result<ReleaseInfo, String> {
     let data: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("応答を読めません ({e})"))?;
+    release_from_value(&data)
+}
+
+/// Releases の 1 件(JSON の値)から資産 zahyou.exe を取り出す。
+fn release_from_value(data: &serde_json::Value) -> Result<ReleaseInfo, String> {
     let s = |v: &serde_json::Value, k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
     let head10 = |x: String| x.chars().take(10).collect::<String>();
     let asset = data
@@ -120,9 +269,9 @@ pub fn parse_release(json: &str) -> Result<ReleaseInfo, String> {
         .to_string();
     let digest = s(asset, "digest");
     Ok(ReleaseInfo {
-        tag: s(&data, "tag_name"),
-        name: s(&data, "name"),
-        published: head10(s(&data, "published_at")),
+        tag: s(data, "tag_name"),
+        name: s(data, "name"),
+        published: head10(s(data, "published_at")),
         url,
         size: asset.get("size").and_then(|x| x.as_u64()).unwrap_or(0),
         sha256: if digest.is_empty() { String::new() } else { digest.rsplit(':').next().unwrap_or("").to_lowercase() },
@@ -130,41 +279,166 @@ pub fn parse_release(json: &str) -> Result<ReleaseInfo, String> {
     })
 }
 
-/// Releases の最新版を 1 つ調べる。
-pub fn latest_release(api_url: &str, timeout: Duration) -> Result<ReleaseInfo, String> {
+/// GitHub の API に GET して本文を読む。
+fn get_text(url: &str, timeout: Duration, limit: u64) -> Result<String, String> {
     let agent = http::agent(timeout, true);
     let mut resp = agent
-        .get(api_url)
+        .get(url)
         .header("User-Agent", USER_AGENT)
         .header("Accept", ACCEPT)
         .call()
         .map_err(|e| http::describe(&e))?;
-    let text = http::read_text(&mut resp, 8 << 20)?;
-    parse_release(&text)
+    http::read_text(&mut resp, limit)
+}
+
+/// Releases の最新版を 1 つ調べる。
+pub fn latest_release(api_url: &str, timeout: Duration) -> Result<ReleaseInfo, String> {
+    parse_release(&get_text(api_url, timeout, 8 << 20)?)
+}
+
+/// Releases の一覧から、β版の更新に使うものを選んだ結果([`select_prerelease_update`])。
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PrereleaseChoice {
+    /// 今より新しい版のうち、最も新しいもの(資産 zahyou.exe があるものだけ)
+    pub newer: Option<ReleaseInfo>,
+    /// 今と同じ版のもの(あれば。最新版の文に公開日を出すため)
+    pub same: Option<ReleaseInfo>,
+    /// 今より新しく、`newer` よりも新しいのに資産 zahyou.exe がまだ無いもののタグ(資産を上げている途中など)
+    pub pending: Option<String>,
+}
+
+/// Releases の一覧(GitHub の API の応答。プレリリースを含む)から、`current` と大きな版(major)が同じで、
+/// semver で今より新しいもののうち最も新しいものを選ぶ。
+///
+/// 使わないもの: 下書き(draft)・タグを版として読めないもの・`-dev` で終わるタグ・大きな版の違うもの(v6 など)。
+/// プレリリースかどうか(prerelease)は問わない(β版の利用者は次のβ版も正式版も受け取る)。
+/// 一覧として読めない応答だけを誤りにする(1 件ずつの壊れは、その 1 件を使わないだけ)。
+pub fn select_prerelease_update(json: &str, current: &Version) -> Result<PrereleaseChoice, String> {
+    let data: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("応答を読めません ({e})"))?;
+    let list = data.as_array().ok_or("応答を読めません (Releases の一覧ではありません)")?;
+    let mut out = PrereleaseChoice::default();
+    let mut best: Option<Version> = None;
+    let mut pending: Option<Version> = None;
+    for rel in list {
+        if rel.get("draft").and_then(|d| d.as_bool()).unwrap_or(false) {
+            continue;
+        }
+        let tag = rel.get("tag_name").and_then(|t| t.as_str()).unwrap_or("");
+        if is_dev_version(tag) {
+            continue;
+        }
+        let Some(v) = parse_version(tag) else { continue };
+        if v.major != current.major {
+            continue;
+        }
+        match v.cmp(current) {
+            Ordering::Less => {}
+            Ordering::Equal => {
+                if out.same.is_none() {
+                    out.same = release_from_value(rel).ok();
+                }
+            }
+            Ordering::Greater => match release_from_value(rel) {
+                Ok(info) => {
+                    if best.as_ref().is_none_or(|b| v > *b) {
+                        best = Some(v);
+                        out.newer = Some(info);
+                    }
+                }
+                Err(_) => {
+                    if pending.as_ref().is_none_or(|p| v > *p) {
+                        pending = Some(v);
+                        out.pending = Some(tag.to_string());
+                    }
+                }
+            },
+        }
+    }
+    // 資産のあるものより古い「準備中」は知らせない
+    if let (Some(b), Some(p)) = (&best, &pending)
+        && p < b
+    {
+        out.pending = None;
+    }
+    Ok(out)
 }
 
 /// 更新があるか調べる(Python の `check`。待ち時間 20 秒)。
 ///
 /// `version`(画面の APP_VER)が "-dev" で終わる試作版は確かめない。見分けは最新版の資産との SHA256 の
 /// 突き合わせなので、試作版の exe はいつも「新しい版があります」になり、押すと最新版へ入れ替わってしまう。
+/// β版(プレリリースの版名)は、プレリリースも含めた一覧から同じ大きな版の新しいものを探す(モジュールの説明)。
 pub fn check_update(current_exe: &Path, version: &str, stop: &dyn Fn() -> bool) -> UpdateCheck {
     check_update_at(API_URL, current_exe, version, Duration::from_secs(20), stop)
 }
 
 /// [`check_update`] の問い合わせ先と待ち時間を指定する版(試験用)。
+///
+/// `api_url` は latest の URL。β版の一覧は [`releases_list_url`] でそこから作る。
 pub fn check_update_at(api_url: &str, current_exe: &Path, version: &str, timeout: Duration, stop: &dyn Fn() -> bool) -> UpdateCheck {
-    if version.ends_with("-dev") {
+    if is_dev_version(version) {
         return UpdateCheck::simple(UpdateState::Dev, "試作版のため更新の確認はしません。");
+    }
+    let current = parse_version(version);
+    if let Some(cur) = current.as_ref().filter(|v| v.is_prerelease()) {
+        return check_prerelease(&releases_list_url(api_url), current_exe, version, cur, timeout, stop);
     }
     let info = match latest_release(api_url, timeout) {
         Ok(i) => i,
-        Err(e) => {
-            return UpdateCheck::simple(
-                UpdateState::Error,
-                &format!("更新を確認できませんでした ({e})。インターネットにつながっているか確かめてください。"),
-            );
-        }
+        Err(e) => return cannot_check(&e),
     };
+    // latest が今より古い版なら(v7 の正式版を使っているときに v6 の修正版が latest になった、など)、戻さない
+    if let (Some(cur), Some(tag)) = (&current, parse_version(&info.tag))
+        && tag < *cur
+    {
+        let mut out = UpdateCheck::simple(
+            UpdateState::UpToDate,
+            &format!("最新版です ({version})。公開されている最新版 {} より新しい版を使っています。", info.tag),
+        );
+        out.release = Some(info);
+        return out;
+    }
+    compare_with_release(info, current_exe, stop)
+}
+
+/// 問い合わせに失敗したときの結果
+fn cannot_check(e: &str) -> UpdateCheck {
+    UpdateCheck::simple(
+        UpdateState::Error,
+        &format!("更新を確認できませんでした ({e})。インターネットにつながっているか確かめてください。"),
+    )
+}
+
+/// β版の更新の確認: 一覧から今より新しい版を選び、あればその資産と動いている exe を比べる。
+fn check_prerelease(
+    list_url: &str,
+    current_exe: &Path,
+    version: &str,
+    current: &Version,
+    timeout: Duration,
+    stop: &dyn Fn() -> bool,
+) -> UpdateCheck {
+    let choice = match get_text(list_url, timeout, LIST_LIMIT).and_then(|t| select_prerelease_update(&t, current)) {
+        Ok(c) => c,
+        Err(e) => return cannot_check(&e),
+    };
+    if let Some(info) = choice.newer {
+        return compare_with_release(info, current_exe, stop);
+    }
+    let mut message = match &choice.same {
+        Some(r) => format!("最新版です ({} / {} 版)。", r.tag, r.updated),
+        None => format!("最新版です ({version})。"),
+    };
+    if let Some(p) = &choice.pending {
+        message.push_str(&format!(" {p} は公開の準備中です ({ASSET} がまだありません)。"));
+    }
+    let mut out = UpdateCheck::simple(UpdateState::UpToDate, &message);
+    out.release = choice.same;
+    out
+}
+
+/// 新しい版の候補(`info`)の資産と動いている exe を比べる(digest があれば SHA256、無ければ大きさ)。
+fn compare_with_release(info: ReleaseInfo, current_exe: &Path, stop: &dyn Fn() -> bool) -> UpdateCheck {
     let here_size = match std::fs::metadata(current_exe) {
         Ok(m) => m.len(),
         Err(e) => {
@@ -402,5 +676,90 @@ pub fn cleanup_old_versions(current_exe: &Path, wait: Duration) -> Vec<PathBuf> 
             return left;
         }
         std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+// ================================================================== 試験 ===
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn v(s: &str) -> Version {
+        parse_version(s).unwrap_or_else(|| panic!("読めない: {s}"))
+    }
+
+    #[test]
+    fn parse_versions() {
+        assert_eq!(v("7.0.0-beta.1"), Version { major: 7, minor: 0, patch: 0, pre: vec!["beta".into(), "1".into()] });
+        assert_eq!(v("v7.0.0-beta.1"), v("7.0.0-beta.1"));
+        assert_eq!(v("V7.0.0"), Version { major: 7, minor: 0, patch: 0, pre: vec![] });
+        assert_eq!(v("v6"), Version { major: 6, minor: 0, patch: 0, pre: vec![] });
+        assert_eq!(v("v6.2"), Version { major: 6, minor: 2, patch: 0, pre: vec![] });
+        assert_eq!(v("v7-dev").pre, vec!["dev".to_string()]);
+        assert_eq!(v(" 7.0.0+build.5 "), v("7.0.0"), "ビルドの情報は読み飛ばす");
+        assert_eq!(v("7.0.0-x-y.1").pre, vec!["x-y".to_string(), "1".to_string()]);
+        assert!(v("7.0.0-beta.1").is_prerelease());
+        assert!(!v("7.0.0").is_prerelease());
+        for bad in [
+            "", "v", "-", "-beta", "7.", ".7", "7..0", "7.0.0.0", "7.0.0-", "7.0.0-beta..1", "7.0.0-beta.", "7.0.0-01", "abc", "v7.x",
+            "７.0.0", "v7.0.0-β", "7.0.0-beta 1", "99999999999999999999.0.0", "+1", "v+",
+        ] {
+            assert_eq!(parse_version(bad), None, "{bad:?}");
+        }
+        // 先頭が 0 の数でも、プレリリースの "0" そのものと英字混じりは読める
+        assert_eq!(v("7.0.0-0").pre, vec!["0".to_string()]);
+        assert_eq!(v("7.0.0-0a").pre, vec!["0a".to_string()]);
+    }
+
+    #[test]
+    fn semver_order() {
+        // semver 2.0 の 11 節の例と、zahyou のβ版の並び
+        let chain = [
+            "6", "6.2", "7.0.0-alpha", "7.0.0-alpha.1", "7.0.0-alpha.beta", "7.0.0-beta", "7.0.0-beta.1", "7.0.0-beta.2",
+            "7.0.0-beta.10", "7.0.0-beta.11", "7.0.0-rc.1", "7.0.0", "7.0.1", "7.1.0-beta.1", "7.1.0", "8.0.0-beta.1",
+        ];
+        for w in chain.windows(2) {
+            assert!(v(w[0]) < v(w[1]), "{} < {}", w[0], w[1]);
+            assert!(v(w[1]) > v(w[0]), "{} > {}", w[1], w[0]);
+        }
+        for a in chain {
+            assert_eq!(v(a).cmp(&v(a)), Ordering::Equal);
+        }
+        assert_eq!(v("v7.0.0-beta.1").cmp(&v("7.0.0-beta.1+abc")), Ordering::Equal);
+        // u64 を超える数の区切りでも数として比べる
+        assert!(v("7.0.0-beta.99999999999999999999") > v("7.0.0-beta.9"));
+        assert!(v("7.0.0-beta.9") < v("7.0.0-beta.a"), "数は英字を含むものより前");
+    }
+
+    #[test]
+    fn labels_and_urls() {
+        assert_eq!(prerelease_label("v7.0.0-beta.1"), Some("β版"));
+        assert_eq!(prerelease_label("v7.0.0-rc.1"), Some("β版"));
+        assert_eq!(prerelease_label("v7.0.0"), None);
+        assert_eq!(prerelease_label("v6"), None);
+        assert_eq!(prerelease_label("v7-dev"), None);
+        assert_eq!(prerelease_label("v7.0.0-dev"), None);
+        assert_eq!(prerelease_label("おかしな版"), None);
+        assert!(is_dev_version("v7-dev") && is_dev_version("v7.0.0-dev") && !is_dev_version("v7.0.0-beta.1"));
+        assert_eq!(releases_list_url(API_URL), RELEASES_API_URL);
+        assert_eq!(releases_list_url("http://127.0.0.1:1/repos/x/releases/latest"), "http://127.0.0.1:1/repos/x/releases?per_page=100");
+        assert_eq!(releases_list_url("http://h/r?a=1"), "http://h/r?a=1&per_page=100");
+    }
+
+    /// 壊れた一覧・おかしな項目でも panic せず、一覧として読めないときだけ誤り
+    #[test]
+    fn select_from_broken_lists() {
+        let cur = v("7.0.0-beta.1");
+        assert!(select_prerelease_update("not json", &cur).is_err());
+        assert!(select_prerelease_update("{\"tag_name\": \"v7.0.0\"}", &cur).unwrap_err().contains("一覧ではありません"));
+        assert_eq!(select_prerelease_update("[]", &cur).unwrap(), PrereleaseChoice::default());
+        let odd = r#"[1, null, "x", {}, {"tag_name": 7}, {"tag_name": "v7.0.0", "assets": "x"},
+                      {"tag_name": "v7.0.0-beta.2", "draft": "yes", "assets": [{"name": "zahyou.exe"}]},
+                      {"tag_name": "v7.0.0-beta.3", "assets": [{"name": "zahyou.exe", "browser_download_url": 5}]}]"#;
+        let c = select_prerelease_update(odd, &cur).unwrap();
+        assert_eq!(c.newer, None);
+        // 資産の表が壊れているものは「準備中」(新しいもののうち最も新しいタグ)
+        assert_eq!(c.pending.as_deref(), Some("v7.0.0"));
     }
 }

@@ -11,6 +11,7 @@
 //! - shot.rs / gui_selftest.rs / cli.rs   画面の撮影・自己診断・画面を出さない入口
 
 pub mod app;
+pub mod bench_ui;
 pub mod bridge;
 pub mod cli;
 pub mod env_tab;

@@ -176,11 +176,14 @@ fn help_lines() -> Vec<(Tag, String)> {
     add(Head, "ネットにつながっているとき (オンライン解析)");
     add(Plain, "[解析] の「方法」が「自動」なら、ネットがあれば先に nova.astrometry.net に問い合わせ、");
     add(Plain, "解けなければ zahyou の中で解きます (オフライン)。問い合わせには API キーが要ります。");
-    add(Plain, "キーは環境変数 ASTROMETRY_API_KEY に入れてから zahyou を起動してください");
+    add(Plain, "キーは [解析] の「API キー」の欄に入っています。はじめは作者のキー (既定) が入っているので、");
+    add(Plain, "そのままで使えます。自分のキーを使うなら欄に貼り付けてください");
     add(Plain, "(キーは nova.astrometry.net に登録すると、自分のページで見られます)。");
-    add(Plain, "キーが無ければ問い合わせを飛ばして、はじめからオフラインで解きます。");
-    add(Plain, "「オンラインのみ」はキーが無いと始められません。");
+    add(Plain, "欄は伏せ字で、「表示」で中身が見えます。「元に戻す」で既定のキーに戻ります。");
+    add(Plain, "欄を空にすると、「自動」は問い合わせを飛ばして、はじめからオフラインで解きます。");
+    add(Plain, "「オンラインのみ」は欄が空だと始められません。");
     add(Muted, "送るのは検出した星の位置です。それで解けなければ画像そのものを送ります。");
+    add(Muted, "キーは設定 (下の置き場所の gui.json) に覚えます。");
     add(Plain, "");
     add(Head, "天体名はオフラインでも使えます (2 回目から)");
     add(Plain, "天体名から座標を調べるにはネットが要りますが、一度調べた名前は");
@@ -196,7 +199,7 @@ fn help_lines() -> Vec<(Tag, String)> {
     add(Plain, "・解析が長引いたら「中止」を押してください。数秒で止まります。");
     add(Plain, "");
     add(Head, "設定と記憶の置き場所");
-    add(Plain, "設定 (目標・焦点距離・配色) と、覚えた座標・画素スケールは");
+    add(Plain, "設定 (目標・焦点距離・配色・API キー) と、覚えた座標・画素スケールは");
     add(Plain, "この PC の次の場所にあります。");
     add(Plain, "");
     add(Bold, &format!("    {}", settings_dir().display()));
@@ -212,6 +215,12 @@ fn help_lines() -> Vec<(Tag, String)> {
     add(Plain, "要らなければマニュアル 9 章の手順で消せます。");
     add(Plain, "やめるときは、zahyou.exe と上の置き場所を消してください。");
     add(Plain, "星図データ (C:\\AstrometryData) は、使わないならフォルダーごと消せます。");
+    // β版の間だけ(正式版に上げれば出なくなる)
+    if zahyou_net::update::prerelease_label(APP_VER).is_some() {
+        add(Muted, "この版は v7 のβ版です。上の「更新を確認」は、GitHub の Releases から");
+        add(Muted, "次のβ版と v7 の正式版を探します。β版は v6 の「更新を確認」には出てきません。");
+        add(Muted, "v6 に戻すときは、v6 の zahyou.exe を上書きしてください (API キーの欄の値は v6 では使いません)。");
+    }
     add(Plain, "");
     add(Head, "ライセンス");
     add(Plain, "zahyou 自身は MIT ライセンスです。自由に使って、書き換えて、");
@@ -241,7 +250,7 @@ impl ZahyouApp {
         let (placed, grect) = widgets::group(ui, th, "更新", |ui| {
             let mut placed = Vec::new();
             ui.horizontal(|ui| {
-                widgets::head(ui, th, &format!("いまの版: {APP_NAME} {APP_VER}"));
+                widgets::head(ui, th, &format!("いまの版: {APP_NAME} {APP_VER}{}", crate::prerelease_suffix()));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let b = ui.add_enabled(self.update_can_apply && !self.busy, egui::Button::new("更新する"));
                     if b.clicked() {
@@ -342,6 +351,28 @@ mod tests {
         // 空白で切れるときは空白の後ろで切る
         let lines = wrap_lines("aaaa bbbb cccc dddd eeee ffff", 20);
         assert_eq!(lines, vec!["aaaa bbbb cccc dddd ", "eeee ffff"]);
+    }
+
+    #[test]
+    fn 手引きは_api_キーの欄を説明する() {
+        let text: String = help_lines().into_iter().map(|(_, s)| s + "\n").collect();
+        assert!(text.contains("「API キー」の欄"), "欄の説明が無い");
+        assert!(text.contains("「元に戻す」で既定のキーに戻ります"));
+        // 環境変数に入れて起動し直す、という古い説明は残さない。キーの値も書かない
+        assert!(!text.contains("ASTROMETRY_API_KEY"), "環境変数の古い説明が残っている");
+        assert!(!text.contains(zahyou_net::nova::DEFAULT_API_KEY), "手引きにキーの値が出た");
+    }
+
+    #[test]
+    fn beta_版の間だけ更新の扱いを説明する() {
+        let text: String = help_lines().into_iter().map(|(_, s)| s + "\n").collect();
+        let beta = zahyou_net::update::prerelease_label(APP_VER).is_some();
+        assert_eq!(text.contains("この版は v7 のβ版です。"), beta, "β版の説明の有無が版名と合わない ({APP_VER})");
+        assert_eq!(crate::prerelease_suffix().is_empty(), !beta);
+        // 起動のログの 1 行目も同じ(β版なら「(β版・Rust 版)」)
+        let line = crate::ui::app::startup_line("F");
+        assert!(line.starts_with(&format!("zahyou {APP_VER} (")) && line.ends_with("Rust 版)   フォント: F"), "{line}");
+        assert_eq!(line.contains("β版・Rust 版"), beta, "{line}");
     }
 
     #[test]

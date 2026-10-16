@@ -40,24 +40,12 @@ fn rule() -> String {
     "=".repeat(62)
 }
 
-/// ログの見出しに出す版(パッケージの版 "0.7.0-dev" を Python 版の言い方 "v7-dev" にする)。
+/// ログの見出しに出す版。画面の版名(main.rs の APP_VER)と同じ「v + パッケージの版」(例: "v7.0.0-beta.1")。
+///
+/// 第 2 段の試作のあいだはパッケージの版が "0.7.0-dev" で、Python 版の言い方 "v7-dev" に直していた。
+/// v7 のβ版からはパッケージの版をそのまま版名にする(GitHub のタグ名・更新の確認の版の比べ方と同じ形)。
 pub fn log_version() -> String {
-    let v = env!("CARGO_PKG_VERSION");
-    let (core, pre) = match v.split_once('-') {
-        Some((c, p)) => (c, Some(p)),
-        None => (v, None),
-    };
-    let parts: Vec<&str> = core.split('.').collect();
-    let mut s = match parts.as_slice() {
-        ["0", minor, "0"] => format!("v{minor}"),
-        ["0", minor, patch] => format!("v{minor}.{patch}"),
-        _ => format!("v{core}"),
-    };
-    if let Some(p) = pre {
-        s.push('-');
-        s.push_str(p);
-    }
-    s
+    crate::APP_VER.to_string()
 }
 
 // ================================================================== 設定と結果 ===
@@ -114,8 +102,10 @@ pub struct RunParams {
     pub image_path: PathBuf,
     /// 星図データの置き場所(空なら C:\AstrometryData)
     pub index_dir: PathBuf,
-    /// nova.astrometry.net の API キー(None なら環境変数 ASTROMETRY_API_KEY)
-    pub api_key: Option<String>,
+    /// nova.astrometry.net の API キー(画面の「API キー」の欄の値)。Some で空なら問い合わせない
+    /// (「自動」はオフラインへ、「オンラインのみ」は「API キーが空です」)。None(自己診断・速さの物差し)なら
+    /// 環境変数 ASTROMETRY_API_KEY、無ければ既定のキー(v6 と同じ)。Debug では値を伏せる
+    pub api_key: Option<zahyou_net::nova::ApiKey>,
 }
 
 impl Default for RunParams {
@@ -137,6 +127,15 @@ impl Default for RunParams {
             index_dir: PathBuf::from(DEFAULT_INDEX_DIR),
             api_key: None,
         }
+    }
+}
+
+/// オンライン解析に使う API キー(前後の空白を除く)。None = 空なので問い合わせない。
+/// 画面からは欄の値(Some)がそのまま来る。None(画面を通らない自己診断など)は環境変数か既定のキー。
+fn online_api_key(p: &RunParams) -> Option<String> {
+    match &p.api_key {
+        Some(k) => k.usable().map(str::to_string),
+        None => Some(zahyou_net::nova::initial_api_key()),
     }
 }
 
@@ -600,13 +599,11 @@ impl<'a> Runner<'a> {
         scale_why: &str,
     ) -> Option<Wcs> {
         let p = self.p;
-        let key = p.api_key.clone().filter(|k| !k.trim().is_empty()).or_else(zahyou_net::api_key_from_env);
-        // 「自動」でキーが無いときは、問い合わせずにオフラインへ(毎回「エラー」と出さない。Python 版は既定のキーを
-        // 持っていたのでこの分かれ道は無い。キーをソースに書かない Rust 版だけのもの)
+        let key = online_api_key(p);
+        // 「自動」で利用者がキーの欄を空にしているときは、問い合わせずにオフラインへ(毎回「エラー」と出さない。
+        // Python 版はキーを画面で変えられなかったのでこの分かれ道は無い)
         if key.is_none() && p.solve_mode != SolveMode::Online {
-            self.log(
-                "\n[オンライン] nova.astrometry.net の API キーが無いので、問い合わせません (環境変数 ASTROMETRY_API_KEY)。",
-            );
+            self.log("\n[オンライン] API キーが空なので、nova.astrometry.net には問い合わせません。");
             return None;
         }
         self.log(&format!(
@@ -620,14 +617,12 @@ impl<'a> Runner<'a> {
             self.log(&format!("  - 目標の方向 (半径 {}°) を手がかりにします。", fmt_g(p.search_radius_deg)));
         }
         let Some(key) = key else {
-            self.log(
-                "⚠️ オンライン解析でエラー: API キーがありません (環境変数 ASTROMETRY_API_KEY に入れてください)。",
-            );
+            self.log("⚠️ オンライン解析でエラー: API キーが空です ([解析] の「API キー」の欄に入れてください)。");
             return None;
         };
         let xy: Vec<(f64, f64)> = sources.iter().map(|s| (s.x, s.y)).collect();
         let req = zahyou_net::OnlineRequest {
-            api_key: key.trim(),
+            api_key: &key,
             image_path: Some(path),
             sources: Some(&xy),
             width: nx,
@@ -650,7 +645,8 @@ impl<'a> Runner<'a> {
             Ok(None) => None,
             Err(zahyou_net::NetError::Cancelled) => None,
             Err(zahyou_net::NetError::Failed(m)) => {
-                self.log(&format!("⚠️ オンライン解析でエラー: {m}"));
+                // zahyou-net も伏せて返すが、ログに出す前にもう一度伏せる(キーの値をログに残さない)
+                self.log(&format!("⚠️ オンライン解析でエラー: {}", zahyou_net::nova::redact_key(&m, &key)));
                 None
             }
         }
@@ -1598,9 +1594,19 @@ mod tests {
     #[test]
     fn version_text() {
         let v = log_version();
-        assert!(v.starts_with('v'), "{v}");
-        if env!("CARGO_PKG_VERSION") == "0.7.0-dev" {
-            assert_eq!(v, "v7-dev");
+        // ログの見出し・画面の版名・exe の ProductVersion(build.rs)は同じ「v + パッケージの版」
+        assert_eq!(v, crate::APP_VER);
+        assert_eq!(v, format!("v{}", env!("CARGO_PKG_VERSION")));
+        if env!("CARGO_PKG_VERSION") == "7.0.0-beta.1" {
+            assert_eq!(v, "v7.0.0-beta.1");
+        }
+        // 更新の確認が版を読めること(読めないと、正式版の扱い = GitHub の latest だけを見ることになる)
+        let parsed = zahyou_net::update::parse_version(&v).unwrap_or_else(|| panic!("版名を読めません: {v}"));
+        assert_eq!(parsed.major, 7, "{v}");
+        // β版(プレリリース)なら、更新の確認は GitHub のプレリリースも含めた一覧から v7 の新しいものを探す
+        if env!("CARGO_PKG_VERSION_PRE").starts_with("beta") {
+            assert!(parsed.is_prerelease(), "{v}");
+            assert_eq!(zahyou_net::update::prerelease_label(&v), Some("β版"));
         }
     }
 
@@ -1933,6 +1939,34 @@ pub(crate) mod pyref {
         );
     }
 
+    /// ログの見出し "  zahyou <版>   <画像名>" の版を "v*" にする(ほかの行はそのまま)。
+    /// 基準値(pipeline_run.json・run_solver.json)は Python 版の "v7-dev" の頃に作ったもの。版名そのものは
+    /// tests::version_text で確かめる。
+    pub(crate) fn mask_version(l: &str) -> String {
+        let body = l.trim_start_matches('\n');
+        let lead = &l[..l.len() - body.len()];
+        match body.strip_prefix("  zahyou v") {
+            Some(rest) => {
+                let tail = rest.find(' ').map_or("", |i| &rest[i..]);
+                format!("{lead}  zahyou v*{tail}")
+            }
+            None => l.to_string(),
+        }
+    }
+
+    #[test]
+    fn mask_version_header() {
+        assert_eq!(mask_version("  zahyou v7-dev   a.fits"), "  zahyou v*   a.fits");
+        assert_eq!(mask_version("  zahyou v7.0.0-beta.1   Capture 1.fits"), "  zahyou v*   Capture 1.fits");
+        assert_eq!(mask_version("\n  zahyou v7.0.0   a.fits"), "\n  zahyou v*   a.fits");
+        assert_eq!(mask_version("  zahyou は"), "  zahyou は");
+        assert_eq!(mask_version("  zahyou v"), "  zahyou v*");
+        assert_eq!(mask_version("x  zahyou v1   a"), "x  zahyou v1   a");
+        // Rust の見出しと Python の見出しが、伏せたあと同じになる
+        let rust = format!("  zahyou {}   Capture_00001 00_10_33.fits", log_version());
+        assert_eq!(mask_version(&rust), mask_version("  zahyou v7-dev   Capture_00001 00_10_33.fits"));
+    }
+
     /// Python のログから、解法が出す行(pipeline_run.json は解法を「解なし」に差し替えて作った)と時刻の入る行をそろえる。
     pub(crate) fn normalize_log(lines: &[String]) -> Vec<String> {
         let mut out = Vec::new();
@@ -1961,7 +1995,8 @@ pub(crate) mod pyref {
                 out.push(format!("{}所要時間      : X 秒", &l[..i]));
                 continue;
             }
-            out.push(l.clone());
+            // 見出しの版名(基準値は Python 版の "v7-dev")
+            out.push(mask_version(l));
         }
         out
     }
@@ -2372,14 +2407,11 @@ pub(crate) mod pyref {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// オンラインの流れ(通信はしない): API キーが無ければ、オンラインのみなら「オンライン解析でエラー」で
+    /// オンラインの流れ(通信はしない): 画面の API キーの欄が空なら、オンラインのみなら「オンライン解析でエラー」で
     /// そこで終わり、自動なら「エラー」とは書かずに問い合わせを飛ばしてオフラインへ切り替える。
+    /// 欄の値(Some)は空でも環境変数や既定のキーで埋めない(利用者が空にしたら空のまま)ので、本物の nova には送らない。
     #[test]
     fn online_without_key() {
-        if zahyou_net::api_key_from_env().is_some() {
-            eprintln!("SKIP: 環境変数 ASTROMETRY_API_KEY があるので、本物の nova に送ってしまう");
-            return;
-        }
         let Some(d) = load("pipeline_run.json") else { return };
         let Some((with_wcs, plain, dir)) = run_images(&d, "online") else { return };
         let cache = dir.join("cache_online.json");
@@ -2411,11 +2443,11 @@ pub(crate) mod pyref {
             match mode {
                 SolveMode::Online => {
                     assert!(has("[オンライン] nova.astrometry.net に問い合わせます (最大 120 秒)"), "{l:?}");
-                    assert!(has("⚠️ オンライン解析でエラー: API キーがありません"), "{l:?}");
+                    assert!(has("⚠️ オンライン解析でエラー: API キーが空です ([解析] の「API キー」の欄に入れてください)。"), "{l:?}");
                     assert!(has("SOLVE_MODE='ONLINE' なのでここで終了します。") && !has("[オフライン]"), "{l:?}");
                 }
                 _ => {
-                    assert!(has("[オンライン] nova.astrometry.net の API キーが無いので、問い合わせません"), "{l:?}");
+                    assert!(has("[オンライン] API キーが空なので、nova.astrometry.net には問い合わせません。"), "{l:?}");
                     assert!(!has("問い合わせます (最大") && !has("⚠️ オンライン解析でエラー"), "{l:?}");
                     assert!(has("   → オフラインの解析に切り替えます。") && has("[オフライン]"), "{l:?}");
                 }
@@ -2423,6 +2455,29 @@ pub(crate) mod pyref {
             assert!(res.wcs.is_none() && has("❌ 座標を特定できませんでした。"), "{l:?}");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 解析の条件の API キー: 画面の欄の値(Some)はそのまま(空なら問い合わせない)、None は環境変数か既定のキー。
+    /// Debug で書いても値は出ない(失敗の表示に値を出さないため、比べるときも値を文に入れない)。
+    #[test]
+    fn api_key_in_run_params() {
+        use zahyou_net::nova::{ApiKey, DEFAULT_API_KEY};
+        let with = |k: Option<ApiKey>| online_api_key(&RunParams { api_key: k, ..Default::default() });
+        // 値を比べるときは assert! にする(assert_eq! は失敗したときに両方の値を書くので、既定のキーが出うる)
+        assert!(with(Some("".into())).is_none(), "空の欄で問い合わせようとした");
+        assert!(with(Some(" \t ".into())).is_none(), "空白だけの欄で問い合わせようとした");
+        assert!(with(Some("  my-own-key-0123  ".into())).as_deref() == Some("my-own-key-0123"), "欄の値が渡らない");
+        let initial = with(None);
+        assert!(initial.as_deref() == Some(zahyou_net::nova::initial_api_key().as_str()), "None は環境変数か既定のキー");
+        if zahyou_net::api_key_from_env().is_none() {
+            assert!(initial.as_deref() == Some(DEFAULT_API_KEY), "環境変数が無ければ既定のキー");
+        }
+        // 解析の条件を Debug で書いても、キーの値は出ない(長さだけ)
+        for k in [ApiKey::default_key(), ApiKey::new("my-own-key-0123")] {
+            let shown = format!("{:?}", RunParams { api_key: Some(k.clone()), ..Default::default() });
+            assert!(!shown.contains(k.expose()), "RunParams の Debug に API キーの値が出た");
+            assert!(shown.contains(&format!("<伏せ字 {} 文字>", k.expose().chars().count())), "伏せ字の表示が無い");
+        }
     }
 
     // ------------------------------------------------------------ 本物の解法つきの run() ---
@@ -2502,7 +2557,8 @@ pub(crate) mod pyref {
             .filter(|l| !(advice_only && ladder_line(l)))
             .map(|l| match l.find("所要時間      : ") {
                 Some(i) => format!("{}所要時間      : X 秒", &l[..i]),
-                None => mask_seconds(l),
+                // 見出しの版名(基準値は Python 版の "v7-dev")も伏せる
+                None => mask_seconds(&mask_version(l)),
             })
             .collect()
     }

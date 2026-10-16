@@ -4,12 +4,22 @@
 //! - 版情報: エクスプローラーの「プロパティ → 詳細」に出る名前・版・著作権
 //! - アイコン: app/zahyou.ico があれば使う(今は無いので省く)
 //!
+//! 版はどれもパッケージの版(rs/Cargo.toml の `[workspace.package] version`、例: 7.0.0-beta.1)から作る:
+//!
+//! | 置き場所 | 中身(7.0.0-beta.1 のとき) |
+//! |---|---|
+//! | マニフェストの assemblyIdentity | 7.0.0.0(数 4 つしか書けないので、プレリリースの部分は落とす) |
+//! | FILEVERSION / PRODUCTVERSION(数の版) | 7, 0, 0, 0(同上) |
+//! | 文字列の FileVersion | 7.0.0-beta.1(winresource の既定のまま) |
+//! | 文字列の ProductVersion | v7.0.0-beta.1(画面の版名 = main.rs の APP_VER と同じ) |
+//! | FILEFLAGS | プレリリース(-beta.1 など。-dev も)なら VS_FF_PRERELEASE |
+//!
 //! リソースのコンパイラ(GNU ターゲットでは MSYS2 の windres)が見つからないときは、
 //! 警告を出して埋め込まずに進む(exe は動く。DPI の扱いは winit が実行時に設定する)。
 
 const MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0" xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
-  <assemblyIdentity type="win32" name="AstroKIT.zahyou" version="0.7.0.0" processorArchitecture="amd64"/>
+  <assemblyIdentity type="win32" name="AstroKIT.zahyou" version="@VERSION4@" processorArchitecture="amd64"/>
   <description>zahyou</description>
   <dependency>
     <dependentAssembly>
@@ -40,8 +50,10 @@ const MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?
 </assembly>
 "#;
 
-/// 画面に出す版名(main.rs の APP_VER と同じ)
-const APP_VER: &str = "v7-dev";
+/// 数の版の 1 つ(0〜65535。読めない・大きすぎるときは 0)
+fn version_word(key: &str) -> u16 {
+    std::env::var(key).ok().and_then(|s| s.trim().parse::<u16>().ok()).unwrap_or(0)
+}
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
@@ -49,13 +61,29 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
+    // パッケージの版(Cargo が渡す。版を変えると build.rs も走り直す)
+    let pkg_ver = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
+    // 画面に出す版名(main.rs の APP_VER と同じ作り方)
+    let app_ver = format!("v{pkg_ver}");
+    let (major, minor, patch) =
+        (version_word("CARGO_PKG_VERSION_MAJOR"), version_word("CARGO_PKG_VERSION_MINOR"), version_word("CARGO_PKG_VERSION_PATCH"));
+    let prerelease = !std::env::var("CARGO_PKG_VERSION_PRE").unwrap_or_default().is_empty();
     let mut res = winresource::WindowsResource::new();
-    res.set_manifest(MANIFEST);
+    res.set_manifest(&MANIFEST.replace("@VERSION4@", &format!("{major}.{minor}.{patch}.0")));
+    // 数の版(エクスプローラーの「ファイル バージョン」)。winresource の既定と同じ値を、上の数から明示して入れる
+    let words = (u64::from(major) << 48) | (u64::from(minor) << 32) | (u64::from(patch) << 16);
+    res.set_version_info(winresource::VersionInfo::FILEVERSION, words);
+    res.set_version_info(winresource::VersionInfo::PRODUCTVERSION, words);
+    if prerelease {
+        // β 版(-beta.N)と試作版(-dev)は「正式版ではない」印を付ける
+        res.set_version_info(winresource::VersionInfo::FILEFLAGS, winresource::VersionInfo::VS_FF_PRERELEASE);
+    }
     // 日本語(0x0411)の版情報
     res.set_language(0x0411);
     res.set("ProductName", "zahyou");
     res.set("FileDescription", "zahyou — 天体画像から目標への向きを求める");
-    res.set("ProductVersion", APP_VER);
+    res.set("FileVersion", &pkg_ver);
+    res.set("ProductVersion", &app_ver);
     res.set("OriginalFilename", "zahyou.exe");
     res.set("InternalName", "zahyou");
     res.set("CompanyName", "AstroKIT, Kyushu Institute of Technology");

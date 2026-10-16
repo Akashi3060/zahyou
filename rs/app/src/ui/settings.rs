@@ -1,13 +1,19 @@
 //! 設定(%LOCALAPPDATA%\zahyou\gui.json)。v6 と同じキー・同じ形で読み書きする。
 //!
 //! - UTF-8(BOM なし)の JSON。Python の `json.dump(ensure_ascii=False, indent=1)` と同じ書き方
-//! - 方法(`solve`)は画面の表示文字列のまま保存する(v6 と同じ)。旧い「オフライン (WSL) のみ」は読み替える
+//! - 方法(`solve`)は表示文字列で保存する(v6 と同じ)。ただし「オフラインのみ」は v6 の文言「オフライン (WSL) のみ」で
+//!   書き(v6 に戻したときに「自動」へ戻らないように。`Solve::stored_label`)、読むときに読み替える
 //! - 文字列は空でないときだけ反映する(v6 の癖をそのまま引き継ぐ: 天体名を空にして閉じると次は既定に戻る)
 //! - 書けないときは黙って諦める
+//! - v7 で足したキー `api_key`(nova.astrometry.net の API キー)は v6 の gui.json には無い。無い・文字列でないときは
+//!   初めの値(環境変数 ASTROMETRY_API_KEY、無ければ作者の既定のキー)。ほかの文字列と違い、空でもそのまま覚える
+//!   (利用者が消して空にしたら空のまま = オンラインに問い合わせない)。v6 は自分の知るキーだけを書き直すので、
+//!   v6 を使うと消える(次に v7 を開くと初めの値に戻る)
 
 use std::path::PathBuf;
 
 use serde_json::{Map, Value};
+use zahyou_net::nova::ApiKey;
 
 use super::theme::ThemeName;
 
@@ -63,6 +69,14 @@ impl Solve {
         let s = SOLVE_RENAMED.iter().find(|(old, _)| *old == s).map(|(_, new)| *new).unwrap_or(s);
         SOLVE_CHOICES.iter().find(|(l, _)| *l == s).map(|(_, v)| *v)
     }
+    /// gui.json に書く文言。v6 の文言が別のもの(「オフラインのみ」= v6 の「オフライン (WSL) のみ」)は v6 の文言で書く。
+    /// v7 は β の間 v6 と並べて使われ、v6 へ戻す人がいる。v6 は知らない文言を「自動」に戻すので、今の文言で書くと
+    /// オフラインを選んでいた人が v6 に戻したとたん、黙って nova.astrometry.net へ問い合わせるようになる
+    /// (v6 も既定の API キーを持つ)。v7 は読むときに読み替える(from_label)。v6 を配らなくなったら label() に戻してよい
+    pub fn stored_label(self) -> &'static str {
+        let now = self.label();
+        SOLVE_RENAMED.iter().find(|(_, new)| *new == now).map(|(old, _)| *old).unwrap_or(now)
+    }
 }
 
 /// 結果をどの表示で出すか(gui.json の "result_tab")
@@ -114,6 +128,8 @@ pub struct Settings {
     pub theme: ThemeName,
     pub update_auto: bool,
     pub result_tab: ResultTab,
+    /// nova.astrometry.net の API キー(gui.json の "api_key"。Debug では伏せ字)
+    pub api_key: ApiKey,
 }
 
 impl Default for Settings {
@@ -137,6 +153,8 @@ impl Default for Settings {
             theme: ThemeName::Light,
             update_auto: true,
             result_tab: ResultTab::Orig,
+            // 初めて起動したとき: 環境変数 ASTROMETRY_API_KEY、無ければ作者の既定のキー
+            api_key: ApiKey::initial(),
         }
     }
 }
@@ -236,6 +254,10 @@ impl Settings {
         if let Some(t) = get_str("result_tab").and_then(|v| ResultTab::from_key(&v)) {
             s.result_tab = t;
         }
+        // API キーは空でも覚える(利用者が空にした)。無い・文字列でなければ初めの値のまま
+        if let Some(Value::String(k)) = d.get("api_key") {
+            s.api_key = ApiKey::new(k.clone());
+        }
         s
     }
 
@@ -248,7 +270,8 @@ impl Settings {
         m.insert("ra".into(), st(&self.ra));
         m.insert("dec".into(), st(&self.dec));
         m.insert("focal".into(), st(&self.focal));
-        m.insert("solve".into(), st(self.solve.label()));
+        // v6 と行き来できるよう v6 の文言で書く(Solve::stored_label)
+        m.insert("solve".into(), st(self.solve.stored_label()));
         m.insert("radius".into(), st(&self.radius));
         m.insert("t_online".into(), st(&self.t_online));
         m.insert("t_offline".into(), st(&self.t_offline));
@@ -261,6 +284,8 @@ impl Settings {
         m.insert("theme".into(), st(self.theme.key()));
         m.insert("update_auto".into(), Value::Bool(self.update_auto));
         m.insert("result_tab".into(), st(self.result_tab.key()));
+        // v7 で足したキー(v6 のキーの並びのあと)
+        m.insert("api_key".into(), st(self.api_key.expose()));
         let mut buf = Vec::new();
         let fmt = serde_json::ser::PrettyFormatter::with_indent(b" ");
         let mut ser = serde_json::Serializer::with_formatter(&mut buf, fmt);
@@ -295,6 +320,23 @@ mod tests {
     }
 
     #[test]
+    fn 方法は_v6_の文言で書く() {
+        // v6(main:gui/zahyou_gui.py の SOLVE_CHOICES)が知っている文言
+        const V6: [&str; 3] = ["自動 (インターネットがあれば使う)", "オンラインのみ", "オフライン (WSL) のみ"];
+        for (label, solve) in SOLVE_CHOICES {
+            let s = Settings { solve, ..Default::default() };
+            let j = s.to_json();
+            let v: Value = serde_json::from_str(&j).unwrap();
+            let stored = v["solve"].as_str().unwrap();
+            assert!(V6.contains(&stored), "{label} を v6 の知らない文言 {stored} で書いた");
+            // v7 で読み直すと同じ方法に戻る
+            assert_eq!(Settings::from_json(&j).solve, solve);
+        }
+        assert_eq!(Solve::Offline.stored_label(), "オフライン (WSL) のみ");
+        assert_eq!(Solve::Offline.label(), "オフラインのみ");
+    }
+
+    #[test]
     fn 空の文字列は既定のまま() {
         let s = Settings::from_json(r#"{"name": "", "ra": 3}"#);
         assert_eq!(s.name, "UCAC4 660-021020");
@@ -312,11 +354,40 @@ mod tests {
     fn v6_と同じ形で書く() {
         let s = Settings::default();
         let j = s.to_json();
-        // Python の json.dump(indent=1, ensure_ascii=False) と同じ
+        // Python の json.dump(indent=1, ensure_ascii=False) と同じ。v7 で足した api_key は v6 のキーのあと
         assert!(j.starts_with("{\n \"mode\": \"STAR_NAME\",\n \"name\": \"UCAC4 660-021020\",\n"));
         assert!(j.contains("\"solve\": \"自動 (インターネットがあれば使う)\""));
         assert!(j.contains("\"indexdir\": \"C:\\\\AstrometryData\""));
-        assert!(j.ends_with("\"result_tab\": \"orig\"\n}"));
+        assert!(j.contains("\"result_tab\": \"orig\",\n \"api_key\": \""));
+        // キーの値は文に書かない(assert! は失敗しても式しか書かない)
+        assert!(j.ends_with(&format!("\"api_key\": \"{}\"\n}}", s.api_key.expose())));
         assert_eq!(Settings::from_json(&j), s);
+    }
+
+    #[test]
+    fn api_キーは初めは既定_空にしたら空のまま() {
+        use zahyou_net::nova::DEFAULT_API_KEY;
+        // gui.json が無い(初めて起動)・v6 の gui.json(api_key が無い)・文字列でない → 初めの値
+        let initial = zahyou_net::nova::initial_api_key();
+        for text in ["", "{", r#"{"name": "M42"}"#, r#"{"api_key": 3}"#, r#"{"api_key": null}"#] {
+            let s = Settings::from_json(text);
+            assert!(s.api_key.expose() == initial, "初めの値にならない: {text}");
+        }
+        if zahyou_net::api_key_from_env().is_none() {
+            assert!(Settings::default().api_key.is_default(), "環境変数が無いのに既定のキーでない");
+            assert!(Settings::default().api_key.expose() == DEFAULT_API_KEY);
+        }
+        // 利用者が消して空にしたら空のまま覚える(ほかの文字列の欄と違う)
+        let mut s = Settings { api_key: ApiKey::new(""), ..Default::default() };
+        let back = Settings::from_json(&s.to_json());
+        assert!(back.api_key.expose().is_empty(), "空にしたキーが初めの値に戻った");
+        assert_eq!(back, s);
+        // 自分のキーも覚える
+        s.api_key = ApiKey::new("my-own-key-0123");
+        assert_eq!(Settings::from_json(&s.to_json()).api_key, ApiKey::new("my-own-key-0123"));
+        // Debug(試験の失敗の表示)にキーの値が出ない
+        let shown = format!("{:?}", Settings::default());
+        assert!(!shown.contains(DEFAULT_API_KEY) && !shown.contains(&initial), "Settings の Debug に API キーの値が出た");
+        assert!(shown.contains("api_key: ApiKey(<伏せ字 "), "伏せ字の表示が無い");
     }
 }

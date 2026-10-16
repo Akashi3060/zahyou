@@ -66,7 +66,8 @@ pub fn radius_problem(s: &str) -> Option<String> {
     Some(format!("探索半径の「{r}」は使えません。\n0 より大きい数 (度) を入れてください。空欄なら 5° で探します。"))
 }
 
-/// 画面の入力から解析の条件を作る(Python の _params)。API キーは環境変数 ASTROMETRY_API_KEY(pipeline が読む)。
+/// 画面の入力から解析の条件を作る(Python の _params)。API キーは［解析］タブの欄の値をそのまま渡す
+/// (空なら空のまま。pipeline は環境変数や既定のキーで埋めずに、問い合わせを飛ばす)。
 pub fn params(s: &Settings) -> pipeline::RunParams {
     pipeline::RunParams {
         mode: match s.mode {
@@ -92,8 +93,14 @@ pub fn params(s: &Settings) -> pipeline::RunParams {
         show_sources: s.marks,
         image_path: PathBuf::from(s.image.trim()),
         index_dir: PathBuf::from(if s.indexdir.trim().is_empty() { pipeline::DEFAULT_INDEX_DIR } else { s.indexdir.trim() }),
-        api_key: None,
+        api_key: Some(s.api_key.clone()),
     }
+}
+
+/// 「解析を実行」の前の API キーの検査: 「オンラインのみ」で欄が空なら知らせの文(始めない)。
+/// 「自動」は空でも始める(問い合わせを飛ばしてオフラインで解く)、「オフラインのみ」はキーを使わない。
+pub fn api_key_problem(s: &Settings) -> Option<&'static str> {
+    (s.solve == Solve::Online && s.api_key.usable().is_none()).then_some(super::app::ONLINE_NEEDS_KEY)
 }
 
 /// 解析を 1 回通す(ワーカーから呼ぶ)。図は画面に描く形まで直しておく(縮小の段づくりも済ませる)。
@@ -349,6 +356,36 @@ mod tests {
             s.radius = r.into();
             assert_eq!(params(&s).search_radius_deg, want, "{r}");
         }
+    }
+
+    #[test]
+    fn api_キーの欄の値を解析に渡す() {
+        use zahyou_net::nova::{ApiKey, DEFAULT_API_KEY};
+        let mut s = Settings { api_key: ApiKey::default_key(), solve: Solve::Online, ..Default::default() };
+        // 値は assert! で比べる(失敗したときに値を書かない)
+        let p = params(&s);
+        assert!(p.api_key.as_ref().map(|k| k.expose()) == Some(DEFAULT_API_KEY), "既定のキーが渡らない");
+        assert_eq!(api_key_problem(&s), None);
+        // 解析の条件を Debug で書いても値は出ない
+        assert!(!format!("{p:?}").contains(DEFAULT_API_KEY), "解析の条件の Debug に API キーの値が出た");
+        // 空にしたら空のまま渡す(環境変数や既定のキーで埋めない)。「オンラインのみ」なら始める前に止める
+        for blank in ["", "   "] {
+            s.api_key = ApiKey::new(blank);
+            let p = params(&s);
+            assert!(p.api_key.as_ref().is_some_and(|k| k.usable().is_none()), "空の欄が空で渡らない");
+            s.solve = Solve::Online;
+            let m = api_key_problem(&s).expect("オンラインのみで空なのに止めない");
+            assert!(m.starts_with("API キーが空です。"), "{m}");
+            // 「自動」は始める(問い合わせを飛ばしてオフライン)・「オフラインのみ」はキーを使わない
+            for solve in [Solve::Auto, Solve::Offline] {
+                s.solve = solve;
+                assert_eq!(api_key_problem(&s), None, "{solve:?}");
+            }
+        }
+        s.api_key = ApiKey::new(" my-own-key-0123 ");
+        s.solve = Solve::Online;
+        assert_eq!(api_key_problem(&s), None);
+        assert!(params(&s).api_key.is_some_and(|k| k.usable() == Some("my-own-key-0123")));
     }
 
     #[test]

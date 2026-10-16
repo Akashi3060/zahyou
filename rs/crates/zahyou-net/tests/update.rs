@@ -261,3 +261,253 @@ fn download_follows_redirect_with_range() {
     assert_eq!(objs[1].1.as_deref(), Some("bytes=700000-2599999"), "切れたところから");
     assert!(objs.iter().all(|g| g.2.as_deref() == Some("zahyou-updater")));
 }
+
+// ------------------------------------------------------------- β版の更新の確認 ---
+
+/// Releases の 1 件(一覧の項目)。`asset` が None なら資産 zahyou.exe が無い。
+fn listed(tag: &str, prerelease: bool, draft: bool, asset: Option<(usize, &str)>) -> String {
+    let assets = match asset {
+        Some((size, digest)) => format!(
+            "[{{\"name\": \"zahyou.exe\", \"size\": {size}, \"browser_download_url\": \"https://x/{tag}/zahyou.exe\", \
+             \"updated_at\": \"2026-11-01T00:00:00Z\", \"digest\": \"sha256:{digest}\"}}]"
+        ),
+        None => "[{\"name\": \"notes.txt\", \"size\": 1, \"browser_download_url\": \"https://x/notes.txt\"}]".into(),
+    };
+    format!(
+        "{{\"tag_name\": \"{tag}\", \"name\": \"zahyou {tag}\", \"draft\": {draft}, \"prerelease\": {prerelease}, \
+         \"published_at\": \"2026-11-01T00:00:00Z\", \"assets\": {assets}}}"
+    )
+}
+
+/// 偽の GitHub: latest(プレリリースを含まない)と一覧(プレリリースを含む)を別々に返す。
+/// latest には、GitHub の説明のとおり一覧(新しい順)のうちプレリリースでも下書きでもない最初のものを返す。
+struct FakeGitHub {
+    srv: TestServer,
+    list: Arc<Mutex<Vec<String>>>,
+}
+
+impl FakeGitHub {
+    fn start() -> FakeGitHub {
+        let list: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let l = list.clone();
+        let srv = TestServer::start(move |r| {
+            assert_eq!(r.header("user-agent"), Some("zahyou-updater"));
+            assert_eq!(r.header("accept"), Some("application/vnd.github+json"));
+            let items = l.lock().unwrap().clone();
+            match r.path.as_str() {
+                LIST_PATH => Resp::json(&format!("[{}]", items.join(","))),
+                LATEST_PATH => {
+                    let full = items.iter().find(|j| j.contains("\"prerelease\": false") && j.contains("\"draft\": false"));
+                    match full {
+                        Some(j) => Resp::json(j),
+                        None => Resp::new(404, "{\"message\": \"Not Found\"}"),
+                    }
+                }
+                _ => Resp::new(404, "{\"message\": \"Not Found\"}"),
+            }
+        });
+        FakeGitHub { srv, list }
+    }
+    fn set(&self, items: &[String]) {
+        *self.list.lock().unwrap() = items.to_vec();
+        self.srv.clear();
+    }
+    fn latest_url(&self) -> String {
+        format!("{}{LATEST_PATH}", self.srv.url())
+    }
+    fn paths(&self) -> Vec<String> {
+        self.srv.requests().iter().map(|r| r.path.clone()).collect()
+    }
+}
+
+const LIST_PATH: &str = "/repos/x/releases?per_page=100";
+const LATEST_PATH: &str = "/repos/x/releases/latest";
+
+#[test]
+fn beta_checks_prereleases_in_the_list() {
+    let dir = temp_dir("upd-beta");
+    let exe = dir.join("zahyou.exe");
+    std::fs::write(&exe, b"fake beta exe").unwrap();
+    let here = sha_hex(b"fake beta exe");
+    let other = sha_hex(b"another build");
+    let gh = FakeGitHub::start();
+    let api = gh.latest_url();
+    let check = |ver: &str| check_update_at(&api, &exe, ver, Duration::from_secs(5), &|| false);
+    let beta1 = "v7.0.0-beta.1";
+
+    // 1. プレリリースだけ: 次のβ版がある → 新しい版あり(一覧だけを問い合わせ、latest は見ない)
+    gh.set(&[listed("v7.0.0-beta.2", true, false, Some((14_000_000, &other))), listed(beta1, true, false, Some((13_900_000, &here)))]);
+    let st = check(beta1);
+    assert_eq!(st.state, UpdateState::Available, "{}", st.message);
+    assert_eq!(st.release.as_ref().unwrap().tag, "v7.0.0-beta.2");
+    assert_eq!(st.release.as_ref().unwrap().url, "https://x/v7.0.0-beta.2/zahyou.exe");
+    assert_eq!(st.release.as_ref().unwrap().sha256, other);
+    assert_eq!(st.here_sha256.as_deref(), Some(here.as_str()));
+    assert_eq!(st.message, "新しい版があります: v7.0.0-beta.2 (2026-11-01 版 / 14 MB)");
+    assert_eq!(gh.paths(), vec![LIST_PATH.to_string()]);
+
+    // 2. 正式版だけ: v7 の正式版はβ版より新しい → 新しい版あり
+    gh.set(&[listed("v7.0.0", false, false, Some((14_100_000, &other)))]);
+    let st = check(beta1);
+    assert_eq!(st.state, UpdateState::Available, "{}", st.message);
+    assert_eq!(st.release.unwrap().tag, "v7.0.0");
+
+    // 3. 両方(新しい順に並ぶが、いちばん上が最も新しい版とは限らないので semver で選ぶ)
+    gh.set(&[
+        listed("v7.0.0-beta.3", true, false, Some((1, &other))),
+        listed("v6.3", false, false, Some((107_000_000, &other))),
+        listed("v7.0.0", false, false, Some((2, &other))),
+        listed("v7.0.0-beta.2", true, false, Some((3, &other))),
+        listed(beta1, true, false, Some((4, &here))),
+    ]);
+    let st = check(beta1);
+    assert_eq!(st.state, UpdateState::Available);
+    assert_eq!(st.release.unwrap().tag, "v7.0.0", "beta.3 より正式版 v7.0.0 が新しい");
+    // beta.10 は beta.2 より新しい(文字の順ではない)
+    gh.set(&[listed("v7.0.0-beta.2", true, false, Some((1, &other))), listed("v7.0.0-beta.10", true, false, Some((2, &other)))]);
+    assert_eq!(check(beta1).release.unwrap().tag, "v7.0.0-beta.10");
+    // 正式版のあとのβ版(v7.1.0-beta.1)も、β版の利用者には出す
+    gh.set(&[listed("v7.1.0-beta.1", true, false, Some((1, &other))), listed("v7.0.0", false, false, Some((2, &other)))]);
+    assert_eq!(check(beta1).release.unwrap().tag, "v7.1.0-beta.1");
+
+    // 4. v6 のタグだけ → 新しい版なし(exe のハッシュも計算しない)
+    gh.set(&[listed("v6.3", false, false, Some((107_000_000, &other))), listed("v6.2", false, false, Some((107_000_000, &other)))]);
+    let st = check(beta1);
+    assert_eq!(st.state, UpdateState::UpToDate, "{}", st.message);
+    assert_eq!(st.message, "最新版です (v7.0.0-beta.1)。");
+    assert_eq!(st.release, None);
+    assert_eq!(st.here_sha256, None);
+    assert_eq!(gh.paths(), vec![LIST_PATH.to_string()]);
+    // 一覧が空でも同じ
+    gh.set(&[]);
+    assert_eq!(check(beta1).state, UpdateState::UpToDate);
+
+    // 5. 今と同じ版だけ → 最新版(公開日つき)。古いβ版・α版も新しい版ではない
+    gh.set(&[listed(beta1, true, false, Some((4, &here))), listed("v7.0.0-alpha.3", true, false, Some((5, &other)))]);
+    let st = check(beta1);
+    assert_eq!(st.state, UpdateState::UpToDate);
+    assert_eq!(st.message, "最新版です (v7.0.0-beta.1 / 2026-11-01 版)。");
+    assert_eq!(st.release.unwrap().tag, beta1);
+    gh.set(&[listed(beta1, true, false, Some((4, &other)))]);
+    assert_eq!(check("v7.0.0-beta.2").state, UpdateState::UpToDate, "beta.2 から見て beta.1 は古い");
+
+    // 6. 使わないもの: 下書き・-dev で終わるタグ(semver では beta より後ろ)・v8・読めないタグ
+    gh.set(&[
+        listed("v7.0.0-beta.9", true, true, Some((1, &other))),
+        listed("v7.0.0-dev", true, false, Some((1, &other))),
+        listed("v8.0.0", false, false, Some((1, &other))),
+        listed("v7.0.0-β2", true, false, Some((1, &other))),
+        listed("latest", false, false, Some((1, &other))),
+    ]);
+    let st = check(beta1);
+    assert_eq!(st.state, UpdateState::UpToDate, "{}", st.message);
+    assert_eq!(st.message, "最新版です (v7.0.0-beta.1)。");
+
+    // 7. 新しい版の資産が同じ中身 → 最新版
+    gh.set(&[listed("v7.0.0-beta.2", true, false, Some((13, &here)))]);
+    let st = check(beta1);
+    assert_eq!(st.state, UpdateState::UpToDate);
+    assert_eq!(st.message, "最新版です (v7.0.0-beta.2 / 2026-11-01 版)。");
+
+    // 8. 資産がまだ無い新しい版 → 出さない(準備中と知らせる)。資産のある、それより古い新しい版があればそれを出す
+    gh.set(&[listed("v7.0.0-beta.3", true, false, None), listed(beta1, true, false, Some((4, &here)))]);
+    let st = check(beta1);
+    assert_eq!(st.state, UpdateState::UpToDate);
+    assert_eq!(st.message, "最新版です (v7.0.0-beta.1 / 2026-11-01 版)。 v7.0.0-beta.3 は公開の準備中です (zahyou.exe がまだありません)。");
+    gh.set(&[listed("v7.0.0-beta.3", true, false, None), listed("v7.0.0-beta.2", true, false, Some((1, &other)))]);
+    let st = check(beta1);
+    assert_eq!(st.state, UpdateState::Available);
+    assert_eq!(st.release.unwrap().tag, "v7.0.0-beta.2");
+
+    // 9. 中止(ハッシュの計算中)・つながらない
+    gh.set(&[listed("v7.0.0-beta.2", true, false, Some((1, &other)))]);
+    let st = check_update_at(&api, &exe, beta1, Duration::from_secs(5), &|| true);
+    assert_eq!(st.state, UpdateState::Cancelled);
+    let st = check_update_at("http://127.0.0.1:9/repos/x/releases/latest", &exe, beta1, Duration::from_secs(3), &|| false);
+    assert_eq!(st.state, UpdateState::Error);
+    assert!(st.message.starts_with("更新を確認できませんでした"), "{}", st.message);
+}
+
+/// 一覧の応答が壊れている・一覧でない → Error(panic しない)
+#[test]
+fn beta_check_with_broken_responses() {
+    let dir = temp_dir("upd-beta-broken");
+    let exe = dir.join("zahyou.exe");
+    std::fs::write(&exe, b"x").unwrap();
+    let body = Arc::new(Mutex::new(String::new()));
+    let b = body.clone();
+    let srv = TestServer::start(move |_| Resp::json(&b.lock().unwrap()));
+    let api = format!("{}/repos/x/releases/latest", srv.url());
+    for (bad, want) in [
+        ("not json", "応答を読めません"),
+        ("{\"message\": \"API rate limit exceeded\"}", "一覧ではありません"),
+        ("", "応答を読めません"),
+        ("[", "応答を読めません"),
+    ] {
+        *body.lock().unwrap() = bad.into();
+        let st = check_update_at(&api, &exe, "v7.0.0-beta.1", Duration::from_secs(5), &|| false);
+        assert_eq!(st.state, UpdateState::Error, "{bad:?}");
+        assert!(st.message.contains(want), "{bad:?}: {}", st.message);
+    }
+    // 壊れた項目だけなら、その項目を使わないだけ(誤りにしない)
+    *body.lock().unwrap() = "[null, 3, {\"tag_name\": \"v7.0.0\", \"assets\": null}]".into();
+    let st = check_update_at(&api, &exe, "v7.0.0-beta.1", Duration::from_secs(5), &|| false);
+    assert_eq!(st.state, UpdateState::UpToDate, "{}", st.message);
+}
+
+/// 試作版(-dev で終わる)は、β版の形でも v7-dev の形でも問い合わせない
+#[test]
+fn dev_versions_never_ask() {
+    let dir = temp_dir("upd-dev");
+    let exe = dir.join("zahyou.exe");
+    std::fs::write(&exe, b"x").unwrap();
+    let gh = FakeGitHub::start();
+    gh.set(&[listed("v7.0.0", false, false, Some((1, &sha_hex(b"y"))))]);
+    for ver in ["v7-dev", "v7.0.0-dev", "v7.0.0-beta.1-dev", "7.1.0-dev"] {
+        let st = check_update_at(&gh.latest_url(), &exe, ver, Duration::from_secs(5), &|| false);
+        assert_eq!(st.state, UpdateState::Dev, "{ver}");
+        assert_eq!(st.message, "試作版のため更新の確認はしません。");
+    }
+    assert!(gh.paths().is_empty(), "問い合わせてしまった: {:?}", gh.paths());
+}
+
+/// 正式版(プレリリースでない版名)は今までどおり latest だけを見る。latest が今より古い版なら戻さない
+#[test]
+fn release_versions_use_latest_only() {
+    let dir = temp_dir("upd-stable");
+    let exe = dir.join("zahyou.exe");
+    std::fs::write(&exe, b"fake v7 exe").unwrap();
+    let here = sha_hex(b"fake v7 exe");
+    let other = sha_hex(b"other");
+    let gh = FakeGitHub::start();
+    let api = gh.latest_url();
+    let check = |ver: &str| check_update_at(&api, &exe, ver, Duration::from_secs(5), &|| false);
+
+    // プレリリースは latest に出てこない(v6 の利用者にβ版は出ない)
+    gh.set(&[listed("v7.0.0-beta.2", true, false, Some((1, &other))), listed("v6.3", false, false, Some((2, &other)))]);
+    let st = check("v6.2");
+    assert_eq!(st.state, UpdateState::Available, "{}", st.message);
+    assert_eq!(st.release.unwrap().tag, "v6.3");
+    assert_eq!(gh.paths(), vec![LATEST_PATH.to_string()]);
+    gh.set(&[listed("v7.0.0-beta.2", true, false, Some((1, &other))), listed("v6.3", false, false, Some((2, &here)))]);
+    assert_eq!(check("v6.3").state, UpdateState::UpToDate);
+    // β版しか無ければ(latest が 404)、正式版の利用者には確かめられないと出る(v6 の更新係も同じ)
+    gh.set(&[listed("v7.0.0-beta.2", true, false, Some((1, &other)))]);
+    assert_eq!(check("v6.3").state, UpdateState::Error);
+
+    // v7 の正式版を使っているとき、latest が v6 の修正版を指したら入れ替えに誘わない
+    gh.set(&[listed("v6.3", false, false, Some((2, &other)))]);
+    let st = check("v7.0.0");
+    assert_eq!(st.state, UpdateState::UpToDate, "{}", st.message);
+    assert_eq!(st.message, "最新版です (v7.0.0)。公開されている最新版 v6.3 より新しい版を使っています。");
+    assert_eq!(st.here_sha256, None);
+    // v7 の次の正式版は出す
+    gh.set(&[listed("v7.0.1", false, false, Some((3, &other)))]);
+    assert_eq!(check("v7.0.0").state, UpdateState::Available);
+    // 同じ版を建て直したもの(中身が違う)は今までどおり出す
+    gh.set(&[listed("v7.0.0", false, false, Some((3, &other)))]);
+    assert_eq!(check("v7.0.0").state, UpdateState::Available);
+    gh.set(&[listed("v7.0.0", false, false, Some((3, &here)))]);
+    assert_eq!(check("v7.0.0").state, UpdateState::UpToDate);
+    assert!(gh.paths().iter().all(|p| p == LATEST_PATH), "{:?}", gh.paths());
+}

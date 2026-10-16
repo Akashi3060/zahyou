@@ -211,6 +211,88 @@ fn falls_back_to_image_then_times_out_or_cancels() {
     assert!(matches!(r, Err(NetError::Failed(ref m)) if m.contains("API キー")), "{r:?}");
 }
 
+/// API キーの値はログ・失敗の文・Debug に出ない(nova の応答がキーをそのまま返してきても伏せる)。
+/// 値は assert! で比べ、失敗の文にも入れない。
+#[test]
+fn api_key_is_never_logged() {
+    const KEY: &str = "secretkey0123456";
+    // 偽の nova: ログインは通し、星のリストの投稿には受け取った本文(キーを含む)をそのまま返す(subid なし)。
+    // 状態の問い合わせは失敗させ、その文にもキーを入れる
+    let srv = TestServer::start(|r| match r.path.as_str() {
+        "/api/login" => {
+            let body = String::from_utf8_lossy(&r.body).into_owned();
+            assert!(body.contains(KEY), "ログインの本文にキーが入っていない");
+            Resp::json("{\"status\": \"success\", \"session\": \"s\"}")
+        }
+        "/api/url_upload" => Resp::json(&format!("{{\"status\": \"error\", \"errormessage\": \"bad key {KEY}\"}}")),
+        "/api/upload" => Resp::json("{\"status\": \"success\", \"subid\": 5}"),
+        "/api/submissions/5" => Resp::new(500, format!("key={KEY}")),
+        _ => Resp::new(404, KEY),
+    });
+    let dir = temp_dir("nova-redact");
+    let img = dir.join("a.fits");
+    std::fs::write(&img, b"SIMPLE  =                    T").unwrap();
+    let src = [(1.0, 2.0)];
+    let req = OnlineRequest {
+        api_key: KEY,
+        image_path: Some(&img),
+        sources: Some(&src),
+        width: 10,
+        height: 10,
+        timeout_s: 1.0,
+        hint_radec: None,
+        hint_radius_deg: 5.0,
+        scale_hint: None,
+    };
+    // Debug に値が出ない
+    let shown = format!("{req:?}");
+    assert!(!shown.contains(KEY), "OnlineRequest の Debug にキーが出た");
+    assert!(shown.contains("<伏せ字 16 文字>"), "伏せ字の表示が無い");
+    // 星のリストの投稿で失敗(応答にキーが入っている)→ 失敗の文では伏せる
+    let log = Mutex::new(Vec::<String>::new());
+    let r = solve_online_with(&mut client(&srv), &req, &|| false, &|m| log.lock().unwrap().push(m.into()));
+    match &r {
+        Err(NetError::Failed(m)) => {
+            assert!(!m.contains(KEY), "失敗の文にキーが出た");
+            assert!(m.contains(REDACTED) && m.contains("subid"), "伏せた印が無い");
+        }
+        _ => panic!("失敗するはず: {}", r.is_ok()),
+    }
+    // 画像を送る道(状態の問い合わせの失敗の文にキー → ログでは伏せる。そのあと時間切れ)
+    let req2 = OnlineRequest { sources: None, ..req.clone() };
+    let r2 = solve_online_with(&mut client(&srv), &req2, &|| false, &|m| log.lock().unwrap().push(m.into()));
+    assert!(matches!(&r2, Err(NetError::Failed(m)) if m.contains("終わりませんでした") && !m.contains(KEY)));
+    let lines = log.into_inner().unwrap();
+    assert!(lines.iter().any(|l| l.contains("状態を聞けませんでした")), "状態の問い合わせの失敗がログに無い");
+    assert!(lines.iter().all(|l| !l.contains(KEY)), "ログにキーが出た");
+}
+
+#[test]
+fn api_key_helpers() {
+    // 既定のキーは v6 と同じ 16 文字(値は書かない)
+    assert_eq!(DEFAULT_API_KEY.chars().count(), 16);
+    assert!(DEFAULT_API_KEY.chars().all(|c| c.is_ascii_lowercase()));
+    let k = ApiKey::default_key();
+    assert!(k.is_default() && k.usable() == Some(DEFAULT_API_KEY));
+    assert_eq!(k.describe(), "既定のキー (16 文字)");
+    assert!(!format!("{k:?}").contains(DEFAULT_API_KEY));
+    // 前後の空白は使うときに除く。空白だけなら空
+    assert!(ApiKey::new(format!("  {DEFAULT_API_KEY} ")).is_default());
+    assert_eq!(ApiKey::new("  ").usable(), None);
+    assert_eq!(ApiKey::new("").describe(), "空");
+    assert_eq!(ApiKey::new("abc-123").describe(), "既定と違うキー (7 文字)");
+    assert!(!ApiKey::new("abc-123").is_default());
+    // 初めの値は環境変数、無ければ既定のキー
+    match api_key_from_env() {
+        Some(e) => assert!(initial_api_key() == e),
+        None => assert!(initial_api_key() == DEFAULT_API_KEY && ApiKey::initial().is_default()),
+    }
+    // 伏せ字: 4 文字以上だけ伏せる(短い値で、ふつうの文字が消えないように)
+    assert_eq!(redact_key("a secretkey here secretkey", " secretkey "), format!("a {REDACTED} here {REDACTED}"));
+    assert_eq!(redact_key("Key K k", "K"), "Key K k");
+    assert_eq!(redact_key("no key", ""), "no key");
+}
+
 #[test]
 fn internet_check_against_local() {
     let srv = TestServer::start(|r| if r.path == "/api/" { Resp::new(200, "ok") } else { Resp::new(404, "") });

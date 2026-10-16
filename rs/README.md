@@ -71,17 +71,30 @@ export ZAHYOU_CACHE="$T/cache.json" ZAHYOU_SETTINGS="$T/gui.json" LOCALAPPDATA="
 ## exe の入口
 
 ```text
-zahyou.exe                                    画面
-zahyou.exe --selftest <画像> [--offline|--online] [--out f]   自己診断(解析を 2 回 + 画面の項目。24 項目)
+zahyou.exe [--dx12|--glow] [--gpu display|low|high|warp]   画面(既定は DirectX 12・主の画面の GPU。開けなければ
+                                              OpenGL → DirectX 12 のソフトウェア描画 WARP の順に開き直す)
+zahyou.exe --selftest <画像> [--offline|--online] [--out f]   自己診断(解析を 2 回 + 画面の項目。25 項目)
 zahyou.exe --shot <png> [--tab run|env|help] [--run] [--blind] [--image p] [--out-tab orig|northup|log]
-           [--dark|--light] [--size WxH]       画面を自分で撮って閉じる
+           [--dark|--light] [--size WxH] [--left-end]   画面を自分で撮って閉じる(--left-end は［解析］の左の列を
+                                              いちばん下 = API キーの欄まで送って撮る)
 zahyou.exe --bench [--out f.json]             解析の段ごとの速さ(ZAHYOU_BENCH_IMAGES に ; 区切りで画像)
 zahyou.exe --bench-gui [<画像>] [--out f]     画面まわりの速さ
+zahyou.exe --bench-ui <画像> [--glow|--dx12] [--gpu …] [--mem lean|perf] [--no-vsync] [--cycles N] [--out f.json]
+                                              描画方式の物差し(本物の窓で図を自動で動かす。docs/rust-port.md 9 節)
 zahyou.exe --engine-check / --update-check [--out f]
-隠し: --debug-wcs <.wcs>(オフライン解析の代わりにその WCS を解にする)・--glow(OpenGL で描く)・--first-frame <txt>
+隠し: --debug-wcs <.wcs>(オフライン解析の代わりにその WCS を解にする)・--first-frame <txt>・--no-startup-checks・
+      --mem lean|perf・--no-vsync・--no-hw(OpenGL をハードウェア支援なしで開く)・--render-step N(開き直しが自分で付ける)
 ```
 
 exe は windows サブシステムなので、結果はコンソールに出ないことがある。`--out` のファイルを見る。
+
+- **オンライン解析の API キー**: ［解析］の「API キー」の欄(gui.json の `api_key`)。初めは作者の既定のキー
+  (環境変数 ASTROMETRY_API_KEY があればそちら)が入っている。そのため「自動」は、ネットがあれば nova.astrometry.net に
+  星の位置を送る(解けなければ画像も。v6 と同じ)。`--shot --run` で撮るときや試しに解かせるときに外へ送りたくなければ、
+  一時の gui.json の `"solve"` を `"オフラインのみ"` にするか、`"api_key": ""` を書いておく。`--selftest --offline` は送らない。
+- 版名は `Cargo.toml` の `[workspace.package] version` だけで決まる(`v` を付けたものが画面・ログ・更新の確認の版名。
+  exe の版情報も同じ)。`-beta.N` などのプレリリースの版は窓の題・起動のログ・［使い方］に「β版」と添え、更新の確認は
+  GitHub のプレリリースも含めて同じ大きな版(v7)の新しいものを探す。`-dev` で終わる版は更新を確かめない。
 
 ## 照合値を作り直す(Python 基準実装 = リポジトリの dev/)
 

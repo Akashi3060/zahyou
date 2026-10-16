@@ -2,8 +2,8 @@
 //!
 //!   zahyou.exe --selftest <画像> [--online|--offline] [--out f]
 //!
-//! 画面を組み立て、解析を 2 回(目標あり・完全ブラインド)通し、3 つの数字・図・ログ・状態バー・
-//! 部品のはみ出し・下のバー・配色の切り替えを見る。利用者の設定(gui.json)には書かない。
+//! 画面を組み立て、解析を 2 回(目標あり・完全ブラインド)通し、API キーの欄(値は出さない)・3 つの数字・図・ログ・
+//! 状態バー・部品のはみ出し・下のバー・配色の切り替えを見る。利用者の設定(gui.json)には書かない。
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -63,6 +63,9 @@ pub fn run(image: &Path, target: &str, force: Option<Solve>, debug_wcs: Option<s
     rig.frame();
     check("画面が組み立てられる", true, String::new());
     check("日本語のフォントを読める", rig.app.fonts.ui.is_some(), rig.app.fonts.summary());
+    // ［解析］の枠の API キーの欄(値は出さない。長さと既定のキーとの一致だけ)
+    let (ok, msg) = super::run_tab::api_key_selftest(&rig.app);
+    check("API キーの欄がある", ok, msg);
 
     let surveyed = rig.pump(120.0, |a| a.env_state.is_some());
     let ready = rig.app.env_state.as_ref().is_some_and(|s| s.ready);
@@ -113,6 +116,8 @@ pub fn run(image: &Path, target: &str, force: Option<Solve>, debug_wcs: Option<s
         rig.size = size;
         for tab in [TopTab::Run, TopTab::Env, TopTab::Help] {
             rig.app.tab = tab;
+            // ［解析］の左の列はスクロールする。小さい窓で下に隠れる欄(API キー)も、いちばん下まで送れば窓に入るかを見る
+            rig.app.scroll_left_end = tab == TopTab::Run;
             rig.frame();
             rig.frame();
             let win = Rect::from_min_size(Pos2::ZERO, size);
@@ -126,6 +131,7 @@ pub fn run(image: &Path, target: &str, force: Option<Solve>, debug_wcs: Option<s
             }
         }
     }
+    rig.app.scroll_left_end = false;
     outside.dedup();
     over.dedup();
     check("部品が窓の中にある", outside.is_empty(), outside.join(" / ").chars().take(90).collect());

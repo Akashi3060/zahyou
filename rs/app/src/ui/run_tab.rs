@@ -1,11 +1,58 @@
 //! [解析] タブ: 上段(画像・参照・実行・中止)、左の列(目標・望遠鏡・解析)、右の結果欄。
 
 use eframe::egui::{self, RichText, TextEdit};
+use zahyou_net::nova::ApiKey;
 
 use super::app::{Action, ZahyouApp, fig_index};
 use super::fonts::{self, pt};
 use super::settings::{Mode, ResultTab, SOLVE_CHOICES};
 use super::widgets::{self, Placed};
+
+/// ［解析］タブの API キーの欄の見出し
+pub const API_KEY_LABEL: &str = "API キー (nova.astrometry.net)";
+/// 自己診断が部品の記録(placed)で欄を探すときの名前
+pub const API_KEY_FIELD: &str = "API キー";
+/// 欄の egui の id(並びの順から決まる自動の id にせず固定する。上に部品が増えても入力中の状態が保たれる)
+const API_KEY_FIELD_ID: &str = "api_key_field";
+
+/// 自己診断の「API キーの欄がある」(［解析］タブを描いたあとに呼ぶ)。
+///
+/// 欄・「表示」・「元に戻す」が部品の記録にあり、伏せ字で、初めの値(環境変数 ASTROMETRY_API_KEY、無ければ既定のキー)が
+/// 入っていれば通る。補足にキーの値は書かず、長さと既定のキーとの一致だけを書く。
+pub fn api_key_selftest(app: &ZahyouApp) -> (bool, String) {
+    let has = |n: &str| app.placed.iter().any(|p| p.name == n);
+    let field = has(API_KEY_FIELD) && has("表示") && has("元に戻す");
+    let k = &app.s.api_key;
+    let n = k.expose().chars().count();
+    let what = if k.usable().is_none() {
+        "空".to_string()
+    } else if k.is_default() {
+        format!("既定のキーと一致 ({n} 文字)")
+    } else if zahyou_net::api_key_from_env().is_some_and(|e| k.usable() == Some(e.as_str())) {
+        format!("環境変数 ASTROMETRY_API_KEY のキー ({n} 文字)")
+    } else {
+        format!("既定のキーと違う ({n} 文字)")
+    };
+    let ok = field && !app.show_api_key && *k == ApiKey::initial();
+    let msg = format!(
+        "{} / {} / {what}",
+        if field { "欄あり" } else { "欄が見つからない" },
+        if app.show_api_key { "伏せ字でない" } else { "伏せ字" }
+    );
+    (ok, msg)
+}
+
+/// 欄の下の短い説明(キーの値は書かない。既定か・自分のキーか・空か と、どの方法で使うか)
+pub fn api_key_note(k: &ApiKey) -> String {
+    const USE: &str = "方法が「自動」「オンラインのみ」のときに使います。";
+    if k.usable().is_none() {
+        "空です。「自動」は問い合わせずにオフラインで解き、「オンラインのみ」は始められません。".to_string()
+    } else if k.is_default() {
+        format!("既定のキー (作者のもの) です。{USE}")
+    } else {
+        format!("自分のキーです。{USE}")
+    }
+}
 
 impl ZahyouApp {
     pub fn run_tab(&mut self, ui: &mut egui::Ui) {
@@ -45,8 +92,18 @@ impl ZahyouApp {
             .width_range(280.0..=560.0)
             .frame(egui::Frame::new().inner_margin(egui::Margin { left: 0, right: 8, top: 0, bottom: 0 }))
             .show_inside(ui, |ui| {
-                let area = egui::ScrollArea::vertical().id_salt("run_left_scroll").auto_shrink([false, false]);
-                widgets::scroll(ui, th, area, |ui| self.run_left(ui));
+                let mut area = egui::ScrollArea::vertical().id_salt("run_left_scroll").auto_shrink([false, false]);
+                // 自己診断: いちばん下(API キーの欄)まで送って描く(小さい窓では下に隠れる。送れば窓に入るかを見る)。
+                // 送る量は前の 1 枚で測ったもの。scroll_to_cursor は 2 枚あとにしか効かないので使わない
+                if self.scroll_left_end {
+                    area = area.vertical_scroll_offset(self.left_scroll_max);
+                }
+                widgets::scroll(ui, th, area, |ui| {
+                    self.run_left(ui);
+                    // 送れる量 = 中身の高さ − 見えている高さ(見えている枠は上下に clip_rect_margin ずつ広い)
+                    let view_h = ui.clip_rect().height() - 2.0 * ui.visuals().clip_rect_margin;
+                    self.left_scroll_max = (ui.min_rect().height() - view_h).max(0.0);
+                });
             });
 
         // --- 右: 結果 -------------------------------------------------------------
@@ -151,6 +208,38 @@ impl ZahyouApp {
                 let e = ui.add(TextEdit::singleline(&mut self.s.t_offline).desired_width(52.0));
                 rects.push(("オフライン".to_string(), e.rect));
             });
+            // --- API キー(オンライン解析)。既定は伏せ字、「表示」で見える。「元に戻す」で作者の既定のキーへ ---
+            // 欄・「表示」・「元に戻す」を 1 行に並べ、欄は残りの幅(枠の幅が 280 でも、はみ出さない)
+            ui.add_space(8.0);
+            ui.label(API_KEY_LABEL);
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let b = ui
+                        .add_enabled(!self.s.api_key.is_default(), egui::Button::new("元に戻す"))
+                        .on_hover_text("作者の既定のキー (v6 と同じもの) に戻します");
+                    if b.clicked() {
+                        self.s.api_key = ApiKey::default_key();
+                        self.save_settings();
+                    }
+                    rects.push(("元に戻す".to_string(), b.rect));
+                    let c = ui.checkbox(&mut self.show_api_key, "表示");
+                    rects.push(("表示".to_string(), c.rect));
+                    let e = ui.add(
+                        TextEdit::singleline(self.s.api_key.edit())
+                            .id_salt(API_KEY_FIELD_ID)
+                            .password(!self.show_api_key)
+                            .hint_text("空 (問い合わせない)")
+                            .font(fonts::path(pt(10.0)))
+                            .desired_width(ui.available_width()),
+                    );
+                    // 入れ終えたら覚える(閉じる前に落ちても消えないように)
+                    if e.lost_focus() {
+                        self.save_settings();
+                    }
+                    rects.push((API_KEY_FIELD.to_string(), e.rect));
+                });
+            });
+            wrap_note(ui, &api_key_note(&self.s.api_key));
             ui.add_space(10.0);
             if !self.lbl_env.is_empty() {
                 widgets::muted(ui, th, &self.lbl_env);
@@ -206,5 +295,118 @@ impl ZahyouApp {
                 );
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::app::{ONLINE_NEEDS_KEY, Options, TopTab};
+    use crate::ui::settings::Solve;
+    use eframe::egui::{Pos2, RawInput, Rect, vec2};
+    use zahyou_net::nova::DEFAULT_API_KEY;
+
+    /// 窓を出さない画面(確認はいつも「キャンセル」、設定は一時ファイルで保存しない)
+    fn headless(fonts_on: bool) -> (egui::Context, ZahyouApp) {
+        crate::ui::settings::override_path(std::env::temp_dir().join("zahyou-test-cancel.json"));
+        let ctx = egui::Context::default();
+        // 本物の画面と同じ書体・文字の大きさ・間隔(自己診断と同じ)
+        let report = if fonts_on {
+            let (defs, report) = fonts::build();
+            ctx.set_fonts(defs);
+            report
+        } else {
+            Default::default()
+        };
+        crate::ui::style::apply(&ctx);
+        let opts = Options { headless: true, debug_wcs: None, no_startup_checks: true, no_save: true };
+        let app = ZahyouApp::new(&ctx, report, opts);
+        (ctx, app)
+    }
+
+    /// 1 枚描いて、描いた文字を全部返す
+    /// `ppp` は画面の拡大率(Windows の表示スケール 100%・150%・200% = 1.0・1.5・2.0)。窓の大きさは論理 pt
+    fn frame_texts(ctx: &egui::Context, app: &mut ZahyouApp, size: egui::Vec2, ppp: f32) -> Vec<String> {
+        let mut input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), ..Default::default() };
+        input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(ppp);
+        let out = ctx.run(input, |ctx| app.frame(ctx));
+        fn walk(s: &egui::Shape, acc: &mut Vec<String>) {
+            match s {
+                egui::Shape::Text(t) => acc.push(t.galley.text().to_string()),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, acc)),
+                _ => {}
+            }
+        }
+        let mut acc = Vec::new();
+        for c in &out.shapes {
+            walk(&c.shape, &mut acc);
+        }
+        acc
+    }
+
+    #[test]
+    fn api_キーの欄は伏せ字で_最小の窓でも枠に収まる() {
+        let (ctx, mut app) = headless(true);
+        app.tab = TopTab::Run;
+        app.s.api_key = ApiKey::default_key();
+        // 自己診断と同じく、準備タブを調べ終えたあと(枠の下に 1 行増えている)
+        app.lbl_env = "オフライン解析: 使えます / 解ける画角 4′〜2000′".into();
+        for (size, ppp) in [(vec2(1180.0, 780.0), 1.0), (vec2(1000.0, 660.0), 1.0), (vec2(1000.0, 660.0), 1.5), (vec2(1000.0, 660.0), 2.0)] {
+            // 左の列をいちばん下まで送って 2 枚描く(1 枚目で送れる量を測り、2 枚目でそこまで送る)
+            app.scroll_left_end = true;
+            frame_texts(&ctx, &mut app, size, ppp);
+            let texts = frame_texts(&ctx, &mut app, size, ppp);
+            assert_eq!(ctx.pixels_per_point(), ppp);
+            // 画面に描いた文字にキーの値が無い(伏せ字)。値は失敗の文にも入れない
+            assert!(texts.iter().all(|t| !t.contains(DEFAULT_API_KEY)), "伏せ字のはずの欄にキーの値が描かれた");
+            assert!(texts.iter().any(|t| t.contains(&"•".repeat(16))), "伏せ字 (16 文字) が描かれていない");
+            assert!(texts.iter().any(|t| t == API_KEY_LABEL), "欄の見出しが無い");
+            let win = Rect::from_min_size(Pos2::ZERO, size);
+            for name in [API_KEY_FIELD, "表示", "元に戻す"] {
+                let p = app.placed.iter().find(|p| p.name == name).unwrap_or_else(|| panic!("{name} が置かれていない"));
+                assert!(win.contains_rect(p.rect), "{name} が窓の外 ({size:?} 拡大率 {ppp}): {:?}", p.rect);
+                assert!(p.frame.expand(1.0).contains_rect(p.rect), "{name} が［解析］の枠からはみ出た ({size:?} 拡大率 {ppp})");
+            }
+            let (ok, msg) = api_key_selftest(&app);
+            assert_eq!(msg, "欄あり / 伏せ字 / 既定のキーと一致 (16 文字)");
+            // 環境変数 ASTROMETRY_API_KEY があれば、初めの値はそちら(既定のキーの欄は「初めの値と違う」になる)
+            if zahyou_net::api_key_from_env().is_none() {
+                assert!(ok, "{msg}");
+            }
+        }
+        // 「表示」にすると見える(描いた文字を拾えていることの確かめ。値は書かない)
+        app.show_api_key = true;
+        let texts = frame_texts(&ctx, &mut app, vec2(1180.0, 780.0), 1.0);
+        assert!(texts.iter().any(|t| t.contains(DEFAULT_API_KEY)), "「表示」でキーが見えない");
+        let (ok, msg) = api_key_selftest(&app);
+        assert!(!ok && msg.contains("伏せ字でない"), "{msg}");
+    }
+
+    #[test]
+    fn api_キーが空でオンラインのみなら始めない() {
+        let (_ctx, mut app) = headless(false);
+        app.s.image = std::env::current_exe().unwrap().display().to_string();
+        app.s.mode = crate::ui::settings::Mode::None;
+        app.s.solve = Solve::Online;
+        for blank in ["", "  "] {
+            app.s.api_key = ApiKey::new(blank);
+            app.start_analysis(None);
+            assert!(!app.busy, "空のキーで始めた");
+            assert_eq!(app.dialogs.last().map(String::as_str), Some(ONLINE_NEEDS_KEY));
+        }
+        assert!(ONLINE_NEEDS_KEY.starts_with("API キーが空です。"));
+    }
+
+    #[test]
+    fn 欄の説明にキーの値を書かない() {
+        let def = api_key_note(&ApiKey::default_key());
+        assert!(def.starts_with("既定のキー (作者のもの) です。"), "{def}");
+        let own = api_key_note(&ApiKey::new("my-own-key-0123"));
+        assert!(own.starts_with("自分のキーです。") && !own.contains("my-own-key-0123"), "{own}");
+        let empty = api_key_note(&ApiKey::new(" "));
+        assert!(empty.starts_with("空です。"), "{empty}");
+        for t in [def, own, empty] {
+            assert!(!t.contains(DEFAULT_API_KEY));
+        }
     }
 }

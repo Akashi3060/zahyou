@@ -22,6 +22,17 @@ use crate::APP_VER;
 
 pub const APP_NAME: &str = "zahyou";
 
+/// 起動したときのログの 1 行目(例「zahyou v7.0.0-beta.1 (β版・Rust 版)   フォント: …」。正式版なら「(Rust 版)」)。
+/// 窓を開いていれば、次の行に描き方と GPU(`RENDER_INFO`)を書く。
+/// 解析ログの見出し(pipeline の「  zahyou 版   画像名」)は Python の基準値と比べる行なので、そちらには添えない
+pub fn startup_line(fonts: &str) -> String {
+    let kind = match zahyou_net::update::prerelease_label(APP_VER) {
+        Some(l) => format!("{l}・Rust 版"),
+        None => "Rust 版".to_string(),
+    };
+    format!("{APP_NAME} {APP_VER} ({kind})   フォント: {fonts}")
+}
+
 /// 上のタブ
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TopTab {
@@ -76,8 +87,8 @@ pub struct Options {
 /// 結果の 3 つの数字の見出しの既定
 pub const CAPS_TARGET: [&str; 3] = ["画像中心から目標までの距離", "赤経 (RA) 方向", "赤緯 (Dec) 方向"];
 pub const DETAIL_START: &str = "画像を選んで「解析を実行」を押してください。";
-/// 「オンラインのみ」で API キーが無いときの知らせ
-pub const ONLINE_NEEDS_KEY: &str = "「オンラインのみ」には nova.astrometry.net の API キーが要ります。\n環境変数 ASTROMETRY_API_KEY にキーを入れてから zahyou を起動し直すか、\n[解析] の「方法」を「自動」か「オフラインのみ」にしてください。";
+/// 「オンラインのみ」で API キーの欄が空のときの知らせ(始めない)
+pub const ONLINE_NEEDS_KEY: &str = "API キーが空です。\n「オンラインのみ」には nova.astrometry.net の API キーが要ります。\n[解析] の「API キー」の欄に入れるか (「元に戻す」で既定のキーに戻ります)、\n「方法」を「自動」か「オフラインのみ」にしてください。";
 
 pub struct ZahyouApp {
     pub s: Settings,
@@ -113,6 +124,14 @@ pub struct ZahyouApp {
     pub env_rows: [(Option<bool>, String); 3],
     pub lbl_env: String,
     pub marks: BTreeMap<u32, bool>,
+
+    // --- 解析の枠 ---
+    /// API キーの欄を伏せ字にせず見せる(覚えない。起動するたびに伏せ字)
+    pub show_api_key: bool,
+    /// 自己診断: ［解析］タブの左の列をいちばん下まで送って描く(小さい窓で下に隠れる欄も、送れば窓に入るかを見る)
+    pub scroll_left_end: bool,
+    /// ［解析］タブの左の列を送れる量 [pt](描くたびに測る。scroll_left_end のときに使う)
+    pub left_scroll_max: f32,
 
     // --- 更新 ---
     pub update_msg: String,
@@ -170,6 +189,9 @@ impl ZahyouApp {
             env_rows: [(None, "未確認".into()), (None, "未確認".into()), (None, "未確認".into())],
             lbl_env: String::new(),
             marks,
+            show_api_key: false,
+            scroll_left_end: false,
+            left_scroll_max: 0.0,
             update_msg: String::new(),
             update_state: None,
             update_can_apply: false,
@@ -190,7 +212,11 @@ impl ZahyouApp {
 
     // ============================================================ 起動時 ===
     fn startup(&mut self) {
-        self.log_run_line(&format!("{APP_NAME} {APP_VER} (Rust 版)   フォント: {}", self.fonts.summary()));
+        self.log_run_line(&startup_line(&self.fonts.summary()));
+        // 開いた描き方と GPU(問い合わせのときに分かるように。窓を出さない自己診断・試験では空)
+        if let Some(r) = crate::RENDER_INFO.get() {
+            self.log_run_line(&format!("描画: {r}"));
+        }
         if self.opts.no_startup_checks {
             return;
         }
@@ -464,9 +490,9 @@ impl ZahyouApp {
             self.warn(host, &m);
             return;
         }
-        // 「オンラインのみ」は API キーが無いと必ず解けない(Rust 版はキーをソースに持たない)
-        if self.s.solve == super::settings::Solve::Online && zahyou_net::api_key_from_env().is_none() {
-            self.warn(host, ONLINE_NEEDS_KEY);
+        // 「オンラインのみ」は API キーの欄が空だと必ず解けない(「自動」は問い合わせを飛ばしてオフラインで解く)
+        if let Some(m) = bridge::api_key_problem(&self.s) {
+            self.warn(host, m);
             return;
         }
         if self.busy {

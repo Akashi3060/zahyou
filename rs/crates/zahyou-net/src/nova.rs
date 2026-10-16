@@ -7,7 +7,10 @@
 //! 3. 1 秒ごとに `GET api/submissions/<subid>` → `jobs[0]`、`GET api/jobs/<job>/info` → `status`
 //! 4. `success` なら `GET wcs_file/<job>`(FITS のヘッダー)
 //!
-//! API キーはソースに書かない。呼ぶ側が引数で渡す([`api_key_from_env`] で環境変数 ASTROMETRY_API_KEY を読める)。
+//! API キーは呼ぶ側が引数で渡す。画面の「API キー」の欄の初めの値は [`DEFAULT_API_KEY`](作者のキー。v6 と同じ)で、
+//! 環境変数 ASTROMETRY_API_KEY があればそちら([`initial_api_key`])。利用者は欄で自分のキーに替えられる。
+//! キーの値はログ・エラーの文・自己診断に出さない: [`ApiKey`] の Debug は伏せ字にし、nova の応答やエラーの文に
+//! キーが混じっていれば [`redact_key`] で伏せてから返す。
 //! 星のリストは Python 版と同じく 1 始まり(FITS 規約)に直して送る。明るい順に並べて渡すこと。
 //!
 //! 中止: 要求はどれも別のスレッドで投げ、50 ms ごとに中止の合図を見ながら応答を待つ(中止なら待たずに戻る。
@@ -19,6 +22,7 @@ use crate::pyfmt::{py_json, py_urlencode};
 use crate::NetError;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
+use std::fmt;
 use std::io::Read;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,13 +34,107 @@ pub const NOVA_URL: &str = "https://nova.astrometry.net";
 /// API キーを入れる環境変数
 pub const API_KEY_ENV: &str = "ASTROMETRY_API_KEY";
 
+/// 既定の API キー(作者のもの)。v6 の gui/zahyou_gui.py の `_params` と dev/nb_settings.py の既定値と同じ。
+///
+/// 画面の「API キー」の欄の初めの値で、欄の「元に戻す」もこれに戻す(2026-10-16 にユーザーが決めた)。
+/// 利用者は nova.astrometry.net に登録して得た自分のキーに替えられる。v6 のソースで公開済みの値だが、
+/// ログ・画面の文・自己診断・試験の出力には値を出さない(出すのは長さと一致だけ。[`ApiKey::describe`])。
+pub const DEFAULT_API_KEY: &str = "axvhxwfkvnzreobn";
+
 /// 環境変数 ASTROMETRY_API_KEY の API キー(空なら None)。
 pub fn api_key_from_env() -> Option<String> {
     std::env::var(API_KEY_ENV).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
-/// オンライン解析の依頼(Python の `solve_online` の引数と同じ意味)。
-#[derive(Clone, Debug)]
+/// 設定に API キーが無いとき(初めて起動したとき・v6 の gui.json)の初めの値:
+/// 環境変数 ASTROMETRY_API_KEY があればそれ、無ければ [`DEFAULT_API_KEY`](v6 の `os.environ.get(…, 既定)` と同じ)。
+pub fn initial_api_key() -> String {
+    api_key_from_env().unwrap_or_else(|| DEFAULT_API_KEY.to_string())
+}
+
+/// API キーの値。Debug では値を伏せる(試験の失敗の表示や、設定・解析の条件を `{:?}` で書いたときに値が出ないように)。
+/// 値を文字列に直す Display は持たない。値は [`ApiKey::expose`](nova へ送るときと入力欄)でだけ取り出す。
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct ApiKey(String);
+
+impl ApiKey {
+    pub fn new(s: impl Into<String>) -> ApiKey {
+        ApiKey(s.into())
+    }
+
+    /// 既定のキー([`DEFAULT_API_KEY`])。画面の「元に戻す」
+    pub fn default_key() -> ApiKey {
+        ApiKey(DEFAULT_API_KEY.to_string())
+    }
+
+    /// 設定に無いときの初めの値([`initial_api_key`])
+    pub fn initial() -> ApiKey {
+        ApiKey(initial_api_key())
+    }
+
+    /// 値そのもの(nova へ送るとき・画面の入力欄だけで使う。ログや文に入れない)
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+
+    /// 画面の入力欄で書き換えるための中身
+    pub fn edit(&mut self) -> &mut String {
+        &mut self.0
+    }
+
+    /// 前後の空白を除いた値。空なら None(問い合わせない)
+    pub fn usable(&self) -> Option<&str> {
+        Some(self.0.trim()).filter(|s| !s.is_empty())
+    }
+
+    /// 既定のキー(作者のもの)と同じか(前後の空白は見ない)
+    pub fn is_default(&self) -> bool {
+        self.0.trim() == DEFAULT_API_KEY
+    }
+
+    /// 値を出さない説明(自己診断・画面の注記用): 「空」「既定のキー (16 文字)」「既定と違うキー (N 文字)」
+    pub fn describe(&self) -> String {
+        match self.usable() {
+            None => "空".to_string(),
+            Some(k) if k == DEFAULT_API_KEY => format!("既定のキー ({} 文字)", k.chars().count()),
+            Some(k) => format!("既定と違うキー ({} 文字)", k.chars().count()),
+        }
+    }
+}
+
+impl fmt::Debug for ApiKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ApiKey(<伏せ字 {} 文字>)", self.0.chars().count())
+    }
+}
+
+impl From<&str> for ApiKey {
+    fn from(s: &str) -> ApiKey {
+        ApiKey(s.to_string())
+    }
+}
+
+impl From<String> for ApiKey {
+    fn from(s: String) -> ApiKey {
+        ApiKey(s)
+    }
+}
+
+/// 伏せたキーの代わりに書く文字
+pub const REDACTED: &str = "(API キー)";
+
+/// 文の中の API キーを伏せる(nova の応答やエラーの文にキーが混じっていても、ログに値を出さないため)。
+/// 4 文字より短い値は伏せない(ふつうの文字まで消えてしまう。本物のキーは 16 文字)。
+pub fn redact_key(text: &str, key: &str) -> String {
+    let key = key.trim();
+    if key.chars().count() < 4 || !text.contains(key) {
+        return text.to_string();
+    }
+    text.replace(key, REDACTED)
+}
+
+/// オンライン解析の依頼(Python の `solve_online` の引数と同じ意味)。Debug では API キーを伏せる。
+#[derive(Clone)]
 pub struct OnlineRequest<'a> {
     pub api_key: &'a str,
     /// 星のリストで解けなかったときに送る画像(無ければ送らない)
@@ -53,6 +151,22 @@ pub struct OnlineRequest<'a> {
     pub hint_radius_deg: f64,
     /// 画素スケールの手がかり [″/px](0.75〜1.25 倍の範囲で探させる)
     pub scale_hint: Option<f64>,
+}
+
+impl fmt::Debug for OnlineRequest<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OnlineRequest")
+            .field("api_key", &ApiKey::new(self.api_key))
+            .field("image_path", &self.image_path)
+            .field("sources", &self.sources.map(|s| s.len()))
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("timeout_s", &self.timeout_s)
+            .field("hint_radec", &self.hint_radec)
+            .field("hint_radius_deg", &self.hint_radius_deg)
+            .field("scale_hint", &self.scale_hint)
+            .finish()
+    }
 }
 
 /// 解けた結果。
@@ -259,11 +373,9 @@ impl NovaClient {
             return Ok(());
         }
         if api_key.trim().is_empty() {
-            return Err(NetError::Failed(
-                "Astrometry.net の API キーがありません(環境変数 ASTROMETRY_API_KEY か設定で渡す)".into(),
-            ));
+            return Err(NetError::Failed("Astrometry.net の API キーが空です(画面の「API キー」の欄に入れてください)".into()));
         }
-        let v = self.post_form("login", &login_body(api_key), stop)?;
+        let v = self.post_form("login", &login_body(api_key.trim()), stop)?;
         if v.get("status").and_then(|s| s.as_str()) != Some("success") {
             return Err(NetError::Failed("Unable to log in to astrometry.net".into()));
         }
@@ -490,7 +602,18 @@ pub fn solve_online(req: &OnlineRequest, stop: &dyn Fn() -> bool, log: &dyn Fn(&
 }
 
 /// [`solve_online`] の窓口を指定する版(試験用)。
+///
+/// ログの行と失敗の文に API キーが混じっていれば伏せる([`redact_key`]。nova の応答をそのまま文に入れる箇所があるため)。
 pub fn solve_online_with(client: &mut NovaClient, req: &OnlineRequest, stop: &dyn Fn() -> bool, log: &dyn Fn(&str)) -> Result<Option<NovaSolution>, NetError> {
+    let key = req.api_key;
+    let log_safe = |m: &str| log(&redact_key(m, key));
+    solve_online_inner(client, req, stop, &log_safe).map_err(|e| match e {
+        NetError::Failed(m) => NetError::Failed(redact_key(&m, key)),
+        e => e,
+    })
+}
+
+fn solve_online_inner(client: &mut NovaClient, req: &OnlineRequest, stop: &dyn Fn() -> bool, log: &dyn Fn(&str)) -> Result<Option<NovaSolution>, NetError> {
     let fail = |e: String| NetError::Failed(e);
     let settings = hint_settings(req.hint_radec, req.hint_radius_deg, req.scale_hint);
     validate_settings(&settings).map_err(fail)?;
