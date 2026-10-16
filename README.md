@@ -1,5 +1,5 @@
 <!--
-  zahyou v7 のβ版(7.0.0-beta.1。GitHub のプレリリースで出す)の README の下書き(2026-10-16)。
+  zahyou v7 のβ版(7.0.0-beta.2。GitHub のプレリリースで出す)の README の下書き(2026-10-16)。
   2026-10-16 の決定を入れた: API キーは［解析］タブの欄(既定のキー入り)/ 描画は DirectX 12 を既定 /
   v7 は当面β版で、v6 の自動更新には出さない(1〜2 か月使ってから正式版 7.0.0)。
   画像を外へ送ることは「同意を取らずに送ってよい」と決まった(2026-10-16 の 2 回目)。何が送られるかと止め方を書く。
@@ -38,7 +38,7 @@
 > プログラムも Rust で書き直し、exe は 102 MB から約 13 MB に、起動は約 4 秒から 1 秒未満になりました。
 > しくみは [docs/design-native-solver.md](docs/design-native-solver.md) と [docs/rust-port.md](docs/rust-port.md) にあります。
 
-> **いまの v7 はβ版（7.0.0-beta.1）です。** GitHub の Releases で「Pre-release」の印が付いたものから落とします。
+> **いまの v7 はβ版（7.0.0-beta.2）です。** GitHub の Releases で「Pre-release」の印が付いたものから落とします。
 > **v6 の「更新を確認」には出てこない**ので、v6 を使っている人が知らないうちに入れ替わることはありません。
 > 1〜2 か月使って安定を確かめてから、正式版（7.0.0）として出します。v6 との行き来は[下記](#v6-とβ版)にあります。
 
@@ -46,7 +46,7 @@
 
 # ▶ まずはこちら — デスクトップ版 (exe)
 
-**[Releases（v7.0.0-beta.1）から `zahyou.exe` を落として、ダブルクリックするだけです。](https://github.com/Akashi3060/zahyou/releases/tag/v7.0.0-beta.1)**
+**[Releases（v7.0.0-beta.2）から `zahyou.exe` を落として、ダブルクリックするだけです。](https://github.com/Akashi3060/zahyou/releases/tag/v7.0.0-beta.2)**
 Python も VS Code も要りません。インストールも不要で、ファイルは 1 個だけです。
 
 <details>
@@ -148,7 +148,7 @@ Windows は「まだ広く出回っていないファイル」を見慣れない
 署名の無い、まだ広く出回っていない exe なので、誤検知されることがあります。
 その場合はウイルス対策ソフト側で `zahyou.exe` を除外に登録してください。
 
-中身を確かめたい方は、[Releases](https://github.com/Akashi3060/zahyou/releases/tag/v7.0.0-beta.1)
+中身を確かめたい方は、[Releases](https://github.com/Akashi3060/zahyou/releases/tag/v7.0.0-beta.2)
 に付けている `SHA256SUMS.txt`（と Release の本文）の SHA256 と、手元のファイルのハッシュを見比べてください。
 **確かめなくても使えます。**気になる方向けの補足です。
 
@@ -289,7 +289,7 @@ Get-FileHash .\zahyou.exe -Algorithm SHA256
 
 <img src="docs/img/app-help.png" width="860" alt="使い方タブ。上に「更新」の枠（いまの版・更新を確認・更新する・起動したときに確認する）、その下に使い方・出た数字の読み方・ネットが無いところで使う などの手引き">
 
-<!-- この写真の「いまの版」は撮った exe の版名(v7.0.0-beta.1)。版を上げたら撮り直す(docs/release-v7.md) -->
+<!-- この写真の「いまの版」は撮った exe の版名(v7.0.0-beta.2)。版を上げたら撮り直す(docs/release-v7.md) -->
 
 操作の要点と、設定の置き場所がまとまっています。
 **新しい版への入れ替えも、上の「更新を確認」→「更新する」**でできます（[下記](#入れ替える)）。
@@ -370,10 +370,10 @@ Python の図の時間は、図を作るまで（画面に描く・PNG にする
 
 ### 起動と大きさ
 
-| | exe（v7.0.0-beta.1） | v6 の exe |
+| | exe（v7.0.0-beta.2） | v6 の exe |
 |---|---|---|
-| 起動 | 最初の描画まで 0.37 〜 0.40 秒（DirectX 12、3 回）<br>0.20 〜 0.21 秒（OpenGL、3 回） | 窓が出るまで約 4 秒 |
-| 大きさ | 14,041,088 バイト（約 13 MB） | 約 102 MB |
+| 起動 | 最初の描画まで 0.35 〜 0.36 秒（DirectX 12、3 回）<br>0.19 〜 0.24 秒（OpenGL、3 回） | 窓が出るまで約 4 秒 |
+| 大きさ | 14,033,408 バイト（約 13 MB） | 約 102 MB |
 | 起動のたびの一時展開 | なし | 232 MB |
 
 ### メモリと描画
@@ -428,7 +428,7 @@ exe（Rust）とノートブック版（Python）は別々に書いたプログ�
 | `zahyou_v7_beta.ipynb` | 操作画面（3 つの短いセル） |
 | `zahyou_engine.py` | 解析の中身（開く必要はありません） |
 
-**[β版の Release（v7.0.0-beta.1）](https://github.com/Akashi3060/zahyou/releases/tag/v7.0.0-beta.1)から 2 つとも落としてください。**
+**[β版の Release（v7.0.0-beta.2）](https://github.com/Akashi3060/zahyou/releases/tag/v7.0.0-beta.2)から 2 つとも落としてください。**
 `zahyou_v7_beta.ipynb` は、リポジトリ直下の `zahyou_v6.ipynb` と同じ中身です（v6 のノートブックと紛れないよう、
 名前を変えて配っています。ノートブックはエンジンを `zahyou_engine.py` という名前で探すので、名前を変えても動きます）。
 Releases の最新と[配布ページ](https://cloud.akashi-kosaku.uk/s/M2sNsnA2K4oJ4Co)にあるのは v6 のノートブックで、
@@ -624,7 +624,7 @@ GitHub に新しい版があるかを聞き、あれば落として入れ替え�
 v6 で方法を「オフライン (WSL) のみ」にしていたら、v7 でも「オフラインのみ」として読みます
 （設定ファイルには v6 と同じ書き方で書くので、v6 に戻しても方法は変わりません）。
 星図データも**そのままで構いません**（v6 と同じ物を同じ場所で使います）。
-いま使っている版はウィンドウの題（`zahyou v7.0.0-beta.1 (β版) — …` のように）で分かります。
+いま使っている版はウィンドウの題（`zahyou v7.0.0-beta.2 (β版) — …` のように）で分かります。
 
 ### v6 とβ版
 

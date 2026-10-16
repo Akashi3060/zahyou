@@ -1,6 +1,6 @@
 """
 天体画像解析プログラム「zahyou」導入・運用マニュアル v4 を PDF で作る。
-(v4 = zahyou v7(いまはβ版 7.0.0-beta.1)。デスクトップ版は Rust の exe、オフライン解析は zahyou の中のエンジン。
+(v4 = zahyou v7(いまはβ版 7.0.0-beta.2)。デスクトップ版は Rust の exe、オフライン解析は zahyou の中のエンジン。
  2026-10 の下書き。2026-10-16 の決定(API キーの欄・DirectX 12 を既定・β版)を入れた)
 
   python make_manual.py [出力先.pdf]
@@ -206,7 +206,7 @@ def build(out_path):
          "（0.5 〜 4 メガ画素の実写。v6 の WSL 版は約 4 秒）"],
         ["exe", "約 13 MB・窓が出るまで 1 秒ほど（v6 は 102 MB・約 4 秒）"],
         ["対応する画角", "4′ 〜 2000′（焦点距離およそ 4800 mm まで。v6 と同じ）"],
-        ["版", "いまは<b>β版</b>（v7.0.0-beta.1）。GitHub の Releases の「Pre-release」から落とします。"
+        ["版", "いまは<b>β版</b>（v7.0.0-beta.2）。GitHub の Releases の「Pre-release」から落とします。"
          "v6 の「更新を確認」には出てきません"],
     ], st, widths=[42 * mm, CONTENT_W - 42 * mm]))
     add(Spacer(1, 16 * mm))
@@ -1113,7 +1113,7 @@ def build(out_path):
         "（v7 はこれを消しません）。v7 が動いたら消してかまいません。",
     ], st, kind="note"))
     add(Paragraph("いま使っている版は、<b>ウィンドウの題</b>で分かります"
-                  "（「zahyou v7.0.0-beta.1 (β版) — …」）。", st.body))
+                  "（「zahyou v7.0.0-beta.2 (β版) — …」）。", st.body))
     ext(callout("ノートブック版は 2 つとも入れ替えてください", [
         "<b>zahyou_v7_beta.ipynb</b> と <b>zahyou_engine.py</b> は組で動きます。"
         "片方だけ新しくすると、設定の名前が食い違って動かなくなることがあります。",

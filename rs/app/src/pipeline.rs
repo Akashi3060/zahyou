@@ -1597,8 +1597,8 @@ mod tests {
         // ログの見出し・画面の版名・exe の ProductVersion(build.rs)は同じ「v + パッケージの版」
         assert_eq!(v, crate::APP_VER);
         assert_eq!(v, format!("v{}", env!("CARGO_PKG_VERSION")));
-        if env!("CARGO_PKG_VERSION") == "7.0.0-beta.1" {
-            assert_eq!(v, "v7.0.0-beta.1");
+        if env!("CARGO_PKG_VERSION") == "7.0.0-beta.2" {
+            assert_eq!(v, "v7.0.0-beta.2");
         }
         // 更新の確認が版を読めること(読めないと、正式版の扱い = GitHub の latest だけを見ることになる)
         let parsed = zahyou_net::update::parse_version(&v).unwrap_or_else(|| panic!("版名を読めません: {v}"));
