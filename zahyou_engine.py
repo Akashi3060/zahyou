@@ -4589,13 +4589,19 @@ def solve_online(image_path, api_key, sources=None, shape=None, timeout=120,
     cancel (threading.Event か、呼ぶと True を返す関数) が立てば 0.5 秒以内に None で戻り、
     画像そのものは送らない (中止を押した人の画像を、押したあとに外へ送らない)。
     nova が「解けない」と空の結果を返したときも None (成功扱いにしてオフラインを飛ばさない)。
+
+    送るときは必ず「公開しない」(publicly_visible='n') を付ける。付けないと nova は公開 ('y') として
+    受け付け、画像のページや「最近送られた画像」の一覧などに、API キーの持ち主のアカウント名で載る
+    (astroquery も既定値を自分では付けない)。'n' にしても解き方は変わらない。
+    ただし 'n' でも一覧や画像ファイル・API の結果から完全には隠れない可能性がある (サーバーのコードの読み。
+    実サイトでは未確認) ので、利用者には「nova に送ったものは第三者に見られることがある」と説明している。
     """
     from astroquery.astrometry_net import AstrometryNet
     stopped = _cancel_checker(cancel)
 
     ast = AstrometryNet()
     ast.api_key = api_key
-    settings = {}
+    settings = {"publicly_visible": "n"}      # 星の位置を送るときも画像を送るときも
     if hint_radec is not None:
         settings.update(center_ra=float(hint_radec[0]),
                         center_dec=float(hint_radec[1]),
