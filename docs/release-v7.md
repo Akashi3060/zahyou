@@ -390,7 +390,7 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
     パニック位置情報が 501、glutin のビルドスクリプトが OUT_DIR に作ったものが 2、`--bench` の既定の画像が 1。資産は差し替えず(7 節の 3)、
     β2 から消す(4.1 節・下の「β2 の準備」)
 
-### β2 の準備: 作者のパスを exe から消す(2026-10-17。まだ出していない。版は 7.0.0-beta.1 のまま)
+### β2 の準備: 作者のパスを exe から消す(2026-10-17。このあと下の v7.0.0-beta.2 で出した)
 
 - 変えたもの: 4 節の `CARGO_ENCODED_RUSTFLAGS`(`--remap-path-prefix` を 2 つ。理由は 4.1 節)、`selftest::bench_real()`(`--bench` の既定の画像を
   実行時に組み立てる)、`make_release_assets.py` の paths の検査と試験(31 本)。
@@ -417,3 +417,25 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
   2 分 59 秒)、`cargo clippy --workspace --all-targets -- -D warnings` 指摘 0。`test_make_release_assets.py` 31 本(置き換えた exe を `ZAHYOU_RELEASE_EXE` で渡して。Windows の
   Python 3.13 と MSYS2 の 3.14 の両方)
 - この exe(`d262e975…0921`)は配らない。β2 は 2 節で版を上げ、4 節の手順(置き換え込み)で `target-release` に建て直す。`rs/target-check` は消してよい
+
+### v7.0.0-beta.2(2026-10-17 07:23 JST に公開。ユーザーの指示「beta で配布する exe を新しいものに更新して」)
+
+- 公開した β1 の資産は差し替えず(7 節の 3)、版を上げた新しいプレリリースで出した。β1 の exe の更新の確認に β2 が出る
+- タグ `v7.0.0-beta.2` = `native-rs` の `0b73d36`(版上げ・ノートブック・マニュアル・README・app-help.png)。exe は README・写真・マニュアルを
+  直す前の同じ木(rs/ は同じ)で建てた。Release: <https://github.com/Akashi3060/zahyou/releases/tag/v7.0.0-beta.2>
+  (本文は β1 の本文に「β1 からの変更」の節を足し、SHA256・大きさ・試験の表を直したもの。リポジトリには入れていない)
+- 建て方: 4 節のとおり `CARGO_ENCODED_RUSTFLAGS`(置き換え 2 つ)を付けて `target-release` で `cargo clean --release -p zahyou` →
+  `cargo build --release -p zahyou --locked`(2 分 36 秒)。exe 14,033,408 バイト `ae4bc3c9…4a41`。作者のホームのパス 0 か所
+  (UTF-8・UTF-16)、置き換えた位置情報 `/cargoegistry\src\…` 501・`/zahyou\…` 2
+- 試験(同じフラグ・同じ `target-release` で): `cargo test --workspace -- --include-ignored` **279 本通過・失敗 0**(16 分 48 秒)、clippy 指摘 0、
+  check_licenses・`gen_notices --check`(213 個、作り直し不要)・test_tools OK、`test_make_release_assets.py` 31 本(この exe を渡して)、
+  Python の `dev/test_online_settings.py` 14/14。exe: `--engine-check` の version= v7.0.0-beta.2、`--selftest --offline` 25/25、
+  版情報 7.0.0-beta.2・v7.0.0-beta.2・7.0.0.0・IsPreRelease True。`--first-frame` DX12 350〜355 ms・OpenGL 190〜239 ms(各 3 回。README に反映)
+- 文書: README・マニュアル v4(33 ページ、組み直し)・ノートブックの `NB_VERSION` を beta.2 に。`app-help.png` を β2 の exe で撮り直した(`--only app-help`)
+- 資産(6 節の 5 つの検査が全部 OK、`sha256sum -c` OK、GitHub の digest も全部一致): `zahyou.exe` `ae4bc3c9…4a41`、
+  `zahyou_v7_beta.ipynb` `03839c92…259d`(β1 と同じ)、`zahyou_engine.py` `54c4d0d5…22c7`、`zahyou-manual-v4.pdf` `c5a59af1…ae1a`、
+  `LICENSE.txt`・`THIRD-PARTY-NOTICES.md` は β1 と同じ
+- 出したあと: (a) latest は `v6` のまま。(b) v6 の exe の `--update-check` は「最新版です (v6 / 2026-09-17 版)」。
+  (c) β1 の exe は「新しい版があります: v7.0.0-beta.2 (2026-10-16 版 / 14 MB)」。(d) Release から落とした β2 の exe(SHA256 一致)は
+  「最新版です (v7.0.0-beta.2 / 2026-10-16 版)」。日付は GitHub の公開時刻(UTC。22:23Z)の日付なので、日本時間の 10-17 より 1 日前に見える。
+  どれも一時の設定で動かし、利用者の cache.json・gui.json の sha256 は前後で同じ。**(e) 別の PC・想定のノート PC は、β1 と同じくまだ**
