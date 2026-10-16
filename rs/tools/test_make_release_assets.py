@@ -117,6 +117,70 @@ class PeTest(unittest.TestCase):
         self.assertFalse(mra.notices_embedded(b"xx# title\nline 1\nline 3\nyy", notices))
 
 
+class PathsTest(unittest.TestCase):
+    HOME = r"C:\Users\someone"
+
+    def count(self, data: bytes, home: str = HOME) -> dict[str, int]:
+        return mra.count_home_paths(data, home)
+
+    def test_forms(self):
+        # パニック位置情報(\)・OUT_DIR の混ざった区切り(/ と \)・Debug や JSON の \\・大文字小文字・MSYS の /c/…
+        for s in (r"C:\Users\someone\.cargo\registry\src\index.crates.io-0123\tiff-0.11.3\src\lib.rs",
+                  r"C:/Users/someone/Documents/GitHub/zahyou-rs/rs/target-release\release\build\x\out/egl.rs",
+                  r"c:\\users\\SOMEONE\\Downloads\\a.fits",
+                  "/c/Users/someone/.cargo",
+                  r"C:\Users\someone"):
+            self.assertEqual(self.count(b"\x00junk" + s.encode() + b"\x00"), {"UTF-8": 1, "UTF-16": 0}, s)
+        s = r"C:\Users\someone\AppData\Local\zahyou".encode("utf-16-le")
+        self.assertEqual(self.count(b"\x00\x00" + s + b"\x00\x00"), {"UTF-8": 0, "UTF-16": 1})
+
+    def test_not_counted(self):
+        # 置き換えたあとの形・別の人・名前の続き・名前だけ(著作権の行など)は数えない
+        for s in (r"/cargo\registry\src\index.crates.io-0123\tiff-0.11.3\src\lib.rs",
+                  r"/zahyou\target-check\release\build\x\out/egl.rs",
+                  r"C:\Users\other\x", r"C:\Users\someoneelse\x", r"C:\Users\someone.old\x",
+                  r"D:\Users\someone\x", "Copyright (c) someone", r"C:\Users\<名前>\AppData"):
+            self.assertEqual(self.count(s.encode()), {"UTF-8": 0, "UTF-16": 0}, s)
+            self.assertEqual(self.count(s.encode("utf-16-le")), {"UTF-8": 0, "UTF-16": 0}, s)
+
+    def test_many_and_unicode_name(self):
+        one = r"C:\Users\someone\.cargo\x.rs".encode() + b"\x00"
+        self.assertEqual(self.count(one * 501)["UTF-8"], 501)
+        home = r"C:\Users\藤川"
+        self.assertEqual(self.count((home + r"\x").encode(), home)["UTF-8"], 1)
+        self.assertEqual(self.count((home + r"\x").encode("utf-16-le"), home)["UTF-16"], 1)
+        with self.assertRaises(ValueError):
+            mra.home_path_pattern("\\")
+
+    def test_check_paths(self):
+        with tempfile.TemporaryDirectory() as t:
+            exe = Path(t) / "zahyou.exe"
+            exe.write_bytes(b"MZ" + r"C:\Users\someone\.cargo\x.rs".encode() * 3)
+            problems = mra.check_paths(exe, [self.HOME])
+            self.assertEqual(len(problems), 1)
+            self.assertIn("3 か所", problems[0])
+            self.assertEqual(mra.check_paths(exe, [r"C:\Users\other"]), [])
+            exe.write_bytes(b"MZ" + rb"/cargo\registry\src\x.rs")
+            self.assertEqual(mra.check_paths(exe, [self.HOME]), [])
+
+    def test_home_dirs(self):
+        homes = mra.home_dirs()
+        self.assertTrue(homes)
+        key = lambda s: s.replace("\\", "/").rstrip("/").lower()  # noqa: E731
+        self.assertIn(key(str(Path.home())), [key(h) for h in homes])
+        self.assertEqual(len(homes), len({key(h) for h in homes}), "区切りだけが違うものは 1 つに")
+
+    def test_main_refuses_exe_with_home(self):
+        # ホームのパスが残った exe なら、ほかの検査を飛ばしても資産を書かない
+        with tempfile.TemporaryDirectory() as t:
+            exe = Path(t) / "zahyou.exe"
+            exe.write_bytes(b"MZ\x00" + (mra.home_dirs()[0] + r"\.cargo\registry\src\x.rs").encode())
+            out = Path(t) / "out"
+            skip = [x for c in mra.CHECKS if c != "paths" for x in ("--skip", c)]
+            self.assertEqual(mra.main(["--exe", str(exe), "--out", str(out), *skip]), 1)
+            self.assertFalse(out.exists())
+
+
 class NotebookTest(unittest.TestCase):
     def setUp(self):
         self.t = tempfile.TemporaryDirectory()
@@ -252,6 +316,11 @@ class RealExeTest(unittest.TestCase):
     def test_notices_embedded(self):
         exe = find_release_exe()
         self.assertTrue(mra.notices_embedded(exe.read_bytes(), (mra.RS_DIR / "THIRD-PARTY-NOTICES.md").read_bytes()))
+
+    def test_no_home_path(self):
+        # 手順書 4 節の --remap-path-prefix を付けて建てた exe なら 0 か所
+        exe = find_release_exe()
+        self.assertEqual(mra.check_paths(exe), [], str(exe))
 
 
 if __name__ == "__main__":

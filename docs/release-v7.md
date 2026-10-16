@@ -114,11 +114,29 @@ python -B tools/test_tools.py
 export PATH=/c/msys64/ucrt64/bin:$PATH
 cd rs
 export CARGO_TARGET_DIR=$(pwd)/target-release      # ほかのビルドと分ける(.gitignore の /target-*/)
+# 作者のホームのパスを exe に残さない(下の 4.1 節): 依存のソース(CARGO_HOME)を /cargo、rs/ を /zahyou と書き換えて建てる。
+# 区切りは \x1f(CARGO_ENCODED_RUSTFLAGS の決まり。パスに空白があっても切れない)。RUSTFLAGS より優先される
+export CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=$(cygpath -w "${CARGO_HOME:-$USERPROFILE/.cargo}")=/cargo"$'\x1f'"--remap-path-prefix=$(cygpath -w "$(pwd)")=/zahyou"
 cargo clean --release -p zahyou                    # 埋め込みの表示と版情報を確実に入れ直す
-cargo build --release -p zahyou --locked           # lto fat なので 2〜3 分
+cargo build --release -p zahyou --locked           # lto fat なので 2〜3 分(フラグを付けた初回は依存も全部建てる)
 EXE=$CARGO_TARGET_DIR/release/zahyou.exe
 ls -l "$EXE"; sha256sum "$EXE"
 rustc -vV; cargo -V; gcc --version | head -1      # Release 本文に書く(作った道具の版)
+```
+
+exe に作者のホームのパスが残っていないかを数える(0 か所でなければ、上の `CARGO_ENCODED_RUSTFLAGS` を付けずに建てている。
+6 節の `make_release_assets.py` も paths の検査で止める):
+
+```bash
+python -B - "$(cygpath -w "$EXE")" <<'EOF'
+import sys
+sys.path.insert(0, "tools")
+import make_release_assets as m
+d = open(sys.argv[1], "rb").read()
+for h in m.home_dirs():
+    print(h, m.count_home_paths(d, h))          # {'UTF-8': 0, 'UTF-16': 0} なら合格
+print("/cargo:", d.count(b"/cargo\\registry\\src\\"), "/zahyou:", d.count(b"/zahyou\\"))   # 置き換えた形(β2 の準備で 501 と 2)
+EOF
 ```
 
 試験(全部で 17 分ほど。外への問い合わせを避けるなら `ZAHYOU_OFFLINE_TESTS=1` と `--skip live`):
@@ -146,6 +164,42 @@ IMG="$USERPROFILE\\Downloads\\Capture_00001 00_10_33.fits"
   ログの 2 行目に「描画: DirectX 12 / …」が出ることを見る(上の 3 つの環境変数を設定したシェルから起動する)。
   **このとき方法が「自動」でネットがあると、既定のキーで nova へ星の位置を送る**。送りたくなければ、一時の gui.json に
   `{"api_key": ""}` か `{"solve": "オフラインのみ"}` を書いてから起動する。
+
+### 4.1 作者のパスを exe に残さない(`--remap-path-prefix`。2026-10-17、β2 から)
+
+公開した v7.0.0-beta.1 の exe には、作者のホームのパス(`C:\Users\<名前>`)が 504 か所入っていた(公開した資産は差し替えない。7 節の 3)。
+
+| どこから | 数 | 今の形 |
+|---|---|---|
+| 依存のクレートのパニック位置情報。cargo は依存のソースを CARGO_HOME の下の絶対パス(`…\.cargo\registry\src\index.crates.io-…\<クレート>-<版>\src\…`)で rustc に渡す | 501 | `/cargo\registry\src\index.crates.io-…\tiff-0.11.3\src\…` |
+| ビルドスクリプトが OUT_DIR に作って `include!` するもの(glutin_egl_sys・glutin_wgl_sys の bindings。CARGO_TARGET_DIR の下) | 2 | `/zahyou\target-release\release\build\glutin_egl_sys-…\out/egl_bindings.rs` |
+| `--bench` の既定の実写の画像(`selftest.rs` の定数) | 1 | 定数をやめ、`$ZAHYOU_TEST_IMAGES`(無ければ USERPROFILE)の `Downloads\Capture_00001 00_10_33.fits` を実行時に組み立てる(`selftest::bench_real()`。試験の画像と同じ決まり) |
+
+- ワークスペースのソースは cargo が相対パス(`app\src\main.rs`)で渡すので、もともと名前は入らない(置き換えにも当たらない)。
+  `strip = true` は記号とデバッグ情報を消すが、パニックの位置情報(ファイル名・行・列)は文字列のデータなので残る。ログの「場所: …」
+  (ui/worker.rs の panic のフック)に出るのはこれ。置き換えたあともクレート名・版・ファイル・行は読めるので、問い合わせの役には立つ。
+- rs/ は `\` の形(`cygpath -w`)で渡したが、MSYS が `C:/Users/…` の形に直した CARGO_TARGET_DIR の下のパスも置き換わった(rustc は前方一致を
+  パスの部品ごとに比べ、`\` と `/` を区別しない)。置き換えたあとの区切りは `/` と `\` が混ざるが、害はない。
+- 残る作者の名前は、MIT の著作権の行(埋め込んだ同梱物の表示)と版情報の LegalCopyright の `Yoshitaka Fujikawa` だけで、これは意図したもの。
+
+**手順書の環境変数で渡す理由**(`rs/.cargo/config.toml` に固定値を書かない):
+
+1. パスは PC と作業フォルダーごとに違う(CARGO_HOME、ワークツリー `zahyou` と `zahyou-rs`、ほかの人の PC)。固定値は書いた 1 か所でしか効かず、
+   ほかの場所では黙って何もしない。しかも作者のホームのパスをリポジトリに書くことになる。環境変数なら、その場のパスから作れる。
+2. `config.toml` の rustflags は rs/ の中の全部のビルド(試験・clippy・rust-analyzer・ほかのセッションの `rs/target`)に効き、入れた途端に
+   それらも依存から建て直しになる。プロファイルごとの rustflags と、cargo 自身がこの置き換えをする `trim-paths` は、1.94 ではまだ不安定機能
+   (`[profile.release] trim-paths = "all"` は「feature `trim-paths` is required」で止まるのを確かめた)。安定したら `trim-paths` に移す。
+3. 付け忘れても配らずに済む: 6 節の `make_release_assets.py` の paths の検査が、ホームのパスが残った exe では資産を書かない。
+
+**フラグと建て直し**(2026-10-17 に cargo 1.94 で確かめた):
+
+- cargo はフラグを指紋と成果物の名前のハッシュに入れる。付けた初回は依存も全部建てる(空の `target-check` から release で 2 分 28 秒。
+  β1 の記録の 2 分 33 秒とほぼ同じ)。付けたもの・付けないものは並べて残るので、行き来しても建て直しを繰り返さない(zahyou-wcs の試験のビルドで、
+  付ける → 付けない で 6 つ(zahyou-wcs と依存)を建て直し、そのあとの 付ける → 付けない は全部 Fresh)。
+- 環境変数はそのシェルでだけ効く。**上の試験(`cargo test`・`cargo clippy`)を同じシェルで流すと、試験のビルドにも同じ置き換えが付く**
+  (`cargo -v` で全部の rustc の呼び出しに 2 つとも付いているのを見た)。ほかのシェルの `rs/target` のビルドには効かない。
+- 付けたままでも試験は通る(10 節)。試験はパニック位置の文字列を見ていない。pipeline.rs の試験の `file!()` はワークスペースの相対パスなので、
+  置き換えに当たらない。
 
 ## 5. 画面写真とマニュアル
 
@@ -179,7 +233,7 @@ python rs/tools/make_release_assets.py --exe "$(cygpath -w $EXE)" --out "$(cygpa
 
 | 資産の名前 | 元 | 中身の検査 |
 |---|---|---|
-| `zahyou.exe` | 4 節の `$EXE`(**名前は必ず `zahyou.exe`**。更新の確認はこの名前で探す) | 版情報(FileVersion・ProductVersion・数の版・プレリリースの印)と `--engine-check` の version= が `rs/Cargo.toml` の版と同じ |
+| `zahyou.exe` | 4 節の `$EXE`(**名前は必ず `zahyou.exe`**。更新の確認はこの名前で探す) | 版情報(FileVersion・ProductVersion・数の版・プレリリースの印)と `--engine-check` の version= が `rs/Cargo.toml` の版と同じ。**建てた人のホームのパス(USERPROFILE)が 0 か所**(paths。区切り `\` `/`・MSYS の `/c/…`・大文字小文字・UTF-8 と UTF-16 のどれでも数える。4.1 節) |
 | `zahyou_v7_beta.ipynb` | リポジトリ直下の `zahyou_v6.ipynb`(v6 と紛れないよう版の名前で。正式版なら `zahyou_v7.ipynb`) | セルの並びと中身が `dev/build_nb.py` の出力と同じ(出力の例はリポジトリのものを残す) |
 | `zahyou_engine.py` | リポジトリ直下 | `dev/build_nb.py` の出力と同じ・`NB_VERSION` が `"v"` + `rs/Cargo.toml` の版 |
 | `zahyou-manual-v4.pdf` | `天体画像解析プログラム「zahyou」導入・運用マニュアルv4.pdf` | `dev/make_manual.py` で組み直したものとバイト単位で同じ |
@@ -187,11 +241,13 @@ python rs/tools/make_release_assets.py --exe "$(cygpath -w $EXE)" --out "$(cygpa
 | `THIRD-PARTY-NOTICES.md` | `rs/THIRD-PARTY-NOTICES.md`(exe の［使い方］タブでも読める) | exe に埋め込んだものと同じ・`gen_notices.py --check` で最新 |
 | `SHA256SUMS.txt` | 上の 6 つの SHA256(`sha256sum -c` の形、LF) | 書いたあと読み直して照合 |
 
-- 検査が 1 つでも落ちたら、何も書かずに終了コード 1。`--skip version|notices|manual|notebook` は試しのとき用(最後に「確かめていない」と出る)。
+- 検査が 1 つでも落ちたら、何も書かずに終了コード 1。`--skip version|paths|notices|manual|notebook` は試しのとき用(最後に「確かめていない」と出る)。
+- paths の検査は、この道具を走らせた PC の USERPROFILE を探す(exe を建てた PC で走らせる前提)。
 - 出力先は、空か無いフォルダーで、リポジトリの外に限る(直下に .gitignore が無いので)。
 - 文字のファイル(.ipynb・.py・.txt・.md)は改行を LF にそろえて書く(作業ツリーが CRLF でも SHA256 が変わらない。`LICENSE.txt` は
   v6 の Release のものと同じ SHA256 になった)。exe と PDF はそのまま写す。
-- 試験: `python -B rs/tools/test_make_release_assets.py`(release の exe があれば `ZAHYOU_RELEASE_EXE` で渡すと版情報も確かめる)。
+- 試験: `python -B rs/tools/test_make_release_assets.py`(release の exe があれば `ZAHYOU_RELEASE_EXE` で渡すと版情報・同梱物の表示・
+  ホームのパスが無いことも確かめる。31 本。4 節の置き換えを付けずに建てた exe なら、ホームのパスの試験が落ちる)。
 - 2026-10-16 に、`7.0.0-beta.1`(help_tab.rs を直したあとの release の exe、14,039,040 バイト)で 4 つの検査が通り、`sha256sum -c` で 6 つとも OK。
   公開しない指定を入れたあと(exe 14,041,088 バイト・マニュアル v4 を組み直したもの)も同じく通った(rust-port.md 10.10)。
   **ノートブックの資産(`zahyou_v7_beta.ipynb`・`zahyou_engine.py`)は、Python 版の公開しない指定(native-solver)を取り込んで
@@ -330,3 +386,34 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
   - Git Bash の `python` が MSYS2 UCRT64 の Python 3.14 を指していて、reportlab が無く manual の検査が落ちた(資産は書かれない)。
     `make_release_assets.py` は Windows の Python 3.13(`%LOCALAPPDATA%\Programs\Python\Python313\python.exe`)で走らせる
   - 画面写真(14:24 に撮影)のあとに［使い方］の手引きの文が増えたが、`app-help.png` に写る範囲(上の 3 節)は変わっていないので撮り直していない
+  - (2026-10-17 に見つけた)公開した exe(`fc39b8d8…`)に**作者のホームのパス `C:\Users\<名前>` が 504 か所**入っていた。依存のクレートの
+    パニック位置情報が 501、glutin のビルドスクリプトが OUT_DIR に作ったものが 2、`--bench` の既定の画像が 1。資産は差し替えず(7 節の 3)、
+    β2 から消す(4.1 節・下の「β2 の準備」)
+
+### β2 の準備: 作者のパスを exe から消す(2026-10-17。まだ出していない。版は 7.0.0-beta.1 のまま)
+
+- 変えたもの: 4 節の `CARGO_ENCODED_RUSTFLAGS`(`--remap-path-prefix` を 2 つ。理由は 4.1 節)、`selftest::bench_real()`(`--bench` の既定の画像を
+  実行時に組み立てる)、`make_release_assets.py` の paths の検査と試験(31 本)。
+- 確かめ方: 4 節の手順で `CARGO_TARGET_DIR=rs/target-check`(試しの置き場。.gitignore の `/target-*/`)に release を建てた(2 分 28 秒。
+  `cargo build -v` の rustc の呼び出し 274 回の全部に 2 つとも付いた)。exe のバイト列を Python で数えた結果:
+
+| | β1 の exe(公開したもの) | 置き換えて建てた exe |
+|---|---|---|
+| 大きさ | 14,041,088 バイト | 14,033,408 バイト |
+| `C:\Users\yoshi` | 502 | **0** |
+| `C:/Users/yoshi` | 2 | **0** |
+| `yoshi`(小文字のまま) | 504 | **0** |
+| `/cargo\registry\src\index.crates.io-…`(依存のパニック位置情報) | 0 | 501 |
+| `/zahyou\target-check\release\build\glutin_*_sys-…\out/…`(OUT_DIR) | 0 | 2 |
+| ワークスペースの相対パス(`app\src\main.rs` など) | 40 | 40 |
+| 大文字小文字を無視した `yoshi` | 505(UTF-16 で 1) | 1(UTF-16 で 1)= MIT の著作権の行と版情報の LegalCopyright の `Yoshitaka` |
+
+- exe: `--engine-check` の version= v7.0.0-beta.1、`--selftest "…Capture_00001 00_10_33.fits" --offline` **25/25**(1.594′・0.916′ 東・1.304′ 北・
+  1.4610″/px)。`make_release_assets.py` を通しで走らせ、5 つの検査(version・paths・notices・manual・notebook)が全部 OK、`sha256sum -c` で
+  6 つとも OK(exe 以外の資産の SHA256 は β1 と同じ)。手順書 4 節の数え方も書いたとおりに走らせ、置き換えた exe で 0 か所、β1 の exe で 504 か所と出た。
+  `--bench` は既定の実写(ホームの `Downloads\Capture_00001 00_10_33.fits`)を実行時に見つけて、合成 6000×4000 と一緒に測った。
+  どれも ZAHYOU_CACHE・ZAHYOU_SETTINGS・LOCALAPPDATA を一時に向けて動かし、利用者の cache.json・gui.json の sha256 は前後で同じ
+- 試験: 置き換えを付けたまま `ZAHYOU_OFFLINE_TESTS=1 cargo test --workspace -- --skip live` **266 本通過・失敗 0**(無視 9 本は回していない。
+  2 分 59 秒)、`cargo clippy --workspace --all-targets -- -D warnings` 指摘 0。`test_make_release_assets.py` 31 本(置き換えた exe を `ZAHYOU_RELEASE_EXE` で渡して。Windows の
+  Python 3.13 と MSYS2 の 3.14 の両方)
+- この exe(`d262e975…0921`)は配らない。β2 は 2 節で版を上げ、4 節の手順(置き換え込み)で `target-release` に建て直す。`rs/target-check` は消してよい

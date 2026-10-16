@@ -209,7 +209,14 @@ pub struct BenchImage {
 }
 
 /// 速さを測る画像の既定: 手元の実写(あれば)と、6000×4000 の合成画像(一時フォルダーに作って消す)。
-pub const BENCH_REAL: &str = r"C:\Users\yoshi\Downloads\Capture_00001 00_10_33.fits";
+/// 実写は `$ZAHYOU_TEST_IMAGES/Downloads/Capture_00001 00_10_33.fits`(既定はホームフォルダー。試験の画像と同じ決まり)。
+/// 実行時に組み立てるのは、作者のホームのパスを配る exe に書き込まないため(docs/release-v7.md の 4.1 節)。
+pub fn bench_real() -> Option<PathBuf> {
+    std::env::var_os("ZAHYOU_TEST_IMAGES")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .filter(|s| !s.is_empty())
+        .map(|base| PathBuf::from(base).join("Downloads").join("Capture_00001 00_10_33.fits"))
+}
 
 /// `--bench`。段ごとの時間(読み込み・前処理・検出・解法・北が上の再投影と描画・PNG)を測り、表示して
 /// `out_json` があれば JSON で書く。戻り値は終了コード。
@@ -231,8 +238,8 @@ pub fn bench(out_json: Option<&Path>) -> i32 {
         return bench_with(&images, 3, out_json);
     }
     let mut images: Vec<(String, PathBuf)> = Vec::new();
-    if Path::new(BENCH_REAL).exists() {
-        images.push(("実写 968×548".to_string(), PathBuf::from(BENCH_REAL)));
+    if let Some(real) = bench_real().filter(|p| p.exists()) {
+        images.push(("実写 968×548".to_string(), real));
     }
     let keep = std::env::var_os("ZAHYOU_BENCH_DIR").filter(|s| !s.is_empty()).map(PathBuf::from);
     let tmp = keep.clone().unwrap_or_else(|| std::env::temp_dir().join(format!("zahyou_bench_{}", std::process::id())));

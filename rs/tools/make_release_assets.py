@@ -19,6 +19,9 @@
 
     version   exe の版情報(FileVersion・ProductVersion・数の版・プレリリースの印)と `--engine-check` の version= が、
               rs/Cargo.toml の [workspace.package] version と一致する
+    paths     exe に、建てた人のホームフォルダーのパス(USERPROFILE。例 C:\\Users\\<名前>)が 1 か所も無い。
+              区切り \\ と /・MSYS の /c/…・大文字小文字・UTF-8 と UTF-16 のどれでも数える。依存のパニック位置情報は、
+              手順書 4 節の --remap-path-prefix を付けずに建てると、CARGO_HOME の下のパスのまま残る
     notices   exe に埋め込まれた同梱物の表示が rs/THIRD-PARTY-NOTICES.md と同じで、`gen_notices.py --check` で最新
               (cargo と rustc が要る。PATH に無ければ C:\\msys64\\ucrt64\\bin を足して探す)
     manual    dev/make_manual.py を一時フォルダーで組み直したものが、リポジトリの PDF とバイト単位で同じ
@@ -56,7 +59,7 @@ REPO_DIR = RS_DIR.parent
 DEV_DIR = REPO_DIR / "dev"
 MSYS_BIN = Path(r"C:\msys64\ucrt64\bin")
 
-CHECKS = ("version", "notices", "manual", "notebook")
+CHECKS = ("version", "paths", "notices", "manual", "notebook")
 VS_FF_PRERELEASE = 0x2
 VS_FIXEDFILEINFO_SIG = struct.pack("<I", 0xFEEF04BD)
 
@@ -184,6 +187,68 @@ def check_version(exe: Path, version: str) -> list[str]:
     got = engine_check_version(exe)
     if got != f"v{version}":
         problems.append(f"--engine-check の version= が {got!r}(期待は 'v{version}')")
+    return problems
+
+
+# ------------------------------------------------------ 建てた人のホームのパス ---
+
+NAME_CHARS = "0-9A-Za-z_.\\-"
+
+
+def home_path_pattern(home: str, utf16: bool = False) -> re.Pattern[bytes]:
+    """exe の中のホームフォルダーのパスを探す正規表現(大文字小文字は区別しない)。
+
+    区切りは \\ と / のどちらでも、重なった \\\\(Debug の表示や JSON の書き出し)でもよい。ドライブは `C:` と
+    MSYS の `/c` の両方。名前の後ろに文字が続くもの(home が C:\\Users\\taro のときの C:\\Users\\taro2)は別人なので数えない。"""
+    codec = "utf-16-le" if utf16 else "utf-8"
+
+    def lit(s: str) -> bytes:
+        return re.escape(s.encode(codec))
+
+    sep = b"(?:" + lit("\\") + b"|" + lit("/") + b"){1,2}"
+    parts = [p for p in re.split(r"[\\/]+", home) if p]
+    if not parts:
+        raise ValueError(f"ホームフォルダーのパスが空です: {home!r}")
+    drive = re.fullmatch(r"([A-Za-z]):", parts[0])
+    if drive:
+        head = b"(?:" + lit(parts[0]) + b"|" + lit("/" + drive[1]) + b")" + sep
+        parts = parts[1:]
+    else:
+        head = sep
+    body = sep.join(lit(p) for p in parts)
+    tail = b"(?!" + b"[" + NAME_CHARS.encode() + b"]" + (b"\x00" if utf16 else b"") + b")"
+    return re.compile(head + body + tail, re.I)
+
+
+def count_home_paths(data: bytes, home: str) -> dict[str, int]:
+    """exe の中のホームフォルダーのパスの数(UTF-8 と UTF-16 で別に数える)"""
+    return {name: sum(1 for _ in home_path_pattern(home, utf16).finditer(data))
+            for name, utf16 in (("UTF-8", False), ("UTF-16", True))}
+
+
+def home_dirs() -> list[str]:
+    """建てた人のホームフォルダー(この道具は exe を建てた PC で走らせる)。
+    区切りと大文字小文字だけが違うもの(MSYS2 の Python の Path.home() は C:/Users/…)は 1 つにまとめる"""
+    out: list[str] = []
+    seen: set[str] = set()
+    for c in (os.environ.get("USERPROFILE", ""), str(Path.home())):
+        key = c.replace("\\", "/").rstrip("/").lower()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(c)
+    return out
+
+
+def check_paths(exe: Path, homes: list[str] | None = None) -> list[str]:
+    """exe に建てた人のホームフォルダーのパスが入っていないか。見つかった説明の一覧(空なら合格)"""
+    data = exe.read_bytes()
+    problems = []
+    for home in homes if homes is not None else home_dirs():
+        n = count_home_paths(data, home)
+        if sum(n.values()):
+            problems.append(f"exe にホームフォルダーのパス {home} が {sum(n.values())} か所あります"
+                            f"(UTF-8 {n['UTF-8']}・UTF-16 {n['UTF-16']}。依存のパニック位置情報なら、"
+                            "手順書 4 節の --remap-path-prefix を付けずに建てた exe)")
     return problems
 
 
@@ -386,6 +451,7 @@ def main(argv: list[str] | None = None) -> int:
         work = Path(t)
         steps = {
             "version": lambda: check_version(a.exe, version),
+            "paths": lambda: check_paths(a.exe),
             "notices": lambda: check_notices(a.exe),
             "manual": lambda: check_manual(manual_ver, work / "manual"),
             "notebook": lambda: check_notebook(work / "notebook", version),
