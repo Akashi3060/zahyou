@@ -71,6 +71,8 @@ python test_solver_synth.py      # 合成星野をブラインドとヒントで
 python test_solver_real.py       # 実写を解いて、v6 で求めた正解と比べる
 python test_solver_real.py --engine --both   # 同じことを、組み立てた直下の zahyou_engine.py と sv_solve 直接で
 python test_robust.py            # いろいろな画像で星が検出できるか (38 ケース)
+python test_online_settings.py   # オンライン解析が nova へ送る中身 (公開しない指定 publicly_visible="n" など)。
+#                                    astroquery の送信を偽物に差し替えるのでネットには出ない
 python test_notebook_run.py      # 本物のカーネルでセル A/B を実行し、画面に出るものを数える
 ```
 
