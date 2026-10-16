@@ -305,3 +305,28 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
 - β の期間が過ぎて v6 を配らなくなったら、`Solve::stored_label` を `label()` に戻してよい(rust-port.md 10.5 節)。
 - `gui/build_exe.ps1`・`gui/zahyou.spec`・`dev/make_notices.py`(PyInstaller の exe 用)を残すか(v6 と試作版の記録として残すなら、
   README の「中身に興味がある方へ」の説明はそのまま)。
+
+## 10. 出した記録
+
+### v7.0.0-beta.1(2026-10-16 15:58 JST に公開。ユーザーの指示「すべて揃えてからβ版のリリースまで」)
+
+- タグ `v7.0.0-beta.1` = `native-rs` の `8b7060c`(exe を建てたのは `42a9d31`。間の 1 つは README の exe の大きさだけで、exe の中身は同じ)。
+  Release: <https://github.com/Akashi3060/zahyou/releases/tag/v7.0.0-beta.1>(Pre-release。本文の元は手元の
+  `release-notes-v7.0.0-beta.1.md` で、リポジトリには入れていない)
+- 道具: rustc 1.94.0 / cargo 1.94.0(MSYS2 UCRT64、`x86_64-pc-windows-gnu`)、gcc 15.2.0。`cargo build --release -p zahyou --locked` 2 分 33 秒
+- 試験: `cargo test --workspace -- --include-ignored` **279 本通過・失敗 0**(17 分 19 秒)、clippy 指摘 0、check_licenses・`gen_notices --check`・
+  test_tools(15 本)OK、`test_make_release_assets.py` 24 本(release の exe を要る 2 本は飛ばした)。exe の `--selftest --offline` 25/25、
+  `--engine-check` の version= v7.0.0-beta.1、`--first-frame` DX12 / RTX 3060。Python の `dev/test_online_settings.py` 14/14
+- 資産(6 節の 4 つの検査が全部 OK): `zahyou.exe` 14,041,088 バイト `fc39b8d8…dfceb5`、`zahyou_v7_beta.ipynb` `03839c92…259d`、
+  `zahyou_engine.py` `27186b85…8b8e`、`zahyou-manual-v4.pdf`(33 ページ)`d62c2e83…81e2`、`LICENSE.txt` `4efc7bab…a3f8`、
+  `THIRD-PARTY-NOTICES.md` `f037a257…bdd4`。GitHub の各資産の digest は SHA256SUMS.txt と全部同じ
+- 出したあと(7 節の 6): (a) latest は `v6` のまま。(b) Release から落とした v6 の exe(`5f771f33…3605`)の `--update-check` は
+  「最新版です (v6 / 2026-09-17 版)」。(d) Release から落としたβの exe(SHA256 は SHA256SUMS.txt と一致)の `--update-check` は
+  「最新版です (v7.0.0-beta.1 / 2026-10-16 版)」。どれも ZAHYOU_CACHE・ZAHYOU_SETTINGS・LOCALAPPDATA を一時に向けて動かし、
+  利用者の cache.json・gui.json の sha256 は前後で同じ。**(e) 別の PC・想定のノート PC はまだ**(0 節の 1 の本物の nova の確かめも、まだ)
+- 分かったこと:
+  - `gh release create … --prerelease --latest=false --draft` は断られずに通った(7 節の 2 の「確かめていない」の答え)。
+    タグを先に push しておき `--verify-tag` で作った。下書きの間の URL は `releases/tag/untagged-…` になる
+  - Git Bash の `python` が MSYS2 UCRT64 の Python 3.14 を指していて、reportlab が無く manual の検査が落ちた(資産は書かれない)。
+    `make_release_assets.py` は Windows の Python 3.13(`%LOCALAPPDATA%\Programs\Python\Python313\python.exe`)で走らせる
+  - 画面写真(14:24 に撮影)のあとに［使い方］の手引きの文が増えたが、`app-help.png` に写る範囲(上の 3 節)は変わっていないので撮り直していない
