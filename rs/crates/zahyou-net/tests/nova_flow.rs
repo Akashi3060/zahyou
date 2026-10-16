@@ -144,6 +144,110 @@ fn image_upload_flow_matches_python() {
     assert_eq!(&rest[..rest.len() - tail.len()], &content[..], "ファイルの中身そのまま");
 }
 
+/// form の本文(`request-json=…` を quote_plus したもの)から request-json の文字列を取り出す。
+fn form_request_json(body: &[u8]) -> String {
+    let s = std::str::from_utf8(body).unwrap();
+    let v = s.strip_prefix("request-json=").expect("本文が request-json= で始まらない").as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < v.len() {
+        match v[i] {
+            b'+' => out.push(b' '),
+            b'%' => {
+                out.push(u8::from_str_radix(std::str::from_utf8(&v[i + 1..i + 3]).unwrap(), 16).unwrap());
+                i += 2;
+            }
+            c => out.push(c),
+        }
+        i += 1;
+    }
+    String::from_utf8(out).unwrap()
+}
+
+/// multipart の本文(画像の upload)から request-json の部分を取り出す。
+fn multipart_request_json(body: &[u8], ctype: &str) -> String {
+    let boundary = ctype.strip_prefix("multipart/form-data; boundary=").unwrap();
+    let head = format!("--{boundary}\r\nContent-Disposition: form-data; name=\"request-json\"\r\n\r\n");
+    assert!(body.starts_with(head.as_bytes()), "multipart の最初が request-json でない");
+    let rest = &body[head.len()..];
+    let end = format!("\r\n--{boundary}");
+    let pos = rest.windows(end.len()).position(|w| w == end.as_bytes()).unwrap();
+    String::from_utf8(rest[..pos].to_vec()).unwrap()
+}
+
+/// request-json に公開しない指定が "n" で 1 つだけ、先頭に入っていること(Python 版の solve_online と同じ並び)。
+fn assert_private(rj: &str, what: &str) {
+    let v: Value = serde_json::from_str(rj).unwrap();
+    assert_eq!(v.get("publicly_visible").and_then(|s| s.as_str()), Some("n"), "{what}: publicly_visible が \"n\" でない");
+    assert_eq!(rj.matches("\"publicly_visible\"").count(), 1, "{what}: publicly_visible が 1 つでない");
+    assert!(rj.starts_with("{\"publicly_visible\": \"n\", "), "{what}: 公開しない指定が先頭に無い");
+}
+
+/// 2026-10-16 の決定: nova へ送るとき(星の位置のリストも画像も)は publicly_visible = "n"(公開しない)を付ける。
+/// 偽の nova が受け取った本文そのもので確かめる(Python の記録が無くても走る)。ログインには付けない。
+#[test]
+fn sends_publicly_visible_n_with_source_list_and_image() {
+    assert_eq!(PUBLICLY_VISIBLE, "n");
+    let srv = fake_nova(|path, _| match path {
+        "/api/login" => Resp::json("{\"status\": \"success\", \"session\": \"s\"}"),
+        "/api/url_upload" => Resp::json("{\"status\": \"success\", \"subid\": 1}"),
+        "/api/upload" => Resp::json("{\"status\": \"success\", \"subid\": 2}"),
+        "/api/submissions/1" => Resp::json("{\"jobs\": [11]}"),
+        "/api/submissions/2" => Resp::json("{\"jobs\": [22]}"),
+        "/api/jobs/11/info" => Resp::json("{\"status\": \"failure\"}"),
+        "/api/jobs/22/info" => Resp::json("{\"status\": \"success\"}"),
+        "/wcs_file/22" => Resp::new(200, format!("{:<80}{:<80}", "CRVAL1  =                 10.0", "END").into_bytes()),
+        _ => Resp::new(404, "no"),
+    });
+    let dir = temp_dir("nova-private");
+    let img = dir.join("a.fits");
+    std::fs::write(&img, b"SIMPLE  =                    T").unwrap();
+    let src = [(1.0, 2.0)];
+    let req = OnlineRequest {
+        api_key: "K",
+        image_path: Some(&img),
+        sources: Some(&src),
+        width: 10,
+        height: 10,
+        timeout_s: 30.0,
+        hint_radec: Some((10.5, -20.25)),
+        hint_radius_deg: 5.0,
+        scale_hint: Some(1.2345),
+    };
+    // 星のリストでは「解けない」→ 画像を送って解ける(両方の送り方を通る)
+    let sol = solve_online_with(&mut client(&srv), &req, &|| false, &|_| {}).unwrap().unwrap();
+    assert!(!sol.from_source_list);
+    let reqs = srv.requests();
+    let find = |p: &str| reqs.iter().find(|q| q.path == p).unwrap_or_else(|| panic!("{p} を送っていない"));
+    assert!(!String::from_utf8_lossy(&find("/api/login").body).contains("publicly_visible"), "ログインに付けた");
+    let list = find("/api/url_upload");
+    let rj = form_request_json(&list.body);
+    assert_private(&rj, "星の位置のリスト");
+    assert!(rj.contains("\"center_ra\": 10.5") && rj.contains("\"scale_lower\": ") && rj.contains("\"x\": [2.0]"), "手がかり・星の位置が消えた");
+    let up = find("/api/upload");
+    let rj = multipart_request_json(&up.body, up.header("content-type").unwrap());
+    assert_private(&rj, "画像");
+    assert!(rj.contains("\"center_ra\": 10.5") && rj.contains("\"session\": \"s\""), "手がかり・session が消えた");
+
+    // 呼ぶ側が publicly_visible = "y" を渡しても、送るのは "n"(窓口の関数そのもので)
+    srv.clear();
+    let mut c = client(&srv);
+    c.login("K", &|| false).unwrap();
+    let s = vec![("publicly_visible".to_string(), Value::String("y".into())), ("radius".to_string(), Value::from(5.0))];
+    assert_eq!(c.submit_source_list(&s, &[2.0], &[3.0], 10, 10, &|| false).unwrap(), 1);
+    assert_eq!(c.submit_image(&s, &img, &|| false).unwrap(), 2);
+    let reqs = srv.requests();
+    let rj1 = form_request_json(&reqs.iter().find(|q| q.path == "/api/url_upload").unwrap().body);
+    let q2 = reqs.iter().find(|q| q.path == "/api/upload").unwrap();
+    let rj2 = multipart_request_json(&q2.body, q2.header("content-type").unwrap());
+    for (rj, what) in [(&rj1, "星の位置のリスト (y を渡した)"), (&rj2, "画像 (y を渡した)")] {
+        assert_private(rj, what);
+        assert!(rj.contains("\"radius\": 5.0"), "{what}: ほかの設定が消えた");
+    }
+    // 部品の関数
+    assert_eq!(private_settings(&[]), vec![("publicly_visible".to_string(), Value::String("n".into()))]);
+}
+
 #[test]
 fn falls_back_to_image_then_times_out_or_cancels() {
     // 星のリストは「解けない」→ 画像を送る(ログインは 1 回だけ)

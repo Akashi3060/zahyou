@@ -275,9 +275,16 @@ fn nova_bodies_match_python() {
             "url_upload の本文 (hint {hint:?}, scale {scale:?})"
         );
     }
+    // 画像の upload の request-json(公開しない指定 publicly_visible = "n" も含めて Python と同じ)
     let up = &nv["image_upload"]["requests"][1];
     let settings = nova::hint_settings(Some((10.5, -20.25)), 5.0, Some(1.2345));
-    let mut s = settings.clone();
+    let (_, body) = nova::upload_body(&settings, "sess-img", "a.fits", b"", "BOUNDARY");
+    let head = b"--BOUNDARY\r\nContent-Disposition: form-data; name=\"request-json\"\r\n\r\n";
+    assert!(body.starts_with(head));
+    let rest = &body[head.len()..];
+    let end = rest.windows(12).position(|w| w == b"\r\n--BOUNDARY").unwrap();
+    assert_eq!(std::str::from_utf8(&rest[..end]).unwrap(), up["request_json"].as_str().unwrap());
+    let mut s = nova::private_settings(&settings);
     s.push(("session".into(), Value::String("sess-img".into())));
     assert_eq!(nova::request_json(&s), up["request_json"].as_str().unwrap());
     // WCS のヘッダーをカードに分ける

@@ -4,6 +4,7 @@
 //! 1. `POST api/login`  本文 `request-json={"apikey": "..."}` → `session`
 //! 2. 星のリストがあれば `POST api/url_upload`(x・y・image_width・image_height・session と手がかり)→ `subid`
 //!    画像を送るときは `POST api/upload`(multipart: request-json と file)→ `subid`
+//!    どちらの request-json にも **`publicly_visible: "n"`(公開しない)**を付ける([`PUBLICLY_VISIBLE`]。Python 版も同じ設定を送る)
 //! 3. 1 秒ごとに `GET api/submissions/<subid>` → `jobs[0]`、`GET api/jobs/<job>/info` → `status`
 //! 4. `success` なら `GET wcs_file/<job>`(FITS のヘッダー)
 //!
@@ -33,6 +34,25 @@ use std::time::{Duration, Instant};
 pub const NOVA_URL: &str = "https://nova.astrometry.net";
 /// API キーを入れる環境変数
 pub const API_KEY_ENV: &str = "ASTROMETRY_API_KEY";
+
+/// 送るときの公開の指定(nova の `publicly_visible`)。`"n"` = 公開しない(2026-10-16 にユーザーが決めた)。
+///
+/// 付けないと nova は公開(`"y"`)として扱い、画像のページや「最近送られた画像」の一覧などに、API キーの持ち主の
+/// アカウント名で載る(nova の API の文書とサーバーのソースで確かめた。調べ物は claude-research の
+/// notes/zahyou-v7-release-facts-20261016.md)。`"n"` にしても解き方は変わらない(サーバーは保存するだけで、解く条件に使わない)。
+/// ただしサーバーのコードの読みでは、`"n"` でも一覧・画像ファイル・API の結果からは完全には隠れない場合がある
+/// (実サイトでは未確認)。だから利用者への説明では「nova に送ったものは第三者に見られることがある」と書く。
+pub const PUBLICLY_VISIBLE: &str = "n";
+
+/// 送る設定に公開しない指定を付ける: 先頭に `publicly_visible = "n"`、続けて `settings`(呼ぶ側が
+/// `publicly_visible` を入れていても、それは捨てて `"n"` にする)。星のリスト([`source_list_body`])と
+/// 画像([`upload_body`])の両方がこれを通る。
+pub fn private_settings(settings: &[(String, Value)]) -> Vec<(String, Value)> {
+    let mut s = Vec::with_capacity(settings.len() + 1);
+    s.push(("publicly_visible".into(), Value::String(PUBLICLY_VISIBLE.into())));
+    s.extend(settings.iter().filter(|(k, _)| k != "publicly_visible").cloned());
+    s
+}
 
 /// 既定の API キー(作者のもの)。v6 の gui/zahyou_gui.py の `_params` と dev/nb_settings.py の既定値と同じ。
 ///
@@ -253,9 +273,9 @@ pub fn login_body(api_key: &str) -> String {
     py_urlencode(&[("request-json", &rj)])
 }
 
-/// url_upload(星のリスト)の本文。`xs`・`ys` は 1 始まりに直したもの。
+/// url_upload(星のリスト)の本文。`xs`・`ys` は 1 始まりに直したもの。公開しない指定を付ける([`private_settings`])。
 pub fn source_list_body(settings: &[(String, Value)], xs: &[f64], ys: &[f64], width: usize, height: usize, session: &str) -> String {
-    let mut s = settings.to_vec();
+    let mut s = private_settings(settings);
     s.push(("x".into(), Value::Array(xs.iter().map(|v| fnum(*v)).collect())));
     s.push(("y".into(), Value::Array(ys.iter().map(|v| fnum(*v)).collect())));
     s.push(("image_width".into(), Value::from(width as u64)));
@@ -264,9 +284,9 @@ pub fn source_list_body(settings: &[(String, Value)], xs: &[f64], ys: &[f64], wi
     py_urlencode(&[("request-json", &request_json(&s))])
 }
 
-/// upload(画像)の本文。戻り値 (Content-Type, 本文)。
+/// upload(画像)の本文。戻り値 (Content-Type, 本文)。公開しない指定を付ける([`private_settings`])。
 pub fn upload_body(settings: &[(String, Value)], session: &str, file_name: &str, data: &[u8], boundary: &str) -> (String, Vec<u8>) {
-    let mut s = settings.to_vec();
+    let mut s = private_settings(settings);
     s.push(("session".into(), Value::String(session.into())));
     let rj = request_json(&s);
     // ファイル名は urllib3 2.x と同じく HTML5 の書き方(" と改行だけを %XX にする)

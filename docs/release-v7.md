@@ -1,7 +1,8 @@
 # v7 を配る手順(β版 → 正式版)
 
 2026-10-16 作成、同日に 2026-10-16 の決定(API キーの欄・DirectX 12 を既定・v7 は当面β版)と、2 回目の決定
-(画像は同意を取らずに送ってよい・β の Release にも exe 以外を付ける)に合わせて書き直した(下書き)。
+(画像は同意を取らずに送ってよい・β の Release にも exe 以外を付ける)、3 回目の決定(nova へは公開しない指定を付けて送る)と、
+GitHub の Release の扱いを公式の説明で確かめた結果(0.1 節)に合わせて書き直した(下書き)。
 v6 までの手順(`gui/build_exe.ps1` = PyInstaller、`dev/make_notices.py`)を、cargo の release ビルドの exe・
 `rs/THIRD-PARTY-NOTICES.md`・SHA256 の作り直しに置き換えたもの。
 ビルドと試験の細かい説明は [../rs/README.md](../rs/README.md)、決定と実測は [rust-port.md](rust-port.md) の 9・10 節
@@ -23,23 +24,56 @@ main に統合してふつうの Release で出す。** 1〜7 節がβ版、8 �
 | 描画 | **DirectX 12 を既定**(主の画面の GPU・小さな塊)。開けなければ OpenGL → ソフトウェア描画(WARP) | 手で選ぶ引数 `--dx12` / `--glow` / `--gpu display\|low\|high\|warp`。想定は「Windows 11 が動く、RAM 8 GB 以上のノート PC」 |
 | v6 からの移り方 | **v7 は当面β版。v6 の自動更新の対象にしない** | 版 7.0.0-beta.N をプレリリースで出す(v6 の更新係が見る latest に出ない)。β 自身は v7 の新しいβ版と正式版を探す |
 | 画像を外へ送ること | **同意を取らずに送ってよい**(今の動きのまま。v6 と同じ) | 方法が「自動」か「オンラインのみ」で、キーがあり、ネットにつながっていると、まず検出した星の位置(と画像の大きさ・手がかり)を、それで解けなければ画像ファイルそのもの(ファイル名も)を nova.astrometry.net へ送る。送らない方法(方法を「オフラインのみ」/ API キーの欄を空)と一緒に、README・マニュアル 2.3・［使い方］タブに書いた |
+| nova へ送るときの公開の扱い(3 回目) | **公開しない指定 `publicly_visible = "n"` を付ける**(Rust 版と Python 版(ノートブックを含む)の両方)。文書には「nova に送ったものは第三者に見られることがある」と書く | Rust: `zahyou_net::nova::PUBLICLY_VISIBLE`・`private_settings`(星の位置のリストと画像の両方の request-json の先頭に付ける。呼ぶ側が別の値を渡しても `"n"`)。Python: `dev/zahyou_core.py` の `solve_online` の設定(同じく先頭。native-solver で直し、あとで取り込む)。試験は偽の nova が受け取った本文と astroquery の記録(`rs/testdata/gen_net.py`)で。README・マニュアル 2.3・［使い方］タブ・rs/README.md に「公開しない指定を付けて送る。ただし第三者に見られることがある」を足した(0.1 節の注意のとおり、`"n"` でも完全には隠れない場合がある) |
 | β の Release の資産 | **exe 以外も付ける**(v6 の Release に合わせる) | `zahyou.exe`・`zahyou_v7_beta.ipynb` と `zahyou_engine.py`・`zahyou-manual-v4.pdf`・`LICENSE.txt`・`THIRD-PARTY-NOTICES.md`(rs/ のもの)・`SHA256SUMS.txt`。`rs/tools/make_release_assets.py` がそろえて検査する(6 節)。ノートブックはエンジンを名前で探すので、改名しても動く(確かめた) |
 
 残っていること:
 
 | | 何を決めるか | 今の状態 |
 |---|---|---|
-| 1 | GitHub の「latest はプレリリースを返さない」「プレリリースは latest にできない」「新しい正式の Release は既定で latest になる」の確かめ | 記憶による(rust-port.md 10.8)。claude-research のセッションで公式の説明を確かめてから出す |
-| 2 | 本物の nova へキーで送る道の確かめ | 偽の nova でだけ試した(10.8)。β の間に一度、ユーザーの判断で「オンラインのみ」で解いて確かめる(星の位置と、解けなければ画像が nova へ送られる) |
-| 3 | **nova.astrometry.net が、API で送った画像を公開するか** | zahyou は送るときに公開の扱い(`publicly_visible` など)を指定していない(v6 も同じ)。nova の既定では公開されるとみている(記憶による。rust-port.md 10.8)。確かめて、公開されるなら利用者への説明に足すか、公開しない指定を付けるかを決める |
-| 4 | ノートブック版のログの見出しの版の文字 | `dev/nb_main.py` は `zahyou v7-dev` のまま(β の版 7.0.0-beta.N と合っていない)。直したら `python dev/build_nb.py` |
+| 1 | 本物の nova へキーで送る道の確かめ | 偽の nova でだけ試した(rust-port.md 10.8)。β の間に一度、ユーザーの判断で「オンラインのみ」で解いて確かめる(星の位置と、解けなければ画像が nova へ送られる)。そのとき、送ったものが公開しない扱いになっているか(画像のページが他人から見えないか、「最近送られた画像」の一覧に出るか)も見る(0.1 節の注意は実サイトでは未確認) |
+| 2 | ノートブック版のログの見出しの版の文字 | `dev/nb_main.py` は `zahyou v7-dev` のまま(β の版 7.0.0-beta.N と合っていない)。直したら `python dev/build_nb.py` |
+
+(以前ここにあった「GitHub の latest とプレリリースの扱いの確かめ」と「nova が API で送った画像を公開するか」は、0.1 節で確かめて
+決着した。nova は 3 回目の決定で公開しない指定を付けることになった。)
+
+### 0.1 確かめた事実(2026-10-16。claude-research のセッションが公式の文書とソースを読んだ結果)
+
+調べ物は `C:\Users\yoshi\Documents\claude-research\notes\zahyou-v7-release-facts-20261016.md`。**文書とソースを読んだだけ**で、
+Release を作って試したり、nova へ送ったりはしていない。ソースは main / trunk のもので、稼働中のサイトが同じ版かは確かめていない。
+
+**GitHub の Release**(以前は記憶による前提だったもの):
+
+| 事実 | 出典 |
+|---|---|
+| REST API の `GET /repos/{owner}/{repo}/releases/latest` は、**プレリリースでも下書きでもない最も新しい Release** を返す → β をプレリリースで出しても、`releases/latest` を見る v6 の「更新を確認」には届かない | [REST API: releases](https://docs.github.com/en/rest/releases/releases)(Get the latest release) |
+| **プレリリースと下書きは latest にできない**(`make_latest` の説明に明記) | 同上(Create / Update a release の `make_latest`) |
+| **新しく公開する Release の `make_latest` は既定で `true`** → 正式版(ふつうの Release)は、何も指定しなければ latest になる。値は `true` / `false` / `legacy`(作成日と版で決める) | 同上・[Changelog 2022-10-21](https://github.blog/changelog/2022-10-21-explicitly-set-the-latest-release/) |
+| ただし Docs の画面の説明は「Set as latest release を選ばなければセマンティックバージョニングで自動」と書いていて、API の既定 `true` と書き方が食い違う(docs の issue でも指摘)→ **正式版では `--latest` を明示する** | [Managing releases in a repository](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)・[github/docs#23508](https://github.com/github/docs/issues/23508) |
+| `gh release create` は **`--prerelease` と `--latest=false` を一緒に付けられる**(gh に両者の排他の検査は無い)。`--latest` / `--latest=false` を付けたときだけ `make_latest` を送り、付けなければ API の既定に従う。`prerelease` は毎回送る | [gh manual: gh release create](https://cli.github.com/manual/gh_release_create)・[gh のソース create.go](https://github.com/cli/cli/blob/trunk/pkg/cmd/release/create/create.go) |
+| (未確認)プレリリースを後から正式版に変えたとき(`gh release edit --prerelease=false`)に latest になるかは、文書に明記が無い → そうするときも `--latest` / `--latest=false` を明示する | — |
+
+→ β は `--prerelease --latest=false`(`--latest=false` は無くても latest にはならないが、意図を明示するため重ねる。7 節)、
+正式版は `--latest`(8 節)、正式版のあとの v6 の修正版は `--latest=false`(8 節の 6)。
+
+**nova.astrometry.net の公開の扱い**(3 回目の決定の根拠):
+
+| 事実 | 出典 |
+|---|---|
+| **`publicly_visible` を付けずに送ると公開(`'y'`)になる**。画像でも星の位置のリストでも同じ受付処理。値は `"y"` / `"n"`。`allow_commercial_use`・`allow_modifications` の既定は `'d'`(API キーの持ち主のプロフィールの既定ライセンス → サイトの既定) | [API 文書](https://astrometry.net/doc/net/api.html)・サーバーの [net/api.py](https://github.com/dstndstn/astrometry.net/blob/main/net/api.py)・[net/abstract_models.py](https://github.com/dstndstn/astrometry.net/blob/main/net/abstract_models.py)・[net/models.py](https://github.com/dstndstn/astrometry.net/blob/main/net/models.py) |
+| 公開だと、画像のページ(`/user_images/<id>`)が誰でも見られ、トップの「Recently Submitted Images」・Explore・利用者ごとの一覧・タグや天域の検索に、**API キーの持ち主のアカウント名で**載る | [net/views/image.py](https://github.com/dstndstn/astrometry.net/blob/main/net/views/image.py)・[nova のトップ](https://nova.astrometry.net/) |
+| `publicly_visible` は提出の属性として保存されるだけで、**解く処理の条件には使われない**(`"n"` にしても解き方は変わらない) | net/api.py |
+| **注意(サーバーのコードの読み。実サイトでは未確認)**: `"n"` にすると画像の詳細ページは本人以外に見えなくなるが、「最近」「全件」「利用者ごと」「検索」の一覧は公開の印で絞られておらず、画像ファイル・サムネイルの配信と API の `/api/jobs/<id>/…` も公開の印や持ち主を確かめていない → `"n"` は「完全な非公開」ではなく「詳細ページを隠す」程度の可能性がある。だから利用者には「送ったものは第三者に見られることがある」と書く | net/models.py・net/views/image.py・[一覧のテンプレート](https://github.com/dstndstn/astrometry.net/blob/main/net/templates/user_image/image_set.html) |
+| astroquery の `AstrometryNet` は、渡された設定だけを送り、`publicly_visible` の既定値を自分では付けない(v6 も付けていなかった = サーバーの既定どおり公開として受け付けられていたはず。実サイトでは確かめていない) | [astroquery の文書](https://astroquery.readthedocs.io/en/latest/astrometry_net/astrometry_net.html)・[core.py](https://github.com/astropy/astroquery/blob/main/astroquery/astrometry_net/core.py) |
 
 ## 1. v6 の利用者がどうなるか
 
 - v6 の exe の「更新を確認」(起動時にも既定で確かめる)は、`https://api.github.com/repos/Akashi3060/zahyou/releases/latest` の
   資産 **`zahyou.exe`** の digest(SHA256)を手元の exe と比べ、**違えば「新しい版があります」**と出す。版名は見ない。
-- **β版をプレリリースで出している間は、latest は v6 のまま**なので、v6 の利用者には何も出ない(0 節の 4 で確かめる)。
-- **v7 の正式版を Latest で出した時点で、v6 の全員に「新しい版があります」が出る**。「更新する」で v7 へ入れ替わり、
+- **β版をプレリリースで出している間は、latest は v6 のまま**なので、v6 の利用者には何も出ない(GitHub の API はプレリリースを latest として
+  返さず、プレリリースは latest にできない。0.1 節。出したあとに 7 節の 6 (a)・(b) で確かめる)。
+- **v7 の正式版を Latest で出した時点で、v6 の全員に「新しい版があります」が出る**(新しく公開する正式の Release は既定で latest になる。
+  8 節では `--latest` を明示する)。「更新する」で v7 へ入れ替わり、
   v6 の exe が `zahyou.exe.bak`(102 MB)として残る(v7 が消すのは `.old` だけ)。README とマニュアル 9.1 にそう書いた。
 - β の利用者が v6 に戻すときは v6 の zahyou.exe を上書きするだけ。設定はそのまま読める(方法は v6 の文言で書く。10.5 節)。
   API キーの欄の値は v6 では使わず、v6 で保存すると消える(次に v7 を開くと既定のキー)。
@@ -157,17 +191,21 @@ python rs/tools/make_release_assets.py --exe "$(cygpath -w $EXE)" --out "$(cygpa
   v6 の Release のものと同じ SHA256 になった)。exe と PDF はそのまま写す。
 - 試験: `python -B rs/tools/test_make_release_assets.py`(release の exe があれば `ZAHYOU_RELEASE_EXE` で渡すと版情報も確かめる)。
 - 2026-10-16 に、`7.0.0-beta.1`(help_tab.rs を直したあとの release の exe、14,039,040 バイト)で 4 つの検査が通り、`sha256sum -c` で 6 つとも OK。
+  公開しない指定を入れたあと(exe 14,041,088 バイト・マニュアル v4 を組み直したもの)も同じく通った(rust-port.md 10.10)。
+  **ノートブックの資産(`zahyou_v7_beta.ipynb`・`zahyou_engine.py`)は、Python 版の公開しない指定(native-solver)を取り込んで
+  `dev/build_nb.py` で作り直してからそろえる**(取り込む前のものは `publicly_visible` を付けずに送る)。
 
 SHA256 は Release の本文にも書く(SHA256SUMS.txt を貼る)。正式版では配布ページの `はじめにお読みください.txt` にも書く(8 節)。
 
 ## 7. β版を GitHub に出す(rust-port.md 10.7 節。ユーザーの了承のあとで)
 
 1. `native-rs` を push する(**main には統合しない**)。タグは **`v7.0.0-beta.N`**(v + Cargo の版)を、配る exe を建てた `native-rs` の commit に付ける。
-2. Release は **「Set as a pre-release」に印、「Set as the latest release」は付けない**。下書きで作り、中身を見てから出す:
+2. Release は **「Set as a pre-release」に印、「Set as the latest release」は付けない**(gh では `--prerelease --latest=false`。0.1 節)。
+   下書きで作り、中身を見てから出す:
 
 ```bash
 # 資産は 6 節でそろえた $DIST の 7 つ(SHA256SUMS.txt も)。本文は $DIST の外に書いておく
-gh release create v7.0.0-beta.N --repo Akashi3060/zahyou --target native-rs --prerelease --draft \
+gh release create v7.0.0-beta.N --repo Akashi3060/zahyou --target native-rs --prerelease --latest=false --draft \
   --title "zahyou v7.0.0-beta.N (β版)" --notes-file release-notes-v7.0.0-beta.N.md \
   "$DIST/zahyou.exe" "$DIST/zahyou_v7_beta.ipynb" "$DIST/zahyou_engine.py" "$DIST/zahyou-manual-v4.pdf" \
   "$DIST/LICENSE.txt" "$DIST/THIRD-PARTY-NOTICES.md" "$DIST/SHA256SUMS.txt"
@@ -175,17 +213,20 @@ gh release create v7.0.0-beta.N --repo Akashi3060/zahyou --target native-rs --pr
 gh release view v7.0.0-beta.N --repo Akashi3060/zahyou --json isPrerelease,isDraft,assets \
   --jq '"prerelease=\(.isPrerelease) draft=\(.isDraft)", (.assets[]|[.name,.size,.digest]|@tsv)'
 gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                                # v6 のまま
-gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false                        # 出す(--prerelease は付いたまま)
+gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false --latest=false         # 出す(--prerelease は付いたまま)
 ```
 
-   (`--latest=false` も付けたいが、gh がプレリリースと一緒に受け付けるかは確かめていない。10.7 節)
+   `--latest=false` は無くても latest にはならない(プレリリースは latest にできない)が、意図を明示するため作るときと出すときの両方に付ける
+   (gh は `--prerelease` と一緒に受け付ける。0.1 節)。下書きと一緒に `make_latest` を送ったときの API の扱いは確かめていない。
+   作るときに断られたら、作るときの `--latest=false` を外し、出すとき(`gh release edit`)だけに付ける。
 3. **公開したβの資産は差し替えない**。直したら N を上げて新しい Release にする(βの更新の確認は「今より新しい版」しか出さないので、
    同じタグの建て直しはβの利用者に届かない)。
 4. **間違えて正式の Release(pre-release の印なし)で出すと、そのまま v6 の全員に入れ替えが出る**。印を付け忘れたら、すぐ pre-release に直す。
 5. Release 本文に書くこと(v6 の本文を土台に): β版であること・v6 の更新には出ないこと・v6 との行き来(1 節)、ダウンロードの警告(5 枚の図。
    exe の中身によらない)、画面の写真(raw の URL は **`…/zahyou/v7.0.0-beta.N/docs/img/…`(タグ)**で書く。`main` には β の写真が無い)、
    v6 からの変更(WSL 不要・Rust・速さと大きさ。数字は README の「実測値」と同じもの)、API キーの欄と、外へ送るもの(まず星の位置、
-   解けなければ画像ファイルそのもの。送る前に聞かない)と送らない方法(方法を「オフラインのみ」/ API キーの欄を空)、
+   解けなければ画像ファイルそのもの。送る前に聞かない。**公開しない指定 `publicly_visible = n` を付けて送るが、nova に送ったものは
+   第三者に見られることがある**)と送らない方法(方法を「オフラインのみ」/ API キーの欄を空)、
    付けた資産の一覧(6 節)と SHA256SUMS.txt の中身、ノートブックの名前(`zahyou_v7_beta.ipynb`。中身はリポジトリの `zahyou_v6.ipynb`)、
    作った道具の版(rustc・gcc)、動作環境(想定は Windows 11・RAM 8 GB 以上のノート PC、確かめた PC は 1 台だけ)、
    描き方の手動の選び方(`--glow`・`--gpu`)、問い合わせのときに欲しいもの(ログの「描画: …」の行、遅いときは `--bench-ui` の記録)、
@@ -198,6 +239,7 @@ gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false            
    - (e) 作者以外の PC(か、別の Windows のユーザー)で Edge から落とし、README の 5 枚の警告の順に出るか(今の図は v6 の exe のとき)。
      想定のノート PC(Windows 11・RAM 8 GB)で 1 台は起動と解析を確かめ、README の「確かめた PC は 1 台だけ」を書き足す
 7. β の間に v6 の修正版を出すときは、ふつうの Release(Latest)でよい(β の利用者は大きな版 7 しか見ないので影響しない)。
+   gh では `--latest` を明示する(0.1 節。既定でも latest になるはずだが、Docs の説明と API の既定の書き方が食い違っているため)。
 8. 配布ページ(Nextcloud)には β を置かない(v6 の利用者向けのまま)。置くなら 8 節の手順で、v6 と取り違えない名前にする。
 
 ## 8. 正式版(7.0.0)を出す(1〜2 か月使って安定を確かめてから)
@@ -211,11 +253,26 @@ gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false            
    (`app-analyze`・`app-numbers`・`app-prepare`)を見ているので、main の写真を v7 にすると、v6 の Release ページに v7 の画面
    (WSL の行の無い［準備］タブ)が出る。`main` を `v6` に置き換えた本文で `gh release edit v6 --notes-file …`。**main への統合の前に**行う。
 4. タグ `v7.0.0`(main の統合したあとの commit)で **ふつうの Release(Latest)**。ここで v6 の全員と β の利用者に入れ替えが出る(1 節)。
+   新しく公開する正式の Release は API の既定で latest になるが、Docs の画面の説明と書き方が食い違っている(0.1 節)ので、**`--latest` を明示する**。
+   β と同じく下書きで作って中身を見てから出す(資産は 6 節。ノートブックは `zahyou_v7.ipynb`)。下書きは latest にできないので、
+   `--latest` は出すとき(`gh release edit`)に付ける:
+
+```bash
+gh release create v7.0.0 --repo Akashi3060/zahyou --target main --draft \
+  --title "zahyou v7.0.0" --notes-file release-notes-v7.0.0.md \
+  "$DIST/zahyou.exe" "$DIST/zahyou_v7.ipynb" "$DIST/zahyou_engine.py" "$DIST/zahyou-manual-v4.pdf" \
+  "$DIST/LICENSE.txt" "$DIST/THIRD-PARTY-NOTICES.md" "$DIST/SHA256SUMS.txt"
+gh release view v7.0.0 --repo Akashi3060/zahyou --json isPrerelease,isDraft,assets \
+  --jq '"prerelease=\(.isPrerelease) draft=\(.isDraft)", (.assets[]|[.name,.size,.digest]|@tsv)'   # prerelease=false
+gh release edit v7.0.0 --repo Akashi3060/zahyou --draft=false --latest                       # 出す(ここで v6 の全員に入れ替えが出る)
+gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                                # v7.0.0
+```
+
 5. 出したあと: `releases/latest` が `v7.0.0`、資産 `zahyou.exe` の digest が 6 節の SHA256、v6 の exe(一時の LOCALAPPDATA)の
    「更新を確認」→「更新する」で v7 が起動し、`zahyou.exe.bak` が残り、v6 で書いた gui.json の設定(方法・目標・配色)が出ること
    (v6 の入れ替えの台本は環境変数を引き継いで v7 を起動するので、v7 も一時の LOCALAPPDATA を使う)。
-6. 正式版のあとに v6 の修正版を出すときは `--latest=false`(latest が v6 に戻ると、v6 の利用者向けの意図とずれる。v7 の利用者は
-   latest が古ければ入れ替えに誘わないので守られる)。
+6. 正式版のあとに v6 の修正版を出すときは `--latest=false`(付けないと、新しく公開する正式の Release は既定で latest になる。0.1 節。
+   latest が v6 に戻ると、v6 の利用者向けの意図とずれる。v7 の利用者は latest が古ければ入れ替えに誘わないので守られる)。
 7. 戻すとき(v7 に問題があったとき): `gh release edit v6 --latest`。v6 の利用者はそのまま。v7 の利用者は latest が古い版なので
    入れ替えに誘われない(10.4 節)— 戻ってほしいなら案内して手で上書きしてもらう。
 

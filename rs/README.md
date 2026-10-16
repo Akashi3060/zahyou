@@ -90,7 +90,9 @@ exe は windows サブシステムなので、結果はコンソールに出な�
 
 - **オンライン解析の API キー**: ［解析］の「API キー」の欄(gui.json の `api_key`)。初めは作者の既定のキー
   (環境変数 ASTROMETRY_API_KEY があればそちら)が入っている。そのため「自動」は、ネットがあれば nova.astrometry.net に
-  星の位置を送る(解けなければ画像も。v6 と同じ)。`--shot --run` で撮るときや試しに解かせるときに外へ送りたくなければ、
+  星の位置を送る(解けなければ画像も。v6 と同じ)。どちらも request-json に `publicly_visible: "n"`(公開しない)を付ける
+  (`zahyou_net::nova::PUBLICLY_VISIBLE`。2026-10-16 の決定。それでも nova の一覧や画像ファイルからは完全には隠れない場合があるので、
+  利用者向けの文書には「送ったものは第三者に見られることがある」と書いた)。`--shot --run` で撮るときや試しに解かせるときに外へ送りたくなければ、
   一時の gui.json の `"solve"` を `"オフラインのみ"` にするか、`"api_key": ""` を書いておく。`--selftest --offline` は送らない。
 - 版名は `Cargo.toml` の `[workspace.package] version` だけで決まる(`v` を付けたものが画面・ログ・更新の確認の版名。
   exe の版情報も同じ)。`-beta.N` などのプレリリースの版は窓の題・起動のログ・［使い方］に「β版」と添え、更新の確認は
@@ -107,6 +109,8 @@ $PY -B app/testdata/gen_run_solver.py         # run() を本物の解法で 20 �
 ```
 
 どれも利用者のファイルには触れない(cache.json は一時ファイル)。作り直したら `git diff` で変わった値を確かめる。
+`gen_net.py` は nova へ送る要求を Python 版の `solve_online` から記録するので、Python 版が `publicly_visible='n'`(公開しない)を
+送っていなければ値を作らずに止まる(Rust 版は必ず付けるので。Python 版のリポジトリは環境変数 ZAHYOU_PY_REPO で変えられる)。
 
 ## 速さの物差し
 

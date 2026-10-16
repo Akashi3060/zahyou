@@ -13396,8 +13396,8 @@
      {
       "method": "POST",
       "url": "https://nova.astrometry.net/api/url_upload",
-      "body": "request-json=%7B%22center_ra%22%3A+61.9119936%2C+%22center_dec%22%3A+41.9862759%2C+%22radius%22%3A+5.0%2C+%22scale_units%22%3A+%22arcsecperpix%22%2C+%22scale_type%22%3A+%22ul%22%2C+%22scale_lower%22%3A+0.925875%2C+%22scale_upper%22%3A+1.5431249999999999%2C+%22x%22%3A+%5B101.25%2C+1.0%2C+968.75%2C+1.001%5D%2C+%22y%22%3A+%5B51.5%2C+1.0%2C+548.125%2C+4.333333333333334%5D%2C+%22image_width%22%3A+968%2C+%22image_height%22%3A+548%2C+%22session%22%3A+%22sess-abc%22%7D",
-      "request_json": "{\"center_ra\": 61.9119936, \"center_dec\": 41.9862759, \"radius\": 5.0, \"scale_units\": \"arcsecperpix\", \"scale_type\": \"ul\", \"scale_lower\": 0.925875, \"scale_upper\": 1.5431249999999999, \"x\": [101.25, 1.0, 968.75, 1.001], \"y\": [51.5, 1.0, 548.125, 4.333333333333334], \"image_width\": 968, \"image_height\": 548, \"session\": \"sess-abc\"}"
+      "body": "request-json=%7B%22publicly_visible%22%3A+%22n%22%2C+%22center_ra%22%3A+61.9119936%2C+%22center_dec%22%3A+41.9862759%2C+%22radius%22%3A+5.0%2C+%22scale_units%22%3A+%22arcsecperpix%22%2C+%22scale_type%22%3A+%22ul%22%2C+%22scale_lower%22%3A+0.925875%2C+%22scale_upper%22%3A+1.5431249999999999%2C+%22x%22%3A+%5B101.25%2C+1.0%2C+968.75%2C+1.001%5D%2C+%22y%22%3A+%5B51.5%2C+1.0%2C+548.125%2C+4.333333333333334%5D%2C+%22image_width%22%3A+968%2C+%22image_height%22%3A+548%2C+%22session%22%3A+%22sess-abc%22%7D",
+      "request_json": "{\"publicly_visible\": \"n\", \"center_ra\": 61.9119936, \"center_dec\": 41.9862759, \"radius\": 5.0, \"scale_units\": \"arcsecperpix\", \"scale_type\": \"ul\", \"scale_lower\": 0.925875, \"scale_upper\": 1.5431249999999999, \"x\": [101.25, 1.0, 968.75, 1.001], \"y\": [51.5, 1.0, 548.125, 4.333333333333334], \"image_width\": 968, \"image_height\": 548, \"session\": \"sess-abc\"}"
      },
      {
       "method": "GET",
@@ -13435,8 +13435,8 @@
      {
       "method": "POST",
       "url": "https://nova.astrometry.net/api/url_upload",
-      "body": "request-json=%7B%22x%22%3A+%5B101.25%2C+1.0%2C+968.75%2C+1.001%5D%2C+%22y%22%3A+%5B51.5%2C+1.0%2C+548.125%2C+4.333333333333334%5D%2C+%22image_width%22%3A+968%2C+%22image_height%22%3A+548%2C+%22session%22%3A+%22sess-abc%22%7D",
-      "request_json": "{\"x\": [101.25, 1.0, 968.75, 1.001], \"y\": [51.5, 1.0, 548.125, 4.333333333333334], \"image_width\": 968, \"image_height\": 548, \"session\": \"sess-abc\"}"
+      "body": "request-json=%7B%22publicly_visible%22%3A+%22n%22%2C+%22x%22%3A+%5B101.25%2C+1.0%2C+968.75%2C+1.001%5D%2C+%22y%22%3A+%5B51.5%2C+1.0%2C+548.125%2C+4.333333333333334%5D%2C+%22image_width%22%3A+968%2C+%22image_height%22%3A+548%2C+%22session%22%3A+%22sess-abc%22%7D",
+      "request_json": "{\"publicly_visible\": \"n\", \"x\": [101.25, 1.0, 968.75, 1.001], \"y\": [51.5, 1.0, 548.125, 4.333333333333334], \"image_width\": 968, \"image_height\": 548, \"session\": \"sess-abc\"}"
      },
      {
       "method": "GET",
@@ -13477,8 +13477,8 @@
      {
       "method": "POST",
       "url": "https://nova.astrometry.net/api/url_upload",
-      "body": "request-json=%7B%22center_ra%22%3A+359.5%2C+%22center_dec%22%3A+-89.0%2C+%22radius%22%3A+5.0%2C+%22x%22%3A+%5B101.25%2C+1.0%2C+968.75%2C+1.001%5D%2C+%22y%22%3A+%5B51.5%2C+1.0%2C+548.125%2C+4.333333333333334%5D%2C+%22image_width%22%3A+968%2C+%22image_height%22%3A+548%2C+%22session%22%3A+%22sess-abc%22%7D",
-      "request_json": "{\"center_ra\": 359.5, \"center_dec\": -89.0, \"radius\": 5.0, \"x\": [101.25, 1.0, 968.75, 1.001], \"y\": [51.5, 1.0, 548.125, 4.333333333333334], \"image_width\": 968, \"image_height\": 548, \"session\": \"sess-abc\"}"
+      "body": "request-json=%7B%22publicly_visible%22%3A+%22n%22%2C+%22center_ra%22%3A+359.5%2C+%22center_dec%22%3A+-89.0%2C+%22radius%22%3A+5.0%2C+%22x%22%3A+%5B101.25%2C+1.0%2C+968.75%2C+1.001%5D%2C+%22y%22%3A+%5B51.5%2C+1.0%2C+548.125%2C+4.333333333333334%5D%2C+%22image_width%22%3A+968%2C+%22image_height%22%3A+548%2C+%22session%22%3A+%22sess-abc%22%7D",
+      "request_json": "{\"publicly_visible\": \"n\", \"center_ra\": 359.5, \"center_dec\": -89.0, \"radius\": 5.0, \"x\": [101.25, 1.0, 968.75, 1.001], \"y\": [51.5, 1.0, 548.125, 4.333333333333334], \"image_width\": 968, \"image_height\": 548, \"session\": \"sess-abc\"}"
      },
      {
       "method": "GET",
@@ -13516,8 +13516,8 @@
      {
       "method": "POST",
       "url": "https://nova.astrometry.net/api/url_upload",
-      "body": "request-json=%7B%22scale_units%22%3A+%22arcsecperpix%22%2C+%22scale_type%22%3A+%22ul%22%2C+%22scale_lower%22%3A+0.3105%2C+%22scale_upper%22%3A+0.5175%2C+%22x%22%3A+%5B101.25%2C+1.0%2C+968.75%2C+1.001%5D%2C+%22y%22%3A+%5B51.5%2C+1.0%2C+548.125%2C+4.333333333333334%5D%2C+%22image_width%22%3A+968%2C+%22image_height%22%3A+548%2C+%22session%22%3A+%22sess-abc%22%7D",
-      "request_json": "{\"scale_units\": \"arcsecperpix\", \"scale_type\": \"ul\", \"scale_lower\": 0.3105, \"scale_upper\": 0.5175, \"x\": [101.25, 1.0, 968.75, 1.001], \"y\": [51.5, 1.0, 548.125, 4.333333333333334], \"image_width\": 968, \"image_height\": 548, \"session\": \"sess-abc\"}"
+      "body": "request-json=%7B%22publicly_visible%22%3A+%22n%22%2C+%22scale_units%22%3A+%22arcsecperpix%22%2C+%22scale_type%22%3A+%22ul%22%2C+%22scale_lower%22%3A+0.3105%2C+%22scale_upper%22%3A+0.5175%2C+%22x%22%3A+%5B101.25%2C+1.0%2C+968.75%2C+1.001%5D%2C+%22y%22%3A+%5B51.5%2C+1.0%2C+548.125%2C+4.333333333333334%5D%2C+%22image_width%22%3A+968%2C+%22image_height%22%3A+548%2C+%22session%22%3A+%22sess-abc%22%7D",
+      "request_json": "{\"publicly_visible\": \"n\", \"scale_units\": \"arcsecperpix\", \"scale_type\": \"ul\", \"scale_lower\": 0.3105, \"scale_upper\": 0.5175, \"x\": [101.25, 1.0, 968.75, 1.001], \"y\": [51.5, 1.0, 548.125, 4.333333333333334], \"image_width\": 968, \"image_height\": 548, \"session\": \"sess-abc\"}"
      },
      {
       "method": "GET",
@@ -13589,8 +13589,8 @@
     {
      "method": "POST",
      "url": "https://nova.astrometry.net/api/upload",
-     "body": "request-json=%7B%22center_ra%22%3A+10.5%2C+%22center_dec%22%3A+-20.25%2C+%22radius%22%3A+5.0%2C+%22scale_units%22%3A+%22arcsecperpix%22%2C+%22scale_type%22%3A+%22ul%22%2C+%22scale_lower%22%3A+0.925875%2C+%22scale_upper%22%3A+1.5431249999999999%2C+%22session%22%3A+%22sess-img%22%7D",
-     "request_json": "{\"center_ra\": 10.5, \"center_dec\": -20.25, \"radius\": 5.0, \"scale_units\": \"arcsecperpix\", \"scale_type\": \"ul\", \"scale_lower\": 0.925875, \"scale_upper\": 1.5431249999999999, \"session\": \"sess-img\"}",
+     "body": "request-json=%7B%22publicly_visible%22%3A+%22n%22%2C+%22center_ra%22%3A+10.5%2C+%22center_dec%22%3A+-20.25%2C+%22radius%22%3A+5.0%2C+%22scale_units%22%3A+%22arcsecperpix%22%2C+%22scale_type%22%3A+%22ul%22%2C+%22scale_lower%22%3A+0.925875%2C+%22scale_upper%22%3A+1.5431249999999999%2C+%22session%22%3A+%22sess-img%22%7D",
+     "request_json": "{\"publicly_visible\": \"n\", \"center_ra\": 10.5, \"center_dec\": -20.25, \"radius\": 5.0, \"scale_units\": \"arcsecperpix\", \"scale_type\": \"ul\", \"scale_lower\": 0.925875, \"scale_upper\": 1.5431249999999999, \"session\": \"sess-img\"}",
      "files": {
       "file": "撮影 01.fits"
      }

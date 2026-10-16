@@ -165,6 +165,7 @@ pub fn resolve_target_name(name: &str) -> Result<(f64, f64, String), String>;   
 pub fn internet_available() -> bool;
 pub fn solve_online(req: &OnlineRequest, stop: &dyn Fn() -> bool, log: &dyn Fn(&str)) -> Result<Option<NovaSolution>, NetError>;
 // nova::NovaClient の login・submit_source_list・submit_image・monitor・wcs_file はどれも stop を受け取る。
+// submit_source_list・submit_image は request-json の先頭に publicly_visible: "n"(公開しない)を付ける(nova::PUBLICLY_VISIBLE・private_settings。10.10 節)
 // 要求は別のスレッドで投げて 50 ms ごとに stop を見ながら待ち、中止なら待たずに Cancelled(送っている画像の本文も止める)。
 // 中止のあとで新しい要求(特に画像の送信)は始めない
 ```
@@ -726,8 +727,8 @@ WARP は起動から 1.5 秒の間に CPU を 11 秒使う(全部のコアでシ
     次のβ版も v7 の正式版も受け取る。semver の比較は自前(7.0.0-beta.1 < beta.2 < beta.10 < rc.1 < 7.0.0)。
   - 正式版の版: 前と同じく `releases/latest`。latest が今より古い版なら「最新版です」(v7 正式版のあとに v6 の修正版が latest になっても戻さない)。
 - **v6 には届かない理由**(check 係が v6 のソースで確かめた): v6 の `gui/zahyou_update.py` は `releases/latest` の資産 zahyou.exe の digest と
-  自分の exe を比べるだけで、版名は比べない。GitHub の latest はプレリリースを返さない(記憶による。10.8)ので、β をプレリリースで出して
-  いる間は v6 の「更新を確認」は v6 の最新を返す。**v7 の正式版を Latest で出した時点で、v6 の全員に「新しい版があります」が出る**。
+  自分の exe を比べるだけで、版名は比べない。GitHub の latest はプレリリースを返さない(REST API の文書で確かめた。10.10)ので、
+  β をプレリリースで出している間は v6 の「更新を確認」は v6 の最新を返す。**v7 の正式版を Latest で出した時点で、v6 の全員に「新しい版があります」が出る**。
 
 ### 10.5 つなぎ目の直し(check 係)
 
@@ -795,8 +796,8 @@ WARP は起動から 1.5 秒の間に CPU を 11 秒使う(全部のコアでシ
    `--selftest --offline` が全項目通過、exe のプロパティでファイル バージョン `7.0.0-beta.N` を確かめる。
 2. タグは `v7.0.0-beta.N`(v + Cargo の版)、`native-rs` の commit に付ける。**main には統合しない**。
 3. GitHub の Release は **「Set as a pre-release」に印、「Set as the latest release」は付けない**。題名の例「zahyou v7.0.0-beta.N (β版)」。
-   gh なら `gh release create v7.0.0-beta.N zahyou.exe --prerelease --target native-rs --title "zahyou v7.0.0-beta.N (β版)" --notes-file …`
-   (念のため `--latest=false` も付けたいが、gh がプレリリースと一緒に受け付けるかは確かめていない)。
+   gh なら `gh release create v7.0.0-beta.N zahyou.exe --prerelease --latest=false --target native-rs --title "zahyou v7.0.0-beta.N (β版)" --notes-file …`
+   (gh は `--prerelease` と `--latest=false` を一緒に受け付ける。`--latest=false` は無くても latest にはならないが、意図を明示するため重ねる。10.10)。
 4. 資産の名前は必ず **`zahyou.exe`**(更新の確認はこの名前で探す。digest は GitHub が付ける)。
 5. **公開した β の資産は差し替えない**。直したら N を上げて新しい Release にする(β の更新の確認は「今より新しい版」しか出さないので、
    同じタグの建て直しは β の利用者に届かない)。
@@ -806,6 +807,7 @@ WARP は起動から 1.5 秒の間に CPU を 11 秒使う(全部のコアでシ
 7. **間違えて正式の Release(pre-release の印なし)で出すと、そのまま v6 の全員に入れ替えが出る**。印を付け忘れたら、すぐ pre-release に直す。
 8. β の間に v6 の修正版を出すときは、ふつうの Release(Latest)でよい(β の利用者は大きな版 7 しか見ないので影響しない)。
 9. 正式版: 1〜2 か月使って安定を確かめてから、`native-rs` を main に統合し、`7.0.0` に上げて **ふつうの Release(Latest)** で出す。
+   gh では `--latest` を明示する(新しく公開する正式の Release は API の既定で latest になるが、Docs の画面の説明と書き方が食い違うため。10.10)。
    これで v6 の利用者にも入れ替えが出る(v6 は digest しか比べないので)。β の利用者にも出る。
 10. 正式版のあとに v6 の修正版を出すときは `--latest=false`(latest が v6 に戻ると、v6 の利用者向けの意図とずれる。v7 の利用者は
     latest が古ければ入れ替えに誘わないので守られる)。
@@ -823,12 +825,14 @@ WARP は起動から 1.5 秒の間に CPU を 11 秒使う(全部のコアでシ
   exe の通信を手元で止めて撮る。README・マニュアル・release-v7.md は欄の説明とβの出し方に)。
 - 本物の nova へキーで送る道は試していない(偽の nova だけ)。β の間に一度、利用者の判断で「オンラインのみ」で解いて確かめたい
   (星の位置と、解けなければ画像が nova へ送られる)。
-- GitHub の「latest はプレリリースを返さない」「プレリリースは latest にできない」「新しい正式の Release は既定で latest になる」は記憶による
-  (このフォルダーでは外の資料を読まない約束)。claude-research のセッションで公式の説明を確かめたい。
+- ~~GitHub の「latest はプレリリースを返さない」「プレリリースは latest にできない」「新しい正式の Release は既定で latest になる」は記憶による
+  (このフォルダーでは外の資料を読まない約束)。claude-research のセッションで公式の説明を確かめたい。~~ → claude-research が公式の文書と
+  gh のソースで確かめた。3 つとも記憶のとおりで、gh は `--prerelease` と `--latest=false` を一緒に受け付ける(10.10)。
 - ~~画像そのものを外へ送ることへの同意の取り方は未決(7.5。v6 と同じく、送る前に聞かない)。~~ → 同意を取らずに送ってよいと決まった(10.9 節)。
-- **nova.astrometry.net が、API で送った画像を公開するか**を確かめていない。zahyou は送るときに公開の扱い(`publicly_visible` など)を
+- ~~**nova.astrometry.net が、API で送った画像を公開するか**を確かめていない。zahyou は送るときに公開の扱い(`publicly_visible` など)を
   指定していない(Python の v6 も同じ)。nova の既定では公開されるとみている(記憶による。このフォルダーでは外の資料を読まない約束なので、
-  claude-research で確かめたい)。公開されるなら、利用者への説明に足すか、送るときに公開しない指定を付けるかを決める。
+  claude-research で確かめたい)。公開されるなら、利用者への説明に足すか、送るときに公開しない指定を付けるかを決める。~~ → 付けないと公開
+  (`'y'`)だった。公開しない指定 `publicly_visible = "n"` を付けると決まり、Rust 版に入れた(10.10)。
 - gui.json の API キーは平文(決定どおり)。
 - 描画: リモート デスクトップ・ドライバーの無い PC・Intel や AMD の OpenGL・ノート PC の電池は未確認。61 MP の最初のテクスチャの引っかかり
   (108〜129 ms)と、縮小の段を CPU 側にも持つこと(61 MP で約 320 MB)は figure.rs で減らせる(9.6)。DX12 は閉じてから終わるまで約 0.5 秒。
@@ -845,3 +849,67 @@ WARP は起動から 1.5 秒の間に CPU を 11 秒使う(全部のコアでシ
 - `cargo test -p zahyou`(help_tab.rs を直したあと): 78 本通過・失敗 0(重い 2 本は既定どおり飛ばした)。
 - ノートブックはエンジンを「同じフォルダーの `zahyou_engine.py`」という名前で探す(セル A)ので、ノートブックの名前を変えても動く。
   資産の名前に改名したノートブックで、セル A とセル C(方法「オフラインのみ」)を動かして確かめた(docs/release-v7.md 6 節)。
+
+### 10.10 2026-10-16 の 3 回目の決定(nova の公開)と、GitHub の事実の確かめ(rust 係)
+
+| | 決定 | 反映 |
+|---|---|---|
+| 6 | オンライン解析で nova.astrometry.net に送るとき、**`publicly_visible = "n"`(公開しない)を付ける**。Rust 版と Python 版(ノートブックを含む)の両方。文書に「nova に送ったものは第三者に見られることがある」と書く | 下のとおり。Python 版(`dev/zahyou_core.py` の `solve_online`。ノートブックはこれを使う)は native-solver の係が直し、あとで人が取り込む |
+
+**根拠**(claude-research の調べ物 `notes/zahyou-v7-release-facts-20261016.md`。公式の文書とサーバー・astroquery・gh のソースを読んだだけで、
+nova へ送ったり Release を作ったりはしていない。出典の URL は docs/release-v7.md 0.1 節):
+
+- nova のサーバーは `publicly_visible` が無いと `'y'`(公開)にする(画像も星の位置のリストも同じ受付処理)。公開だと画像のページ・「最近送られた
+  画像」・Explore・利用者ごとの一覧などに、API キーの持ち主のアカウント名で載る。astroquery は既定値を自分では付けないので、v6 も Rust 版も
+  これまでは公開で送っていたことになる(既定のキーなら作者のアカウントで。サーバーのソースの読みで、実サイトの一覧で確かめたのではない)。
+- `"n"` は保存されるだけで、解く条件には使われない(解き方は変わらない)。
+- ただしサーバーのコードの読みでは、`"n"` でも一覧(最近・全件・利用者ごと・検索)・画像ファイルとサムネイル・API の `/api/jobs/<id>/…` は
+  公開の印を見ていない → 完全な非公開ではない可能性がある(**実サイトでは未確認**)。だから利用者向けの文書には「第三者に見られることがある」と書いた。
+- GitHub: `releases/latest` はプレリリースと下書きを返さない。プレリリースは latest にできない。新しく公開する Release の `make_latest` は既定 `true`
+  (正式版は既定で latest)。Docs の画面の説明(選ばなければセマンティックバージョニングで自動)とは書き方が食い違う。`gh release create` は
+  `--prerelease` と `--latest=false` を一緒に受け付け、`--latest` を付けたときだけ `make_latest` を送る。→ 10.4 と 10.7 の「記憶による」を書き換え、
+  docs/release-v7.md の手順を β は `--prerelease --latest=false`、正式版は `--latest` を明示する形にした。
+
+**Rust 版の実装**(`crates/zahyou-net/src/nova.rs`):
+
+- `PUBLICLY_VISIBLE = "n"` と `private_settings(settings)`: 先頭に `("publicly_visible", "n")`、続けて呼ぶ側の設定(呼ぶ側が `publicly_visible` を
+  入れていても捨てて `"n"`)。星の位置のリストの本文(`source_list_body`)と画像の本文(`upload_body`)の両方がこれを通るので、
+  `NovaClient::submit_source_list`・`submit_image` を誰がどう呼んでも `"n"` で送る。ログインの本文には付けない。
+- 並びは Python 版と同じ先頭(Python は `settings = {"publicly_visible": "n"}` に手がかりを足す。astroquery は渡された順のまま `json.dumps` する)ので、
+  request-json は 1 文字まで Python と同じ。
+
+**試験**(本物の nova へは送っていない。偽の nova・astroquery の記録・送る本文の検査だけ):
+
+- `rs/testdata/gen_net.py` で `net_python.json` を作り直した。星の位置のリストの 4 場面は前と同じく Python の `solve_online` を通して astroquery の
+  要求を記録(native-solver の作業ツリーの、`publicly_visible` を足した `dev/zahyou_core.py` を読んだ)。画像の場面は、前は astroquery を手で
+  呼んでいたのを、`solve_online` に星のリストを渡さず astroquery の `_no_source_detector` を立てて記録するように変えた(Python 版が付ける設定が
+  そのまま入る)。送る要求の request-json に `publicly_visible='n'` が無ければ値を作らずに止まる(`check_private`)。作り直しで変わったのは
+  送る 5 本の要求の本文だけ(星図データ・書き方・天体名・更新の部分は前と同じ値になることを確かめた)。
+- `tests/parity.rs` `nova_bodies_match_python`: 画像の request-json を `upload_body` の本文から取り出して Python の記録と比べる形にした。
+- `tests/nova_flow.rs` に `sends_publicly_visible_n_with_source_list_and_image` を足した: 偽の nova に星の位置のリスト(解けない)→ 画像(解ける)と
+  送らせ、受け取った本文(form と multipart)から request-json を取り出して、`publicly_visible` が `"n"` で 1 つだけ先頭にあること・手がかりと
+  星の位置が残っていること・ログインには無いことを見る。呼ぶ側が `"y"` を渡しても `"n"` で送ることも、窓口の関数で直接見る。
+  `private_settings` の行を外すと、この試験と Python の記録と比べる 2 本(`source_list_flow_matches_python`・`image_upload_flow_matches_python`)が落ちる
+  ことを確かめた(戻してから試験を通した)。
+- 手引き: ［使い方］(help_tab.rs)に 3 行足し、試験 `手引きは外へ送るものと止め方を説明する` に「公開しない指定」「第三者に見られることがあります」
+  「完全には隠れない場合があります」を足した。README・マニュアル v4(2.3。PDF を組み直した。33 ページのまま)・rs/README.md も同じ趣旨。
+
+**試験の結果**(実測。同じ機械。cargo の試験と exe は LOCALAPPDATA・ZAHYOU_CACHE・ZAHYOU_SETTINGS を一時のフォルダーへ向け、
+`ZAHYOU_OFFLINE_TESTS=1`。exe はさらに ALL_PROXY・HTTPS_PROXY・HTTP_PROXY をつながらない `0.0.0.0:9` にして、`--update-check` が
+外へ出ずに失敗することを先に確かめた):
+
+| 試験 | 結果 |
+|---|---|
+| `cargo test -p zahyou-net -p zahyou` | **通過 124 本・失敗 0**(zahyou 78・zahyou-net 46。外への問い合わせの 3 本と、重い・手で走らせる 3 本は既定どおり飛ばした。天体名を CDS に引く 1 本は ZAHYOU_OFFLINE_TESTS で飛ばした)。1 分 30 秒 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | 指摘 0 |
+| `tools/test_tools.py`・`tools/gen_notices.py --check`・`tools/check_licenses.py` | 15 本通過・最新(クレート 213 個・本文 35 種。依存は増えていない)・許可リストの外なし |
+| `tools/test_make_release_assets.py`(release の exe を `ZAHYOU_RELEASE_EXE` で渡した) | 22 本通過 |
+| `tools/make_release_assets.py`(一時のフォルダーへ) | version・notices・manual・notebook の 4 つの検査が通り、`sha256sum -c` で 6 つとも OK。組み直したマニュアル v4 はリポジトリの PDF とバイト単位で同じ |
+| release の `--selftest --offline`(基準の実写) | **25/25**・rc=0(1.594′ / 0.916′ 東 / 1.304′ 北 / 1.4610″/px)。exe 14,041,088 バイト |
+| マニュアル v4 の組み直し | 直す前の make_manual.py(HEAD)で組むとリポジトリの PDF と同じバイト(作成日時の固定が効いている)。直したあとは 2.3 の「送るもの」に 1 段落増え、33 ページのまま |
+| 利用者の `%LOCALAPPDATA%\zahyou` の cache.json・gui.json | sha256 は作業の前後で同じ |
+
+- 本物の nova の扱い(`"n"` で本当に一覧から隠れるか)は確かめていない(送っていない)。docs/release-v7.md 0 節の残りの 1 に、β の間に一度
+  「オンラインのみ」で送って確かめるときの見どころを足した。
+- β の資産のノートブック(`zahyou_v7_beta.ipynb`・`zahyou_engine.py`)は、Python 版の直し(native-solver)を取り込んで `dev/build_nb.py` で
+  作り直すまで、`publicly_visible` を付けずに送る。β を出す前に取り込むこと。

@@ -6,7 +6,8 @@ zahyou-net の照合用の値を Python 版(基準実装)から作る。
 使うもの(読むだけ。どれも書き換えない):
   gui/zahyou_env.py     星図データの段・名前・URL・画角・おすすめ・ヘッダーの検査・human
   gui/zahyou_update.py  Releases の応答の読み方と確認の文言
-  dev/zahyou_core.py    solve_online(nova に送る設定)・resolve_target_name のキャッシュの鍵と書き方
+  dev/zahyou_core.py    solve_online(nova に送る設定。公開しない指定 publicly_visible='n' も)・
+                        resolve_target_name のキャッシュの鍵と書き方
   astroquery / astropy  nova・VizieR・Sesame へ送る要求そのもの(通信は差し替えて、外へは出さない)
 
 Python 版のリポジトリは環境変数 ZAHYOU_PY_REPO で変えられる(既定 C:\\Users\\yoshi\\Documents\\GitHub\\zahyou)。
@@ -339,9 +340,11 @@ def gen_nova():
         cases.append({"hint": hint, "scale": scale, "requests": log,
                       "solved": hdr is not None and len(hdr) > 0})
 
-    # 画像を送るとき(Python は photutils があると自前で検出して星のリストを送るので、
-    # force_image_upload=True で astroquery の upload そのものを記録する)
-    from astroquery.astrometry_net import AstrometryNet
+    # 画像を送るとき。solve_online に星のリストを渡さず(= 画像そのものを送る道)、astroquery が
+    # 自前で星を検出しないように _no_source_detector を立てる(photutils があると、画像を送らずに
+    # 星のリストを送ってしまうため)。こうすると solve_online が astroquery に渡す設定(公開しない指定と
+    # 手がかり)を、そのまま astroquery の upload の要求として記録できる
+    from astroquery.astrometry_net import core as anc
     with tempfile.TemporaryDirectory() as d:
         img = os.path.join(d, "撮影 01.fits")
         with open(img, "wb") as f:
@@ -355,20 +358,38 @@ def gen_nova():
         ]
 
         def run_img(_img):
-            ast = AstrometryNet()
-            ast.api_key = "KEY-0123456789"
-            settings = dict(center_ra=10.5, center_dec=-20.25, radius=5.0,
-                            scale_units="arcsecperpix", scale_type="ul",
-                            scale_lower=1.2345 * 0.75, scale_upper=1.2345 * 1.25)
-            import warnings
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                return ast.solve_from_image(img, force_image_upload=True, solve_timeout=60,
-                                            verbose=False, **settings)
+            return zc.solve_online(img, "KEY-0123456789", sources=None, shape=None,
+                                   timeout=60, hint_radec=(10.5, -20.25), hint_radius_deg=5.0,
+                                   scale_hint=1.2345)
         script_runner = run_img
-        log, hdr = capture_nova(script)
-    return {"cases": cases, "sources": sources, "shape": list(shape), "wcs_text": text,
-            "wcs_cards": images, "image_upload": {"requests": log, "result_empty": not hdr}}
+        orig_nsd = anc.AstrometryNetClass._no_source_detector
+        anc.AstrometryNetClass._no_source_detector = True
+        try:
+            log, hdr = capture_nova(script)
+        finally:
+            anc.AstrometryNetClass._no_source_detector = orig_nsd
+    out = {"cases": cases, "sources": sources, "shape": list(shape), "wcs_text": text,
+           "wcs_cards": images, "image_upload": {"requests": log, "result_empty": not hdr}}
+    check_private(out)
+    return out
+
+
+def check_private(nova):
+    """送る要求(星のリスト・画像)の request-json に publicly_visible='n'(公開しない)が入っていること。
+
+    2026-10-16 の決定。Python 版(dev/zahyou_core.py の solve_online)が付けていなければ、
+    照合用の値を作らずに止める(Rust 版は必ず付けるので、付けていない記録とは合わない)。
+    """
+    sent = [r for c in nova["cases"] for r in c["requests"]] + nova["image_upload"]["requests"]
+    posts = [r for r in sent if r["url"].endswith(("/api/url_upload", "/api/upload"))]
+    if len(posts) != len(nova["cases"]) + 1:
+        raise SystemExit(f"送る要求の数が合いません ({len(posts)})")
+    for r in posts:
+        rj = json.loads(r["request_json"])
+        if rj.get("publicly_visible") != "n":
+            raise SystemExit(
+                f"{r['url']} の request-json に publicly_visible='n' がありません "
+                f"(Python 版 {REPO} の dev/zahyou_core.py の solve_online が付けていない)")
 
 
 # ------------------------------------------------------------------- 更新 ---
