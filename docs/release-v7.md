@@ -1,6 +1,7 @@
 # v7 を配る手順(β版 → 正式版)
 
-2026-10-16 作成、同日に 2026-10-16 の決定(API キーの欄・DirectX 12 を既定・v7 は当面β版)に合わせて書き直した(下書き)。
+2026-10-16 作成、同日に 2026-10-16 の決定(API キーの欄・DirectX 12 を既定・v7 は当面β版)と、2 回目の決定
+(画像は同意を取らずに送ってよい・β の Release にも exe 以外を付ける)に合わせて書き直した(下書き)。
 v6 までの手順(`gui/build_exe.ps1` = PyInstaller、`dev/make_notices.py`)を、cargo の release ビルドの exe・
 `rs/THIRD-PARTY-NOTICES.md`・SHA256 の作り直しに置き換えたもの。
 ビルドと試験の細かい説明は [../rs/README.md](../rs/README.md)、決定と実測は [rust-port.md](rust-port.md) の 9・10 節
@@ -14,23 +15,24 @@ main に統合してふつうの Release で出す。** 1〜7 節がβ版、8 �
 
 ## 0. 決まったことと、残っていること
 
-決まったこと(2026-10-16。rust-port.md 10.1 節):
+決まったこと(2026-10-16。rust-port.md 10.1・10.9 節):
 
 | | 決定 | 実装 |
 |---|---|---|
 | API キー | ［解析］タブの「解析」の枠に欄(伏せ字・「表示」・「元に戻す」)。**既定は元のキー(v6 と同じ)** | gui.json の `api_key` に平文で保存。空なら問い合わせない。環境変数 ASTROMETRY_API_KEY は gui.json に `api_key` が無いときの初めの値だけ。キーの値は文書・ログ・画面の文に書かない |
 | 描画 | **DirectX 12 を既定**(主の画面の GPU・小さな塊)。開けなければ OpenGL → ソフトウェア描画(WARP) | 手で選ぶ引数 `--dx12` / `--glow` / `--gpu display\|low\|high\|warp`。想定は「Windows 11 が動く、RAM 8 GB 以上のノート PC」 |
 | v6 からの移り方 | **v7 は当面β版。v6 の自動更新の対象にしない** | 版 7.0.0-beta.N をプレリリースで出す(v6 の更新係が見る latest に出ない)。β 自身は v7 の新しいβ版と正式版を探す |
+| 画像を外へ送ること | **同意を取らずに送ってよい**(今の動きのまま。v6 と同じ) | 方法が「自動」か「オンラインのみ」で、キーがあり、ネットにつながっていると、まず検出した星の位置(と画像の大きさ・手がかり)を、それで解けなければ画像ファイルそのもの(ファイル名も)を nova.astrometry.net へ送る。送らない方法(方法を「オフラインのみ」/ API キーの欄を空)と一緒に、README・マニュアル 2.3・［使い方］タブに書いた |
+| β の Release の資産 | **exe 以外も付ける**(v6 の Release に合わせる) | `zahyou.exe`・`zahyou_v7_beta.ipynb` と `zahyou_engine.py`・`zahyou-manual-v4.pdf`・`LICENSE.txt`・`THIRD-PARTY-NOTICES.md`(rs/ のもの)・`SHA256SUMS.txt`。`rs/tools/make_release_assets.py` がそろえて検査する(6 節)。ノートブックはエンジンを名前で探すので、改名しても動く(確かめた) |
 
 残っていること:
 
 | | 何を決めるか | 今の状態 |
 |---|---|---|
-| 1 | **画像そのものを外へ送ることへの同意の取り方** | v6 と同じく、送る前に聞かない(「自動」で既定のキーがあると、ネットがあれば星の位置を nova へ送り、解けなければ画像も送る)。README とマニュアルに `決めること:` の印 |
-| 2 | β の Release に何を付けるか(exe だけか、THIRD-PARTY-NOTICES.md・LICENSE.txt・マニュアル v4・ノートブック 2 つも付けるか) | 10.7 節は exe だけを挙げている。README は「β の間のノートブックはブランチの直下」と書いた(付けるならタグへのリンクにする) |
-| 3 | ノートブックの名前(`zahyou_v6.ipynb` のままか)と版の文字(`dev/nb_main.py` のログの見出しは `zahyou v7-dev`) | ノートブックは β の Release に付けるかどうかと一緒に決める |
-| 4 | GitHub の「latest はプレリリースを返さない」「プレリリースは latest にできない」「新しい正式の Release は既定で latest になる」の確かめ | 記憶による(rust-port.md 10.8)。claude-research のセッションで公式の説明を確かめてから出す |
-| 5 | 本物の nova へキーで送る道の確かめ | 偽の nova でだけ試した(10.8)。β の間に一度、ユーザーの判断で「オンラインのみ」で解いて確かめる(星の位置と、解けなければ画像が nova へ送られる) |
+| 1 | GitHub の「latest はプレリリースを返さない」「プレリリースは latest にできない」「新しい正式の Release は既定で latest になる」の確かめ | 記憶による(rust-port.md 10.8)。claude-research のセッションで公式の説明を確かめてから出す |
+| 2 | 本物の nova へキーで送る道の確かめ | 偽の nova でだけ試した(10.8)。β の間に一度、ユーザーの判断で「オンラインのみ」で解いて確かめる(星の位置と、解けなければ画像が nova へ送られる) |
+| 3 | **nova.astrometry.net が、API で送った画像を公開するか** | zahyou は送るときに公開の扱い(`publicly_visible` など)を指定していない(v6 も同じ)。nova の既定では公開されるとみている(記憶による。rust-port.md 10.8)。確かめて、公開されるなら利用者への説明に足すか、公開しない指定を付けるかを決める |
+| 4 | ノートブック版のログの見出しの版の文字 | `dev/nb_main.py` は `zahyou v7-dev` のまま(β の版 7.0.0-beta.N と合っていない)。直したら `python dev/build_nb.py` |
 
 ## 1. v6 の利用者がどうなるか
 
@@ -124,26 +126,39 @@ python dev/make_manual.py                                     # 天体画像解�
 - 版を上げたら、少なくとも `app-help.png`(「いまの版」)は撮り直す(`--only app-help`)。
 - 画面の並びが変わったら、切り抜きの枠(`shoot_docs.py` の NUMBERS など)を、撮ったものを見て直す。
 - **ページ数を書く箇所が複数ある**(Release 本文と配布ページの txt に書くなら、PDF を組んでから数える)。2026-10-16 の下書きは 33 ページ。
+- `make_manual.py` は作成日時などを固定して組む(ReportLab の invariant)ので、同じ make_manual.py とフォントからは同じバイトの PDF になる。
+  6 節の道具は組み直して、リポジトリの PDF と突き合わせる。make_manual.py を直したら、PDF も組み直して一緒に commit する。
+- ノートブック版を直したら `python dev/build_nb.py`(直下の `zahyou_engine.py` と `zahyou_v6.ipynb` のセルの中身を作り直す)。
 - 撮影に使う画像 `Capture_00001 00_10_33.fits` と、星図データ(既定の `C:\AstrometryData`)は作者の PC にあるもの。
 
-## 6. SHA256 を作る
+## 6. 資産をそろえて SHA256 を作る(`rs/tools/make_release_assets.py`)
 
-資産を 1 つのフォルダーに集めてから数える。リポジトリの直下には .gitignore が無いので、**リポジトリの外**に置く
-(例 `%USERPROFILE%\zahyou-dist-v7.0.0-beta.N\`。下のコマンドの `dist` はここを指す)。
-
-| 資産の名前 | 元 | β |
-|---|---|---|
-| `zahyou.exe` | 4 節の `$EXE`(**名前は必ず `zahyou.exe`**。更新の確認はこの名前で探す) | 必ず |
-| `THIRD-PARTY-NOTICES.md` | `rs/THIRD-PARTY-NOTICES.md`(exe の［使い方］タブでも読める) | 0 節の 2 |
-| `LICENSE.txt` | `LICENSE` の写し | 0 節の 2 |
-| `zahyou-manual-v4.pdf` | `天体画像解析プログラム「zahyou」導入・運用マニュアルv4.pdf` | 0 節の 2 |
-| `zahyou_v6.ipynb` と `zahyou_engine.py` | ノートブック版 | 0 節の 2・3 |
-
-```powershell
-Get-FileHash .\dist\* -Algorithm SHA256 | Format-Table Hash, Path -AutoSize
+```bash
+DIST=$USERPROFILE/zahyou-dist-v7.0.0-beta.N        # リポジトリの外。空か無いフォルダー
+python rs/tools/make_release_assets.py --exe "$(cygpath -w $EXE)" --out "$(cygpath -w $DIST)"
+(cd "$DIST" && sha256sum -c SHA256SUMS.txt)
 ```
 
-SHA256 は Release の本文に書く。正式版では配布ページの `はじめにお読みください.txt` にも書く(8 節)。
+そろえるもの(v6 の Release に合わせる。名前は版から決まる):
+
+| 資産の名前 | 元 | 中身の検査 |
+|---|---|---|
+| `zahyou.exe` | 4 節の `$EXE`(**名前は必ず `zahyou.exe`**。更新の確認はこの名前で探す) | 版情報(FileVersion・ProductVersion・数の版・プレリリースの印)と `--engine-check` の version= が `rs/Cargo.toml` の版と同じ |
+| `zahyou_v7_beta.ipynb` | リポジトリ直下の `zahyou_v6.ipynb`(v6 と紛れないよう版の名前で。正式版なら `zahyou_v7.ipynb`) | セルの並びと中身が `dev/build_nb.py` の出力と同じ(出力の例はリポジトリのものを残す) |
+| `zahyou_engine.py` | リポジトリ直下 | `dev/build_nb.py` の出力と同じ |
+| `zahyou-manual-v4.pdf` | `天体画像解析プログラム「zahyou」導入・運用マニュアルv4.pdf` | `dev/make_manual.py` で組み直したものとバイト単位で同じ |
+| `LICENSE.txt` | `LICENSE` | — |
+| `THIRD-PARTY-NOTICES.md` | `rs/THIRD-PARTY-NOTICES.md`(exe の［使い方］タブでも読める) | exe に埋め込んだものと同じ・`gen_notices.py --check` で最新 |
+| `SHA256SUMS.txt` | 上の 6 つの SHA256(`sha256sum -c` の形、LF) | 書いたあと読み直して照合 |
+
+- 検査が 1 つでも落ちたら、何も書かずに終了コード 1。`--skip version|notices|manual|notebook` は試しのとき用(最後に「確かめていない」と出る)。
+- 出力先は、空か無いフォルダーで、リポジトリの外に限る(直下に .gitignore が無いので)。
+- 文字のファイル(.ipynb・.py・.txt・.md)は改行を LF にそろえて書く(作業ツリーが CRLF でも SHA256 が変わらない。`LICENSE.txt` は
+  v6 の Release のものと同じ SHA256 になった)。exe と PDF はそのまま写す。
+- 試験: `python -B rs/tools/test_make_release_assets.py`(release の exe があれば `ZAHYOU_RELEASE_EXE` で渡すと版情報も確かめる)。
+- 2026-10-16 に、`7.0.0-beta.1`(help_tab.rs を直したあとの release の exe、14,039,040 バイト)で 4 つの検査が通り、`sha256sum -c` で 6 つとも OK。
+
+SHA256 は Release の本文にも書く(SHA256SUMS.txt を貼る)。正式版では配布ページの `はじめにお読みください.txt` にも書く(8 節)。
 
 ## 7. β版を GitHub に出す(rust-port.md 10.7 節。ユーザーの了承のあとで)
 
@@ -151,10 +166,15 @@ SHA256 は Release の本文に書く。正式版では配布ページの `は�
 2. Release は **「Set as a pre-release」に印、「Set as the latest release」は付けない**。下書きで作り、中身を見てから出す:
 
 ```bash
+# 資産は 6 節でそろえた $DIST の 7 つ(SHA256SUMS.txt も)。本文は $DIST の外に書いておく
 gh release create v7.0.0-beta.N --repo Akashi3060/zahyou --target native-rs --prerelease --draft \
-  --title "zahyou v7.0.0-beta.N (β版)" --notes-file dist/release-notes.md dist/zahyou.exe   # 付ける資産は 0 節の 2
+  --title "zahyou v7.0.0-beta.N (β版)" --notes-file release-notes-v7.0.0-beta.N.md \
+  "$DIST/zahyou.exe" "$DIST/zahyou_v7_beta.ipynb" "$DIST/zahyou_engine.py" "$DIST/zahyou-manual-v4.pdf" \
+  "$DIST/LICENSE.txt" "$DIST/THIRD-PARTY-NOTICES.md" "$DIST/SHA256SUMS.txt"
+# 出す前に確かめる: pre-release の印が付いている・Latest でない・下書き・資産が 7 つで digest が SHA256SUMS.txt と同じ
 gh release view v7.0.0-beta.N --repo Akashi3060/zahyou --json isPrerelease,isDraft,assets \
-  --jq '.isPrerelease, (.assets[]|[.name,.size,.digest]|@tsv)'                              # true と、6 節の SHA256
+  --jq '"prerelease=\(.isPrerelease) draft=\(.isDraft)", (.assets[]|[.name,.size,.digest]|@tsv)'
+gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                                # v6 のまま
 gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false                        # 出す(--prerelease は付いたまま)
 ```
 
@@ -164,8 +184,10 @@ gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false            
 4. **間違えて正式の Release(pre-release の印なし)で出すと、そのまま v6 の全員に入れ替えが出る**。印を付け忘れたら、すぐ pre-release に直す。
 5. Release 本文に書くこと(v6 の本文を土台に): β版であること・v6 の更新には出ないこと・v6 との行き来(1 節)、ダウンロードの警告(5 枚の図。
    exe の中身によらない)、画面の写真(raw の URL は **`…/zahyou/v7.0.0-beta.N/docs/img/…`(タグ)**で書く。`main` には β の写真が無い)、
-   v6 からの変更(WSL 不要・Rust・速さと大きさ。数字は README の「実測値」と同じもの)、API キーの欄と、外へ送るもの(星の位置、解けなければ画像)、
-   `zahyou.exe` の SHA256、作った道具の版(rustc・gcc)、動作環境(想定は Windows 11・RAM 8 GB 以上のノート PC、確かめた PC は 1 台だけ)、
+   v6 からの変更(WSL 不要・Rust・速さと大きさ。数字は README の「実測値」と同じもの)、API キーの欄と、外へ送るもの(まず星の位置、
+   解けなければ画像ファイルそのもの。送る前に聞かない)と送らない方法(方法を「オフラインのみ」/ API キーの欄を空)、
+   付けた資産の一覧(6 節)と SHA256SUMS.txt の中身、ノートブックの名前(`zahyou_v7_beta.ipynb`。中身はリポジトリの `zahyou_v6.ipynb`)、
+   作った道具の版(rustc・gcc)、動作環境(想定は Windows 11・RAM 8 GB 以上のノート PC、確かめた PC は 1 台だけ)、
    描き方の手動の選び方(`--glow`・`--gpu`)、問い合わせのときに欲しいもの(ログの「描画: …」の行、遅いときは `--bench-ui` の記録)、
    ライセンス(Rust のクレート 213 個、GPL・LGPL・MPL なし)。
 6. 出したあとに確かめる(10.7 節の 6):
@@ -181,7 +203,7 @@ gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false            
 ## 8. 正式版(7.0.0)を出す(1〜2 か月使って安定を確かめてから)
 
 1. `native-rs` を main に統合する(PR。`native-rs` は Python 版の `native-solver` を取り込んでいる)。`rs/Cargo.toml` の版を `7.0.0` にし、
-   2〜6 節をやり直す(版を上げると「(β版)」は自然に消える)。
+   2〜6 節をやり直す(版を上げると「(β版)」は自然に消える。ノートブックの資産名は `zahyou_v7.ipynb` になる)。
 2. README を正式版の形にする: β版のタグへのリンク(`releases/tag/v7.0.0-beta.N`)を `releases/latest` に戻し、「いまの v7 はβ版です」と
    「v6 とβ版」の段落、ノートブックの入手先の β の注記を書き換える(README 冒頭の HTML コメントに書いてある)。マニュアルの表紙の「版」の行と
    2.1・9.1・付録 B も同じ。
@@ -206,6 +228,9 @@ gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false            
   `はじめにお読みください.txt`): TrueNAS の root(一時 cronjob)で **`cat 新しいもの > 今のもの`**。inode が変わらないので、所有者・ACL・
   公開共有の設定はそのまま。作業ファイルは書ける `R:\AstroKIT\` に置き、終わったら root で消す(root が書いたものは `chown YoFu:YoFu` しないと
   Windows から消せない)。手順の型は CLAUDE.md の TrueNAS の節と、メモリの zahyou-release-pipeline。
+- 配布ページのファイルの名前は Release の資産と違う(配布ページは `zahyou_v6.ipynb`・`…マニュアルv3.pdf`、資産は `zahyou_v7.ipynb`・
+  `zahyou-manual-v4.pdf`)。v6 の名前の中身を v7 のものに替えるか、v7 の名前のファイルを足すか(下)を決める。`SHA256SUMS.txt` は
+  配布ページでは星図データの zip 用なので、Release の `SHA256SUMS.txt` で上書きしない。
 - **新しい名前のファイル**(`…マニュアルv4.pdf`)は `cat >` では作れない(新しい inode になる)。作ったあと所有者と ACL を今あるファイル
   (例 `…マニュアルv3.pdf`)と同じにしたか、`stat` と ACL の表示で見比べる。v3 の PDF を残すか消すかも決める。
 - `はじめにお読みください.txt` は v6 の記述が多い。直すところ: 大きさ(102 MB)・起動(4 秒)・誤検知の理由(Python をまとめているため)・

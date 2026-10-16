@@ -2,7 +2,7 @@
   zahyou v7 のβ版(7.0.0-beta.1。GitHub のプレリリースで出す)の README の下書き(2026-10-16)。
   2026-10-16 の決定を入れた: API キーは［解析］タブの欄(既定のキー入り)/ 描画は DirectX 12 を既定 /
   v7 は当面β版で、v6 の自動更新には出さない(1〜2 か月使ってから正式版 7.0.0)。
-  残っている「決めること:」は、画像そのものを外へ送ることへの同意の取り方だけ。
+  画像を外へ送ることは「同意を取らずに送ってよい」と決まった(2026-10-16 の 2 回目)。何が送られるかと止め方を書く。
   正式版にするときは、β版のタグへのリンク(releases/tag/v7.0.0-beta.N)を releases/latest に戻し、β版の段落を消す(docs/release-v7.md)。
   数字は docs/rust-port.md の 7.3・9.3・10.6 節の実測(Core Ultra 7 265K)。画面写真は rs/tools/shoot_docs.py で、
   exe の通信を手元で止めて撮ったもの(nova へは何も送っていない)。
@@ -46,6 +46,20 @@
 
 **[Releases（v7.0.0-beta.1）から `zahyou.exe` を落として、ダブルクリックするだけです。](https://github.com/Akashi3060/zahyou/releases/tag/v7.0.0-beta.1)**
 Python も VS Code も要りません。インストールも不要で、ファイルは 1 個だけです。
+
+<details>
+<summary><b>β版の Release に付けているファイル</b></summary>
+
+| ファイル | 中身 |
+|---|---|
+| `zahyou.exe` | **これだけで動きます**（デスクトップ版） |
+| `zahyou_v7_beta.ipynb` と `zahyou_engine.py` | ノートブック版（[下記](#ノートブック版中身を読んだり書き換えたい人へ)。2 つを同じフォルダーに置く） |
+| `zahyou-manual-v4.pdf` | 導入・運用マニュアル v4 |
+| `LICENSE.txt` | zahyou のライセンス（MIT） |
+| `THIRD-PARTY-NOTICES.md` | `zahyou.exe` に入っているライブラリの一覧とライセンス（exe の［使い方］タブでも読めます） |
+| `SHA256SUMS.txt` | 上の全部の SHA256（中身が本物か確かめたいとき） |
+
+</details>
 
 1. `zahyou.exe` をダブルクリック（窓が出るまで 1 秒ほど）
 2. **［解析］** タブで「参照...」を押して画像を選ぶ（窓へドラッグしても選べます）
@@ -133,7 +147,7 @@ Windows は「まだ広く出回っていないファイル」を見慣れない
 その場合はウイルス対策ソフト側で `zahyou.exe` を除外に登録してください。
 
 中身を確かめたい方は、[Releases](https://github.com/Akashi3060/zahyou/releases/tag/v7.0.0-beta.1)
-に載せている SHA256 と、手元のファイルのハッシュを見比べてください。
+に付けている `SHA256SUMS.txt`（と Release の本文）の SHA256 と、手元のファイルのハッシュを見比べてください。
 **確かめなくても使えます。**気になる方向けの補足です。
 
 ```powershell
@@ -198,8 +212,17 @@ Get-FileHash .\zahyou.exe -Algorithm SHA256
 - **欄を空にすると、ネットがあっても nova.astrometry.net には問い合わせず、はじめからオフラインで解きます**
   （「オンラインのみ」は欄が空だと始められません）
 
-送るのはまず検出した星の位置で、それで解けなければ画像そのものを送ります。
-<!-- 決めること: 画像そのものを外へ送ることへの同意の取り方(今は v6 と同じく、送る前に聞かない。docs/rust-port.md 10.8) -->
+#### nova.astrometry.net へ送るもの
+
+方法が「自動」か「オンラインのみ」で、API キーの欄にキーがあり、ネットにつながっていると、
+**送る前に確かめることはせずに**次のものを送ります（v6 と同じです）。
+
+1. まず、**検出した星の位置**（画像の中の座標の一覧）と画像の大きさ。
+   目標の方向や画素スケールが分かっていれば、探す範囲の手がかりも送ります
+2. 星の位置だけで解けなければ、**画像ファイルそのもの**（ファイル名も）
+
+**送りたくないときは、「方法」を「オフラインのみ」にするか、API キーの欄を空にしてください。**
+どちらでも、解析は zahyou の中だけで行い、星の位置も画像も nova.astrometry.net へは送りません（星図データが要ります）。
 
 ---
 
@@ -395,15 +418,15 @@ exe（Rust）とノートブック版（Python）は別々に書いたプログ�
 
 | ファイル | 中身 |
 |---|---|
-| `zahyou_v6.ipynb` | 操作画面（3 つの短いセル） |
+| `zahyou_v7_beta.ipynb` | 操作画面（3 つの短いセル） |
 | `zahyou_engine.py` | 解析の中身（開く必要はありません） |
 
-**β版の間は、このブランチ（`native-rs`）の直下にある 2 つを使ってください。**
+**[β版の Release（v7.0.0-beta.1）](https://github.com/Akashi3060/zahyou/releases/tag/v7.0.0-beta.1)から 2 つとも落としてください。**
+`zahyou_v7_beta.ipynb` は、リポジトリ直下の `zahyou_v6.ipynb` と同じ中身です（v6 のノートブックと紛れないよう、
+名前を変えて配っています。ノートブックはエンジンを `zahyou_engine.py` という名前で探すので、名前を変えても動きます）。
 Releases の最新と[配布ページ](https://cloud.akashi-kosaku.uk/s/M2sNsnA2K4oJ4Co)にあるのは v6 のノートブックで、
 オフライン解析に WSL と astrometry.net が要る古い版です（下の手順 5 は v7 のノートブックの説明です）。
-<!-- β の Release にノートブックも付けるかは未定(docs/release-v7.md 0 節)。付けるなら上の文をそのタグへのリンクにする。
-     正式版では、Releases の最新と配布ページへのリンクに戻す -->
-<!-- ノートブックのファイル名を zahyou_v7.ipynb にするかは、build_nb.py と一緒に決める(今は v6 の名前のまま) -->
+<!-- 正式版では、Releases の最新と配布ページへのリンクに戻す(資産の名前は zahyou_v7.ipynb。rs/tools/make_release_assets.py が版から決める) -->
 
 以下はノートブック版の導入手順です。**exe を使う方は読む必要はありません。**
 
@@ -452,8 +475,8 @@ python --version
 
 ## 4. ノートブックとライブラリ
 
-1. `zahyou_v6.ipynb` と `zahyou_engine.py` を同じフォルダーに置きます。
-2. `zahyou_v6.ipynb` を右クリック →「プログラムから開く」→ VS Code。
+1. `zahyou_v7_beta.ipynb` と `zahyou_engine.py` を同じフォルダーに置きます。
+2. `zahyou_v7_beta.ipynb` を右クリック →「プログラムから開く」→ VS Code。
 3. 画面右上の「カーネルの選択」→ **Python 環境** → 入れた Python を選びます。
 4. **セル A** の中の `!pip install` で始まる行の `#` を消して、セルを実行
    （左端の ▷ または `Shift+Enter`）。
@@ -607,7 +630,7 @@ v6 で方法を「オフライン (WSL) のみ」にしていたら、v7 でも�
 - **v7 の正式版が出ると、v6 の「更新する」でも v7 に入れ替わります。** そのとき v6 の exe が `zahyou.exe.bak`
   （約 102 MB）として横に残ります（v7 はこれを消しません）。v7 が動いたら消してかまいません。
 
-ノートブック版は `zahyou_v6.ipynb` と `zahyou_engine.py` の**両方**を入れ替えて、
+ノートブック版は、ノートブック（`zahyou_v7_beta.ipynb`）と `zahyou_engine.py` の**両方**を入れ替えて、
 ノートブックを開き直してセル A からやり直してください（組で動くため）。
 
 ### やめる（アンインストール）
@@ -684,6 +707,7 @@ python dev/test_solver_synth.py    # 星図データから作った正解つき�
 python dev/test_solver_real.py     # 実写を解いて、v6 で求めた正解と比べる (下の注)
 python dev/make_manual.py          # マニュアル PDF を組む
 python rs/tools/shoot_docs.py      # README とマニュアルの画面写真を exe で撮り直す
+python rs/tools/make_release_assets.py --exe <zahyou.exe> --out <フォルダー>   # Release の資産をそろえて検査し、SHA256SUMS.txt を作る
 ```
 
 試験の一覧は [dev/README.md](dev/README.md) と [rs/README.md](rs/README.md) にあります。

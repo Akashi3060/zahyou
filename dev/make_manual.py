@@ -161,7 +161,10 @@ def build(out_path):
                     leftMargin=MARGIN, rightMargin=MARGIN,
                     topMargin=MARGIN, bottomMargin=18 * mm,
                     title=f"天体画像解析プログラム「zahyou」導入・運用マニュアル {VERSION}",
-                    author="zahyou", subject="導入・運用マニュアル")
+                    author="zahyou", subject="導入・運用マニュアル",
+                    # 同じ make_manual.py と同じフォントからは、いつ組んでも同じバイトの PDF にする
+                    # (作成日時などを固定する。rs/tools/make_release_assets.py が組み直して突き合わせる)
+                    invariant=1)
     frame = Frame(MARGIN, 18 * mm, CONTENT_W, PAGE_H - MARGIN - 18 * mm, id="body")
     doc.addPageTemplates([
         PageTemplate(id="cover", frames=[frame], onPage=cover_page),
@@ -378,8 +381,8 @@ def build(out_path):
         "<b>ウイルス対策ソフトが誤検知することがあります</b>"
         "（署名の無い、まだ広く出回っていない exe なので）。"
         "その場合は、ウイルス対策ソフト側で zahyou.exe を除外に登録してください。",
-        "<b>中身が本物か確かめたい方は</b>、配布ページ（付録 B）に載せている "
-        "SHA256 と、手元のファイルのものを見比べてください。"
+        "<b>中身が本物か確かめたい方は</b>、GitHub の Releases（付録 B）に付けている "
+        "SHA256SUMS.txt の SHA256 と、手元のファイルのものを見比べてください。"
         "<b>確かめなくても使えます。</b>気になる方向けの補足です。"
         "PowerShell で次を打つと出ます。",
     ], st))
@@ -452,9 +455,21 @@ def build(out_path):
         "キーは設定（%LOCALAPPDATA%\\zahyou\\gui.json）に覚えます。",
         "<b>欄を空にすると、ネットがあっても nova.astrometry.net には問い合わせず、"
         "はじめからオフラインで解きます</b>（「オンラインのみ」は欄が空だと始められません）。",
-        "送るのはまず検出した星の位置で、それで解けなければ画像そのものを送ります。",
     ], st))
-    # 決めること: 画像そのものを外へ送ることへの同意の取り方(今は v6 と同じく、送る前に聞かない。docs/rust-port.md 10.8)
+    # 2026-10-16 の決定: 画像は同意を取らずに送ってよい。その代わり、何が送られるかと止め方を書く(README・［使い方］タブと同じ)
+    add(Paragraph("nova.astrometry.net へ送るもの", st.h3))
+    add(Paragraph("方法が「自動」か「オンラインのみ」で、API キーの欄にキーがあり、ネットにつながっていると、"
+                  "<b>送る前に確かめることはせずに</b>次のものを送ります（v6 と同じです）。", st.body))
+    ext(steps([
+        "まず、<b>検出した星の位置</b>（画像の中の座標の一覧）と画像の大きさ。"
+        "目標の方向や画素スケールが分かっていれば、探す範囲の手がかりも送ります。",
+        "星の位置だけで解けなければ、<b>画像ファイルそのもの</b>（ファイル名も）。",
+    ], st))
+    ext(callout("送りたくないときは", [
+        "「方法」を<b>「オフラインのみ」</b>にするか、<b>API キーの欄を空</b>にしてください。",
+        "どちらでも、解析は zahyou の中だけで行い、星の位置も画像も nova.astrometry.net へは"
+        "送りません（星図データが要ります。2.4）。",
+    ], st, kind="note"))
 
     ext(h2("ネットの無いところで使う — ［準備］タブ", st, "2.4"))
     add(Paragraph("<b>「まとめて準備する」を押すだけです。</b>"
@@ -696,10 +711,11 @@ def build(out_path):
 
     ext(h2("ノートブックと必要なライブラリ", st, "4.3"))
     ext(steps([
-        "<b>zahyou_v6.ipynb</b> と <b>zahyou_engine.py</b> の 2 つを、"
+        "<b>zahyou_v7_beta.ipynb</b>（β版の Release での名前。中身はリポジトリの zahyou_v6.ipynb と同じ）と "
+        "<b>zahyou_engine.py</b> の 2 つを、"
         "分かりやすい場所（デスクトップに作った zahyou フォルダーなど）に"
         "<b>そろえて</b>置きます。片方だけでは動きません。",
-        "<b>zahyou_v6.ipynb</b> を右クリック →「プログラムから開く」→ VS Code を選びます。",
+        "<b>zahyou_v7_beta.ipynb</b> を右クリック →「プログラムから開く」→ VS Code を選びます。",
         "画面右上の「カーネルの選択」を押し、<b>Python 環境</b> →"
         "先ほど入れた Python を選びます。",
         "いちばん上の <b>セル A</b> の中の <b>!pip install</b> で始まる行の "
@@ -751,7 +767,7 @@ def build(out_path):
                   "同じフォルダーをそのまま使えます。", st.small))
 
     ext(h2("動作確認", st, "4.5"))
-    add(Paragraph("VS Code で zahyou_v6.ipynb を開き、セル A → セル B → セル C の順に"
+    add(Paragraph("VS Code で zahyou_v7_beta.ipynb を開き、セル A → セル B → セル C の順に"
                   "実行します。手元のテスト画像で結果の図が 2 枚出れば導入完了です。",
                   st.body))
     add(Paragraph("オフライン解析だけを試したいときは、セル C の "
@@ -968,13 +984,15 @@ def build(out_path):
         "4 個の星が作る四角形の形を星図データと突き合わせ、"
         "一致する場所を空全体から探します（Astrometry.net と同じ方式。"
         "Lang et al. 2010 の論文をもとに、zahyou 用に書き直したエンジンが行います）。"
-        "画像ではなく星の位置で照合するので、"
-        "上下が入れ替わるような取り違えが起きません。",
+        "このエンジンは星の位置だけで照合し、画像を別の形式に作り変えて渡すことはしないので、"
+        "上下が入れ替わるような取り違え（v5 で起きていた不具合）が起きません。",
         "<b>座標に直して描く</b> — 見つかった対応関係から、"
         "画像のどの点が空のどこかを計算し、目標への矢印を引きます。",
     ], st))
     add(Paragraph("インターネットにつながっていて API キーがあるときは、3 の照合を"
-                  "Astrometry.net のサーバーに任せます。それ以外は、zahyou の中のエンジンが "
+                  "Astrometry.net のサーバーに任せます。そのときもまず拾った星の位置だけを送り、"
+                  "それで解けなければ画像ファイルそのもの（作り変えずに、選んだファイルのまま）を"
+                  "送ります（2.3）。それ以外は、zahyou の中のエンジンが "
                   "C:\\AstrometryData の星図データを使って同じことをします。"
                   "v6 までは、この照合を WSL の中の astrometry.net に頼んでいました。"
                   "同じ方式なので答えはほぼ同じで、基準の実写では v6 の解と"
@@ -1093,7 +1111,7 @@ def build(out_path):
     add(Paragraph("いま使っている版は、<b>ウィンドウの題</b>で分かります"
                   "（「zahyou v7.0.0-beta.1 (β版) — …」）。", st.body))
     ext(callout("ノートブック版は 2 つとも入れ替えてください", [
-        "<b>zahyou_v6.ipynb</b> と <b>zahyou_engine.py</b> は組で動きます。"
+        "<b>zahyou_v7_beta.ipynb</b> と <b>zahyou_engine.py</b> は組で動きます。"
         "片方だけ新しくすると、設定の名前が食い違って動かなくなることがあります。",
         "入れ替えたあとは、ノートブックを開き直して"
         "<b>セル A からやり直して</b>ください"
@@ -1201,8 +1219,11 @@ def build(out_path):
     ext(h1("参考リンクと出典", st, "付録 B"))
     add(Paragraph("配布ページ", st.h3))
     ext(bullets([
-        "GitHub の Releases（exe。β版は「Pre-release」の印が付いた v7.0.0-beta.N）："
-        "https://github.com/Akashi3060/zahyou/releases",
+        "GitHub の Releases（β版は「Pre-release」の印が付いた v7.0.0-beta.N）："
+        "https://github.com/Akashi3060/zahyou/releases<br/>"
+        "付けているもの: zahyou.exe（デスクトップ版）・zahyou_v7_beta.ipynb と zahyou_engine.py"
+        "（ノートブック版）・zahyou-manual-v4.pdf（このマニュアル）・LICENSE.txt・"
+        "THIRD-PARTY-NOTICES.md（exe に入っているライブラリの一覧）・SHA256SUMS.txt（全部の SHA256）",
         "ソース：https://github.com/Akashi3060/zahyou（β版は native-rs ブランチ）",
         "星図データの zip（ノートブック版向け）："
         "https://cloud.akashi-kosaku.uk/s/M2sNsnA2K4oJ4Co",
