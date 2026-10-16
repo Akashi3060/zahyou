@@ -601,7 +601,8 @@ def _psf_sigma(sm1, work, valid, ns1, sigma, max_stars=40, min_snr=10.0):
     if len(ys) < 3:
         return None, 0, math.inf
     found = []                                      # (σ, 鋭さ か None)
-    for i in np.argsort(-sm1[ys, xs])[:max_stars]:
+    # 同じ値の候補は元の順に(安定な並べ替え。同点の順が numpy の実装や CPU で変わらないように)
+    for i in np.argsort(-sm1[ys, xs], kind="stable")[:max_stars]:
         y, x = int(ys[i]), int(xs[i])
         v = float(sm1[y, x])
         sharp = _sharpness(work, y, x) if work[y, x] > 10.0 * sigma else None
@@ -747,7 +748,7 @@ def detect_sources_deep(sub, mask, sigma, max_sources=400, target_false=2.0, min
     ys, xs = np.nonzero(pk)
     del mx, pk
     vals = sm[ys, xs]
-    order = np.argsort(-vals)[:max(4000, 10 * max_sources)]
+    order = np.argsort(-vals, kind="stable")[:max(4000, 10 * max_sources)]
     ys, xs, vals = ys[order], xs[order], vals[order].astype(np.float64)
     n = len(ys)
 
