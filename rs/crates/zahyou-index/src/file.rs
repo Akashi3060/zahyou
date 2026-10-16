@@ -155,11 +155,17 @@ impl IndexFile {
     /// 探索を何度も繰り返すときは、これで得たハンドルを持って [`IndexData`] のメソッドを呼ぶと
     /// 毎回の錠を省ける。ハンドルが 1 つでも残っている間はファイルが mmap されたまま。
     pub fn data(&self) -> Result<Arc<IndexData>, IndexError> {
-        let mut g = self.mapped.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(d) = g.as_ref() {
+        if let Some(d) = self.mapped.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             return Ok(Arc::clone(d));
         }
+        // 錠を持たずに開く。開くときの木の検査は rayon で並列に走り、rayon の作業スレッドは待つ間に別の仕事を
+        // 横取りする。錠を持ったままだと、横取りした仕事が同じ索引を開こうとして自分の持つ錠を待ち、止まる
+        // (同じ目録を 2 つの探索が同時に使ったときに実際に止まった)。同時に開いたら先に入れたほうを使う
         let d = Arc::new(IndexData::map(self)?);
+        let mut g = self.mapped.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(first) = g.as_ref() {
+            return Ok(Arc::clone(first));
+        }
         *g = Some(Arc::clone(&d));
         Ok(d)
     }
@@ -249,6 +255,16 @@ fn open_deny_write(path: &Path) -> io::Result<File> {
     }
 }
 
+/// 開けなかった理由の文。共有違反(Windows の ERROR_SHARING_VIOLATION = 32)は、ほかのプロセスが書き込み用に
+/// 開いているためなので、そう書き足す(中身が壊れているのではない)。
+fn open_error_text(e: &io::Error) -> String {
+    if cfg!(windows) && e.raw_os_error() == Some(32) {
+        format!("ほかのプロセスが書き込み用に開いています: {e}")
+    } else {
+        e.to_string()
+    }
+}
+
 /// ファイル全体を読み取り専用で mmap する。この crate で unsafe を使うのはここだけ。
 #[allow(unsafe_code)]
 fn map_readonly(file: &File) -> io::Result<Mmap> {
@@ -273,7 +289,7 @@ impl IndexData {
             ));
         }
         let lay = f.layout();
-        let file = open_deny_write(&f.path).map_err(|e| IndexError::Io(e.to_string()))?;
+        let file = open_deny_write(&f.path).map_err(|e| IndexError::Io(open_error_text(&e)))?;
         let len = file.metadata().map_err(|e| IndexError::Io(e.to_string()))?.len();
         if len != lay.size {
             return Err(IndexError::Format(format!("{}: 開いている間にファイルの大きさが変わりました", f.name)));

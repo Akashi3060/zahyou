@@ -1,4 +1,4 @@
-//! zahyou — 天体画像から目標への向きを求める(Rust 版、第 2 段)。
+//! zahyou — 天体画像から目標への向きを求める(Rust 版)。
 //!
 //! 引数なしで画面を出す。画面を出さない入口(exe は windows サブシステムなので結果は --out へも書く):
 //!
@@ -92,25 +92,28 @@ fn run_gui(args: &[String]) -> i32 {
     };
     let args_owned: Vec<String> = args.to_vec();
     let ff_path = first_frame.clone();
-    let result = eframe::run_native(
-        "zahyou",
-        native,
-        Box::new(move |cc| {
-            let report = ui::fonts::setup(&cc.egui_ctx);
-            ui::style::apply(&cc.egui_ctx);
-            let opts = Options {
-                headless: false,
-                debug_wcs: arg_value(&args_owned, "--debug-wcs").map(PathBuf::from),
-                no_startup_checks: has(&args_owned, "--no-startup-checks"),
-                no_save: shooting,
-            };
-            let mut app = ZahyouApp::new(&cc.egui_ctx, report, opts);
-            if shooting {
-                apply_shot_args(&mut app, &args_owned, shot_path.clone(), first_frame.clone());
-            }
-            Ok(Box::new(app))
-        }),
-    );
+    // 画面のスレッドの panic(窓を開く途中の OpenGL の設定探しなど)も受け止めて、理由を知らせる
+    let result = ui::worker::guarded(|| {
+        eframe::run_native(
+            "zahyou",
+            native,
+            Box::new(move |cc| {
+                let report = ui::fonts::setup(&cc.egui_ctx);
+                ui::style::apply(&cc.egui_ctx);
+                let opts = Options {
+                    headless: false,
+                    debug_wcs: arg_value(&args_owned, "--debug-wcs").map(PathBuf::from),
+                    no_startup_checks: has(&args_owned, "--no-startup-checks"),
+                    no_save: shooting,
+                };
+                let mut app = ZahyouApp::new(&cc.egui_ctx, report, opts);
+                if shooting {
+                    apply_shot_args(&mut app, &args_owned, shot_path.clone(), first_frame.clone());
+                }
+                Ok(Box::new(app))
+            }),
+        )
+    });
     // 閉じるまでにかかった時間(起動の物差しの --first-frame のときだけ書き足す)
     if let Some(p) = &ff_path
         && let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(p)
@@ -118,23 +121,61 @@ fn run_gui(args: &[String]) -> i32 {
         use std::io::Write;
         let _ = writeln!(f, "run_native_returned_ms={:.1}", process_elapsed_ms());
     }
-    match result {
-        Ok(()) => 0,
-        Err(e) => {
-            eprintln!("画面を開けませんでした: {e}");
-            // GPU(DX12)で開けなければ OpenGL で開き直す(winit のイベントループは 1 プロセスに 1 回しか作れないので、起動し直す)
-            if !glow
-                && let Ok(exe) = std::env::current_exe()
-            {
-                let mut rest: Vec<String> = args.iter().skip(1).cloned().collect();
-                rest.push("--glow".into());
-                if std::process::Command::new(exe).args(rest).spawn().is_ok() {
-                    return 0;
+    let why = match result {
+        Ok(Ok(())) => return 0,
+        Ok(Err(e)) => e.to_string(),
+        Err((msg, detail)) => {
+            // 一度でも描けたあとの panic は、画面の不具合(開き直さない)
+            if FRAME_SHOWN.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("画面が止まりました: {msg}");
+                if !shooting {
+                    tell_failure(&format!("zahyou の画面が止まりました。\n\n{msg}\n{}", detail.join("\n")));
                 }
+                return 1;
             }
-            1
+            format!("{msg} ({})", detail.join(" / "))
+        }
+    };
+    eprintln!("画面を開けませんでした: {why}");
+    let renderer = if glow { "OpenGL" } else { "DirectX 12" };
+    let advice = "グラフィックスのドライバーを更新してください。\nリモート デスクトップや仮想マシンの中では開けないことがあります。";
+    // GPU(DX12)で開けなければ OpenGL で開き直す(winit のイベントループは 1 プロセスに 1 回しか作れないので、起動し直す)。
+    // 開き直した先でも開けなければ、そちらが知らせる
+    if !glow {
+        let spawned = std::env::current_exe().and_then(|exe| {
+            let mut rest: Vec<String> = args.iter().skip(1).cloned().collect();
+            rest.push("--glow".into());
+            std::process::Command::new(exe).args(rest).spawn()
+        });
+        match spawned {
+            Ok(_) => return 0,
+            Err(e) => {
+                if !shooting {
+                    tell_failure(&format!(
+                        "zahyou の画面を開けませんでした ({renderer}: {why})。\nOpenGL で開き直そうとしましたが、起動できませんでした ({e})。\n\n{advice}"
+                    ));
+                }
+                return 1;
+            }
         }
     }
+    if !shooting {
+        tell_failure(&format!("zahyou の画面を開けませんでした ({renderer}: {why})。\n\n{advice}"));
+    }
+    1
+}
+
+/// 一度でも画面を描いたか(描いたあとの panic は開き直さない)
+pub static FRAME_SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 画面を開けなかった・止まったことを箱で知らせる(exe は windows サブシステムなので、標準エラーは見えない)
+fn tell_failure(text: &str) {
+    rfd::MessageDialog::new()
+        .set_title("zahyou")
+        .set_description(text)
+        .set_level(rfd::MessageLevel::Error)
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
 }
 
 /// 撮影の指定を画面に反映する

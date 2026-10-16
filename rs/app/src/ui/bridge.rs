@@ -35,13 +35,35 @@ pub struct ResultView {
     pub figures: Vec<FigureOut>,
 }
 
-/// 数を読む。空なら None、読めなければ None(v6 と同じく黙って既定値に戻す)
+/// 数を読む。空なら None、読めなければ None(v6 と同じく黙って既定値に戻す)。
+/// Python の float() と同じく全角の数字(０〜９)も読む(全角の「．」「－」は Python も読まないので読まない)
 fn num(s: &str) -> Option<f64> {
     let t = s.trim();
     if t.is_empty() {
         return None;
     }
-    t.parse::<f64>().ok().filter(|v| v.is_finite())
+    let ascii: String = t
+        .chars()
+        .map(|c| match c {
+            '\u{FF10}'..='\u{FF19}' => char::from(b'0' + (c as u32 - 0xFF10) as u8),
+            c => c,
+        })
+        .collect();
+    ascii.parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
+/// 正の数を読む(Python の `_num(positive=True)`)。空・読めない・0 以下なら None
+fn num_positive(s: &str) -> Option<f64> {
+    num(s).filter(|v| *v > 0.0)
+}
+
+/// 探索半径の欄が使えないときの知らせ(Python の _start_analysis と同じ文)。空欄は 5° で探すので問題なし
+pub fn radius_problem(s: &str) -> Option<String> {
+    let r = s.trim();
+    if r.is_empty() || num_positive(r).is_some() {
+        return None;
+    }
+    Some(format!("探索半径の「{r}」は使えません。\n0 より大きい数 (度) を入れてください。空欄なら 5° で探します。"))
 }
 
 /// 画面の入力から解析の条件を作る(Python の _params)。API キーは環境変数 ASTROMETRY_API_KEY(pipeline が読む)。
@@ -65,7 +87,7 @@ pub fn params(s: &Settings) -> pipeline::RunParams {
         online_timeout_s: num(&s.t_online).map(|v| v.trunc()).unwrap_or(120.0),
         offline_timeout_s: num(&s.t_offline).map(|v| v.trunc()).unwrap_or(300.0),
         use_target_as_hint: s.hint,
-        search_radius_deg: num(&s.radius).unwrap_or(5.0),
+        search_radius_deg: num_positive(&s.radius).unwrap_or(5.0),
         ignore_existing_wcs: s.ignore,
         show_sources: s.marks,
         image_path: PathBuf::from(s.image.trim()),
@@ -77,7 +99,7 @@ pub fn params(s: &Settings) -> pipeline::RunParams {
 /// 解析を 1 回通す(ワーカーから呼ぶ)。図は画面に描く形まで直しておく(縮小の段づくりも済ませる)。
 ///
 /// `debug_wcs` を渡すと、オフライン解析の代わりにそのファイルの WCS を「解」として返す
-/// (隠しの引数 --debug-wcs。解法がまだ仮の実装のうちに、結果の画面を確かめるため)。
+/// (隠しの引数 --debug-wcs。解法と切り離して結果の画面を確かめるため)。
 pub fn run(p: &pipeline::RunParams, debug_wcs: Option<&Path>, cancel: &AtomicBool, log: &(dyn Fn(&str) + Sync)) -> ResultView {
     let r = match debug_wcs {
         None => pipeline::run(p, cancel, log),
@@ -87,8 +109,8 @@ pub fn run(p: &pipeline::RunParams, debug_wcs: Option<&Path>, cancel: &AtomicBoo
                                    _cat: &zahyou_index::Catalog,
                                    _par: &zahyou_solver::Params,
                                    _ctl: &zahyou_solver::Control|
-                      -> Result<Option<zahyou_solver::Solution>, zahyou_solver::SolveError> {
-                    Ok(Some(debug_solution(wcs.clone())))
+                      -> Result<zahyou_solver::OfflineOutcome, zahyou_solver::SolveError> {
+                    Ok(pipeline::tried(Some(debug_solution(wcs.clone()))))
                 };
                 let env = pipeline::RunEnv { offline_solver: Some(&solver), online: Some(false), ..Default::default() };
                 let mut p2 = p.clone();
@@ -322,6 +344,26 @@ mod tests {
         assert_eq!(p.solve_mode, pipeline::SolveMode::Offline);
         s.focal = "inf".into();
         assert_eq!(params(&s).focal_mm, None);
+        // 探索半径は正の数だけ(0 以下・数でない値は 5°。画面は始める前に止める)
+        for (r, want) in [("-3", 5.0), ("0", 5.0), ("abc", 5.0), ("nan", 5.0), ("2.5", 2.5), ("\u{FF13}", 3.0), ("\u{FF11}.\u{FF15}", 1.5)] {
+            s.radius = r.into();
+            assert_eq!(params(&s).search_radius_deg, want, "{r}");
+        }
+    }
+
+    #[test]
+    fn 探索半径の検査() {
+        assert_eq!(radius_problem(""), None);
+        assert_eq!(radius_problem("  "), None);
+        assert_eq!(radius_problem("5"), None);
+        assert_eq!(radius_problem(" 0.5 "), None);
+        // 全角の数字は Python の float() と同じく読む。全角の「．」は Python も読まない
+        assert_eq!(radius_problem("\u{FF15}"), None);
+        assert!(radius_problem("\u{FF11}\u{FF0E}\u{FF15}").is_some());
+        for r in ["-3", "0", "abc", "nan", "inf", "-0"] {
+            let m = radius_problem(r).expect(r);
+            assert!(m.starts_with(&format!("探索半径の「{r}」は使えません。")), "{m}");
+        }
     }
 
     #[test]

@@ -64,8 +64,8 @@ pub fn selftest(args: &[String]) -> i32 {
                        _c: &zahyou_index::Catalog,
                        _p: &zahyou_solver::Params,
                        _t: &zahyou_solver::Control|
-          -> Result<Option<zahyou_solver::Solution>, zahyou_solver::SolveError> {
-        Ok(debug.clone().map(super::bridge::debug_solution))
+          -> Result<zahyou_solver::OfflineOutcome, zahyou_solver::SolveError> {
+        Ok(crate::pipeline::tried(debug.clone().map(super::bridge::debug_solution)))
     };
     let mut env = crate::pipeline::RunEnv::default();
     if debug_wcs.is_some() {

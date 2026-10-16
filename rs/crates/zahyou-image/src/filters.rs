@@ -33,47 +33,65 @@ fn nearest_index(i: isize, n: usize) -> usize {
     i.clamp(0, n as isize - 1) as usize
 }
 
-/// 対称な重み w[0..=r](w[0] が中心)の相関を 1 本の線にかける。scipy の NI_Correlate1D の対称の枝と同じ順:
-/// o = x[0]*w0、続いて外側から o += (x[-j] + x[+j]) * w[j](j = r .. 1)。
-#[inline]
-fn sym_line(ext: &[f64], r: usize, w: &[f64], out: &mut [f32]) {
-    for (l, o) in out.iter_mut().enumerate() {
-        let c = l + r;
-        let mut acc = ext[c] * w[0];
-        for j in (1..=r).rev() {
-            acc += (ext[c - j] + ext[c + j]) * w[j];
-        }
-        *o = acc as f32;
-    }
-}
-
 /// 対称な重みの分離型フィルター(軸 0 → 軸 1)。`index` は端の延長の規則。
+/// 画素ごとの計算は scipy の NI_Correlate1D の対称の枝と同じ順: o = x[0]*w0、続いて外側から
+/// o += (x[-j] + x[+j]) * w[j](j = r .. 1)を float64 で行い、軸ごとに float32 に丸める。
+/// 速さのため、行ごとに「重み 1 つ分を行全体に足す」を外側から順に繰り返す(画素ごとの足す順は同じ)。
+/// 出力は 1 枚だけ確保し、軸 1 はその行の写しから計算して同じ行へ書き戻す。
 fn separable_sym(data: &[f32], ny: usize, nx: usize, w: &[f64], index: fn(isize, usize) -> usize) -> Vec<f32> {
     let r = w.len() - 1;
-    let mut tmp = vec![0.0f32; ny * nx];
-    // 軸 0: 出力の行 y は入力の行 y-r..y+r から決まる(行ごとに並列)
-    tmp.par_chunks_mut(nx.max(1)).enumerate().for_each(|(y, orow)| {
-        let rows: Vec<&[f32]> = (0..=2 * r)
-            .map(|k| {
-                let yy = index(y as isize + k as isize - r as isize, ny);
-                &data[yy * nx..yy * nx + nx]
-            })
-            .collect();
-        for x in 0..nx {
-            let mut acc = rows[r][x] as f64 * w[0];
-            for j in (1..=r).rev() {
-                acc += (rows[r - j][x] as f64 + rows[r + j][x] as f64) * w[j];
-            }
-            orow[x] = acc as f32;
-        }
-    });
-    // 軸 1: 行ごと
+    let nxc = nx.max(1);
     let mut out = vec![0.0f32; ny * nx];
-    out.par_chunks_mut(nx.max(1)).enumerate().for_each(|(y, orow)| {
-        let row = &tmp[y * nx..y * nx + nx];
-        let ext: Vec<f64> = (0..nx + 2 * r).map(|e| row[index(e as isize - r as isize, nx)] as f64).collect();
-        sym_line(&ext, r, w, orow);
-    });
+    // 軸 0: 出力の行 y は入力の行 y-r..y+r から決まる(行ごとに並列)
+    out.par_chunks_mut(nxc).enumerate().for_each_init(
+        || vec![0.0f64; nx],
+        |acc, (y, orow)| {
+            let row = |k: isize| {
+                let yy = index(y as isize + k, ny);
+                &data[yy * nx..yy * nx + nx]
+            };
+            for (a, &v) in acc.iter_mut().zip(row(0)) {
+                *a = v as f64 * w[0];
+            }
+            for j in (1..=r).rev() {
+                let (lo, hi, wj) = (row(-(j as isize)), row(j as isize), w[j]);
+                for ((a, &p), &q) in acc.iter_mut().zip(lo).zip(hi) {
+                    *a += (p as f64 + q as f64) * wj;
+                }
+            }
+            for (o, &a) in orow.iter_mut().zip(acc.iter()) {
+                *o = a as f32;
+            }
+        },
+    );
+    // 軸 1: 行ごと(行を端で延ばした float64 の写しから計算し、同じ行へ書き戻す)
+    out.par_chunks_mut(nxc).for_each_init(
+        || (vec![0.0f64; nx + 2 * r], vec![0.0f64; nx]),
+        |(ext, acc), orow| {
+            for (e, slot) in ext[..r].iter_mut().enumerate() {
+                *slot = orow[index(e as isize - r as isize, nx)] as f64;
+            }
+            for (slot, &v) in ext[r..r + nx].iter_mut().zip(orow.iter()) {
+                *slot = v as f64;
+            }
+            for (k, slot) in ext[r + nx..].iter_mut().enumerate() {
+                *slot = orow[index((nx + k) as isize, nx)] as f64;
+            }
+            for (a, &v) in acc.iter_mut().zip(&ext[r..r + nx]) {
+                *a = v * w[0];
+            }
+            for j in (1..=r).rev() {
+                let wj = w[j];
+                let (lo, hi) = (&ext[r - j..r - j + nx], &ext[r + j..r + j + nx]);
+                for ((a, &p), &q) in acc.iter_mut().zip(lo).zip(hi) {
+                    *a += (p + q) * wj;
+                }
+            }
+            for (o, &a) in orow.iter_mut().zip(acc.iter()) {
+                *o = a as f32;
+            }
+        },
+    );
     out
 }
 
@@ -83,6 +101,83 @@ pub fn gaussian1(data: &[f32], ny: usize, nx: usize) -> Vec<f32> {
         return Vec::new();
     }
     separable_sym(data, ny, nx, &GAUSS1, reflect_index)
+}
+
+/// scipy の `_gaussian_kernel1d(sigma, 0, radius)` の重みの半分(添字は中心からの距離、[0] が中心)。
+/// 半径は `int(4 * sigma + 0.5)`(truncate=4)。scipy と同じく `exp(-0.5 / sigma² * x²)` を numpy と同じ
+/// ペアワイズ和で割る。exp は numpy(この機械では UCRT の exp)と同じ値を返すことを確かめてある。
+/// sigma が有限の正の数でない、または大きすぎる(半径 1000 超)ときは None。
+pub fn gaussian_weights(sigma: f64) -> Option<Vec<f64>> {
+    if !(sigma.is_finite() && sigma > 0.0) {
+        return None;
+    }
+    let lw = 4.0 * sigma + 0.5;
+    if lw >= 1001.0 {
+        return None;
+    }
+    let r = lw as usize; // Python の int(): 正の数は切り捨て
+    let c = -0.5 / (sigma * sigma);
+    let phi: Vec<f64> = (0..=2 * r)
+        .map(|i| {
+            let x = i as f64 - r as f64;
+            (c * (x * x)).exp()
+        })
+        .collect();
+    let total = crate::stats::sum_f64(&phi);
+    Some((0..=r).map(|j| phi[r + j] / total).collect())
+}
+
+/// `ndimage.gaussian_filter(a, sigma)`(mode="reflect"、truncate=4)。軸 0 → 軸 1 の順で、途中を float32 に丸める。
+/// sigma が使えない値なら入力をそのまま返す(scipy は sigma ≤ 1e-15 なら何もしない)。
+pub fn gaussian(data: &[f32], ny: usize, nx: usize, sigma: f64) -> Vec<f32> {
+    if ny == 0 || nx == 0 || data.len() != ny * nx {
+        return Vec::new();
+    }
+    match gaussian_weights(sigma) {
+        Some(w) if sigma > 1e-15 => separable_sym(data, ny, nx, &w, reflect_index),
+        _ => data.to_vec(),
+    }
+}
+
+/// `ndimage.maximum_filter(a, size=2h+1)`(mode="reflect")。最大値は端を鏡映で延ばしても窓を画像の内側に
+/// 縮めても同じなので、窓を縮めて計算する(NaN を含まない画像に使う)。深い検出は極大を 1 点ずつ調べる
+/// (deep.rs の is_local_max)ので、これは照合の試験だけで使う。
+#[cfg(test)]
+pub(crate) fn maximum_filter(data: &[f32], ny: usize, nx: usize, h: usize) -> Vec<f32> {
+    if ny == 0 || nx == 0 || data.len() != ny * nx {
+        return Vec::new();
+    }
+    #[inline]
+    fn mx(a: f32, b: f32) -> f32 {
+        if b > a { b } else { a }
+    }
+    // 軸 0: 行 y の出力は行 y-h..=y+h(画像の内側)の最大値
+    let mut tmp = vec![0.0f32; ny * nx];
+    tmp.par_chunks_mut(nx).enumerate().for_each(|(y, orow)| {
+        let y0 = y.saturating_sub(h);
+        let y1 = (y + h).min(ny - 1);
+        orow.copy_from_slice(&data[y0 * nx..y0 * nx + nx]);
+        for yy in y0 + 1..=y1 {
+            let row = &data[yy * nx..yy * nx + nx];
+            for (o, &v) in orow.iter_mut().zip(row) {
+                *o = mx(*o, v);
+            }
+        }
+    });
+    // 軸 1: 列 x の出力は列 x-h..=x+h(画像の内側)の最大値。ずらした行との最大を h 回ずつ取る
+    let mut out = tmp.clone();
+    out.par_chunks_mut(nx).enumerate().for_each(|(y, orow)| {
+        let row = &tmp[y * nx..y * nx + nx];
+        for d in 1..=h.min(nx - 1) {
+            for (o, &v) in orow[..nx - d].iter_mut().zip(&row[d..]) {
+                *o = mx(*o, v);
+            }
+            for (o, &v) in orow[d..].iter_mut().zip(&row[..nx - d]) {
+                *o = mx(*o, v);
+            }
+        }
+    });
+    out
 }
 
 /// ベイヤー用の 3×3 二項フィルター: `correlate1d(a, [0.25, 0.5, 0.25], axis=0/1, mode="nearest")`。

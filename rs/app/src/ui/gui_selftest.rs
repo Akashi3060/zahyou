@@ -75,15 +75,20 @@ pub fn run(image: &Path, target: &str, force: Option<Solve>, debug_wcs: Option<s
         rig.app.s.solve = force.unwrap_or(if ready { Solve::Offline } else { Solve::Auto });
         rig.frame();
         let t0 = Instant::now();
-        rig.app.start_analysis();
+        rig.app.start_analysis(None);
+        // 始める前に断られた(「オンラインのみ」なのに API キーが無いなど)ときは、その知らせを補足に出す
+        let refused = (!rig.app.busy).then(|| rig.app.dialogs.last().cloned().unwrap_or_default());
         let done = rig.pump(420.0, |a| !a.busy);
         rig.pump(0.3, |_| false);
         let a = &rig.app;
         let shown = a.vals.iter().all(|v| v != "—" && !v.is_empty());
         check(
             "画面から解析を通せる",
-            done && shown,
-            format!("{:.1} 秒 / {} / {} / {}", t0.elapsed().as_secs_f64(), a.vals[0], a.vals[1], a.vals[2]),
+            refused.is_none() && done && shown,
+            match &refused {
+                Some(m) => format!("始められませんでした: {}", m.replace('\n', " ")),
+                None => format!("{:.1} 秒 / {} / {} / {}", t0.elapsed().as_secs_f64(), a.vals[0], a.vals[1], a.vals[2]),
+            },
         );
         let n = a.figs.iter().filter(|f| f.is_some()).count();
         check("図が 2 枚貼られる", n == 2, format!("{n} 枚"));
@@ -175,7 +180,7 @@ mod tests {
         rig.frame();
         rig.app.s.image = img.display().to_string();
         rig.app.s.solve = Solve::Offline;
-        rig.app.start_analysis();
+        rig.app.start_analysis(None);
         assert!(rig.app.busy);
         rig.app.cancel();
         assert!(rig.app.log_run.contains("■ 中止します"));
@@ -184,10 +189,61 @@ mod tests {
         assert_eq!(rig.app.detail, "中止しました。");
         assert_eq!(rig.app.status, "中止しました。");
         // 二重には走らない
-        rig.app.start_analysis();
-        rig.app.start_analysis();
+        rig.app.start_analysis(None);
+        rig.app.start_analysis(None);
         assert!(rig.app.dialogs.iter().any(|d| d.contains("いま別の処理が動いています")));
         rig.pump(60.0, |a| !a.busy);
+    }
+
+    /// 画面から「中止」を押してから、解析のワーカーが止まる(busy が下りる)までの時間を測る。手で回す:
+    ///   cargo test -p zahyou --release 中止の遅れ -- --ignored --nocapture
+    /// 解けない画像(ピンぼけの実写。$ZAHYOU_TEST_IMAGES/Downloads/Capture_00001 00_55_14.fits)を目標なし・
+    /// オフラインで解かせ、始めてから 0.5〜8 秒後に押す。画面は 30 ms ごとに回すので、その分の粒の粗さがある。
+    /// 利用者の設定には書かない(gui.json は一時ファイル。目標なしなので cache.json も読み書きしない)。
+    #[test]
+    #[ignore]
+    fn 中止の遅れを測る() {
+        let base = std::env::var_os("ZAHYOU_TEST_IMAGES")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default();
+        let img = base.join("Downloads").join("Capture_00001 00_55_14.fits");
+        if !img.exists() || !Path::new(crate::pipeline::DEFAULT_INDEX_DIR).is_dir() {
+            eprintln!("SKIP: {} か星図データが無い", img.display());
+            return;
+        }
+        super::super::settings::override_path(std::env::temp_dir().join("zahyou-test-cancel-lag.json"));
+        let ctx = egui::Context::default();
+        let (defs, report) = fonts::build();
+        ctx.set_fonts(defs);
+        let opts = Options { headless: true, debug_wcs: None, no_startup_checks: true, no_save: true };
+        let app = ZahyouApp::new(&ctx, report, opts);
+        let mut rig = Rig { ctx, app, size: vec2(1180.0, 780.0) };
+        let mut worst: f64 = 0.0;
+        for after in [0.5, 1.0, 2.0, 3.0, 5.0, 8.0] {
+            rig.app.s.image = img.display().to_string();
+            rig.app.s.mode = Mode::None;
+            rig.app.s.solve = Solve::Offline;
+            rig.frame();
+            rig.app.start_analysis(None);
+            assert!(rig.app.busy);
+            let t0 = Instant::now();
+            assert!(!rig.pump(after, |a| !a.busy), "{after} 秒より前に終わった(解けない画像のはず)");
+            let t_cancel = Instant::now();
+            rig.app.cancel();
+            assert!(rig.pump(30.0, |a| !a.busy), "止まらない");
+            let lag = t_cancel.elapsed().as_secs_f64();
+            worst = worst.max(lag);
+            rig.pump(0.1, |_| false);
+            eprintln!(
+                "始めて {:.2} 秒で中止 → {lag:.3} 秒で止まった / 状態バー {:?}",
+                (t_cancel - t0).as_secs_f64(),
+                rig.app.status
+            );
+            assert_eq!(rig.app.status, "中止しました。");
+        }
+        eprintln!("画面からの中止: 最大の遅れ {worst:.3} 秒(画面を回す間隔 30 ms 込み)");
+        assert!(worst < 1.0, "中止の遅れが 1 秒を超えた: {worst:.3} 秒");
     }
 
     #[test]
@@ -197,22 +253,116 @@ mod tests {
         let opts = Options { headless: true, debug_wcs: None, no_startup_checks: true, no_save: true };
         let mut app = ZahyouApp::new(&ctx, Default::default(), opts);
         app.s.image = r"C:\no\such\file.fits".into();
-        app.start_analysis();
+        app.start_analysis(None);
         assert!(!app.busy);
         assert_eq!(app.dialogs.last().map(String::as_str), Some("画像を選んでください。"));
         app.s.image = std::env::current_exe().unwrap().display().to_string();
         app.s.mode = Mode::StarName;
         app.s.name = "  ".into();
-        app.start_analysis();
+        app.start_analysis(None);
         assert!(app.dialogs.last().unwrap().starts_with("目標の天体名を入れてください。"));
         // 準備タブ: 段を選ばずに「選んだ段を落とす」
-        app.download_index();
+        app.download_index(None);
         assert_eq!(app.dialogs.last().map(String::as_str), Some("落とす段にチェックを入れてください。"));
         // 焦点距離が空で「必要な段を選ぶ」
-        app.recommend();
+        app.recommend(None);
         assert!(app.dialogs.last().unwrap().starts_with("焦点距離とセンサー横幅 [mm] を入れてください。"));
         // 更新を確認する前に「更新する」
-        app.apply_update();
+        app.apply_update(None);
         assert_eq!(app.dialogs.last().map(String::as_str), Some("先に「更新を確認」を押してください。"));
+    }
+
+    /// 窓を出さない画面(確認はいつも「キャンセル」)。設定は一時ファイル、星図データの置き場所は空のフォルダー
+    fn headless_app(sub: &str) -> (ZahyouApp, std::path::PathBuf) {
+        super::super::settings::override_path(std::env::temp_dir().join("zahyou-test-cancel.json"));
+        let ctx = egui::Context::default();
+        let opts = Options { headless: true, debug_wcs: None, no_startup_checks: true, no_save: true };
+        let mut app = ZahyouApp::new(&ctx, Default::default(), opts);
+        let dir = std::env::temp_dir().join(format!("zahyou-gui-empty-{sub}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        app.s.indexdir = dir.display().to_string();
+        (app, dir)
+    }
+
+    #[test]
+    fn 探索半径がおかしいと始めない() {
+        let (mut app, dir) = headless_app("radius");
+        app.s.image = std::env::current_exe().unwrap().display().to_string();
+        app.s.mode = Mode::None;
+        for r in ["-3", "0", "abc"] {
+            app.s.radius = r.into();
+            app.start_analysis(None);
+            assert!(!app.busy, "{r} で始めた");
+            assert_eq!(
+                app.dialogs.last().map(String::as_str),
+                Some(format!("探索半径の「{r}」は使えません。\n0 より大きい数 (度) を入れてください。空欄なら 5° で探します。").as_str())
+            );
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn まとめて準備は落とす前に必ず聞く() {
+        let (mut app, dir) = headless_app("prepare");
+        // (a) 印があっても聞く(確認は「キャンセル」なので落とさない)
+        for s in [5202u32, 5203] {
+            app.marks.insert(s, true);
+        }
+        let n = app.dialogs.len();
+        app.prepare_all(None);
+        assert!(!app.busy, "確認なしで落とし始めた");
+        assert_eq!(app.dialogs.len(), n + 1);
+        assert!(app.dialogs.last().unwrap().starts_with("印を付けた段をそろえます。\n足りない 2 段"), "{:?}", app.dialogs.last());
+        // (b) 「おすすめをまとめて落とす」をキャンセルしたら印を元に戻す
+        let before = app.marks.clone();
+        app.download_recommended(None);
+        assert!(!app.busy);
+        assert!(app.dialogs.last().unwrap().starts_with("画角 "), "{:?}", app.dialogs.last());
+        assert_eq!(app.marks, before, "キャンセルしたのに印が残った");
+        for v in app.marks.values_mut() {
+            *v = false;
+        }
+        // 印が無ければおすすめの段について聞く
+        app.prepare_all(None);
+        assert!(!app.busy);
+        assert!(app.dialogs.last().unwrap().starts_with("段が選ばれていないので、おすすめ"), "{:?}", app.dialogs.last());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn 置き場所を変えたら前の結果で判断しない() {
+        let (mut app, dir) = headless_app("stale");
+        // 前の置き場所でおすすめの段が全部そろっていた、という古い結果
+        let mut old = super::super::survey::Survey::default();
+        old.index.dir = std::path::PathBuf::from(r"C:\somewhere\else");
+        old.index.scales = zahyou_net::recommended_scales();
+        old.ready = true;
+        app.env_state = Some(old.clone());
+        // 新しい(空の)置き場所で押す: 数え直すので「そろっています」とは言わず、容量を聞く
+        app.download_recommended(None);
+        assert!(!app.busy);
+        assert_ne!(app.status, "おすすめの段はすべてそろっています。");
+        assert!(app.dialogs.last().is_some_and(|d| d.starts_with("画角 ")), "{:?}", app.dialogs.last());
+        for v in app.marks.values_mut() {
+            *v = false;
+        }
+        let n = app.dialogs.len();
+        app.prepare_all(None);
+        assert!(!app.busy, "確認なしで落とし始めた");
+        assert_eq!(app.dialogs.len(), n + 1);
+        // 置き場所を変えたら表は「未確認」に戻り、前の置き場所の結果が(調べ終わって)届いても使わない
+        app.forget_env();
+        assert!(app.env_state.is_none());
+        assert!(app.env_rows.iter().all(|r| r.0.is_none()));
+        app.job(super::super::worker::LogTo::Env).send(super::super::worker::Msg::Env(Box::new(old)));
+        app.pump();
+        assert!(app.env_state.is_none(), "前の置き場所の結果を使った");
+        // 今の置き場所の結果は使う
+        let now = super::super::survey::survey(&app.index_dir());
+        app.job(super::super::worker::LogTo::Env).send(super::super::worker::Msg::Env(Box::new(now)));
+        app.pump();
+        assert!(app.env_state.is_some());
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

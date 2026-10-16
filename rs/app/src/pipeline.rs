@@ -10,8 +10,10 @@
 //! ログは `log` に 1 行ずつ(先頭に改行を含むことがある。Python の `_log` と同じ)届く。
 //!
 //! 係の分担(オフライン解析): 事前のログ(画素スケール・手持ちの段・足りない段)と、解けなかったときの案内と、
-//! 中止の「■ 中止しました。」はここが出す。`zahyou_solver::solve_offline` が出すのは試行のはしごのログ
-//! (`[i/N] ラベル (最大 t 秒)`・深い検出・解の要約・`✅ 解析成功 (ラベル)`)だけにする。
+//! 中止の「■ 中止しました。」はここが出す。`zahyou_solver::solve_offline_detailed` が出すのは深い検出と
+//! 試行のはしごのログ(`[i/N] ラベル (最大 t 秒)`・探索・解の要約・`✅ 解析成功 (ラベル)`・星が 1〜2 個のときの
+//! 「❌ 星が N 個しかない」・途中の失敗)。解けなかったときの案内は、解法が返す止まった理由(`OfflineStop`)と
+//! 深い検出の星の数で選ぶ(Python の `_solve_offline` の末尾と同じ分岐)。
 #![forbid(unsafe_code)]
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -22,7 +24,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use zahyou_image::{DetectOpts, Loaded, Prep, Source};
 use zahyou_index::Catalog;
-use zahyou_solver::{Control, OfflineRequest, Params, Solution, SolveError};
+use zahyou_solver::{Control, OfflineOutcome, OfflineRequest, OfflineStop, Params, SolveError};
 use zahyou_wcs::{Card, CardValue, Wcs};
 
 use crate::scale::{self, fmt_g};
@@ -251,16 +253,21 @@ impl RunResult {
 
 // ================================================================== 差し替え口 ===
 
-/// オフライン解析の関数の形(`zahyou_solver::solve_offline` と同じ)。
+/// オフライン解析の関数の形(`zahyou_solver::solve_offline_detailed` と同じ)。
 pub type OfflineSolverFn =
-    dyn Fn(&OfflineRequest, &Catalog, &Params, &Control) -> Result<Option<Solution>, SolveError> + Sync;
+    dyn Fn(&OfflineRequest, &Catalog, &Params, &Control) -> Result<OfflineOutcome, SolveError> + Sync;
+
+/// 差し替えの解法が返す「試行のはしごを試した」結果(深い検出の星の数は 0 とする)。
+pub fn tried(solution: Option<zahyou_solver::Solution>) -> OfflineOutcome {
+    OfflineOutcome { solution, n_deep: 0, stop: OfflineStop::Tried }
+}
 
 /// 試験・自己診断・速さの物差しのための差し替え。画面からは [`RunEnv::default`](= 本物)で使う。
 #[derive(Default)]
 pub struct RunEnv<'a> {
     /// cache.json の場所(None なら `zahyou_net::cache_path()` = %LOCALAPPDATA%\zahyou\cache.json)
     pub cache_file: Option<PathBuf>,
-    /// オフライン解析(None なら `zahyou_solver::solve_offline`)
+    /// オフライン解析(None なら `zahyou_solver::solve_offline_detailed`)
     pub offline_solver: Option<&'a OfflineSolverFn>,
     /// AUTO のときのつながりの判定(None なら `zahyou_net::internet_available()`)
     pub online: Option<bool>,
@@ -593,6 +600,15 @@ impl<'a> Runner<'a> {
         scale_why: &str,
     ) -> Option<Wcs> {
         let p = self.p;
+        let key = p.api_key.clone().filter(|k| !k.trim().is_empty()).or_else(zahyou_net::api_key_from_env);
+        // 「自動」でキーが無いときは、問い合わせずにオフラインへ(毎回「エラー」と出さない。Python 版は既定のキーを
+        // 持っていたのでこの分かれ道は無い。キーをソースに書かない Rust 版だけのもの)
+        if key.is_none() && p.solve_mode != SolveMode::Online {
+            self.log(
+                "\n[オンライン] nova.astrometry.net の API キーが無いので、問い合わせません (環境変数 ASTROMETRY_API_KEY)。",
+            );
+            return None;
+        }
         self.log(&format!(
             "\n[オンライン] nova.astrometry.net に問い合わせます (最大 {} 秒)",
             fmt_seconds(p.online_timeout_s)
@@ -603,7 +619,6 @@ impl<'a> Runner<'a> {
         if hint.is_some() {
             self.log(&format!("  - 目標の方向 (半径 {}°) を手がかりにします。", fmt_g(p.search_radius_deg)));
         }
-        let key = p.api_key.clone().filter(|k| !k.trim().is_empty()).or_else(zahyou_net::api_key_from_env);
         let Some(key) = key else {
             self.log(
                 "⚠️ オンライン解析でエラー: API キーがありません (環境変数 ASTROMETRY_API_KEY に入れてください)。",
@@ -676,28 +691,38 @@ impl<'a> Runner<'a> {
         let params = Params::default();
         let solved = match self.env.offline_solver {
             Some(f) => f(&req, &catalog, &params, &ctl),
-            None => zahyou_solver::solve_offline(&req, &catalog, &params, &ctl),
+            None => zahyou_solver::solve_offline_detailed(&req, &catalog, &params, &ctl),
         };
-        match solved {
-            Ok(Some(sol)) => Some(sol.wcs),
+        let out = match solved {
             Err(SolveError::Cancelled) => {
                 self.log("\n  ■ 中止しました。");
-                None
+                return None;
             }
-            Ok(None) => {
+            Ok(o) => o,
+        };
+        if let Some(sol) = out.solution {
+            return Some(sol.wcs);
+        }
+        // 「写っている星が N 個」は標準の検出と深い検出の多いほう(Python の max(len(sources), len(deep_stars)))
+        let n_best = inp.sources.len().max(out.n_deep);
+        match out.stop {
+            OfflineStop::Tried => {
                 if self.cancelled(false) {
                     self.log("\n  ■ 中止しました。");
                     return None;
                 }
-                // 星が 1 つも無ければ、深い検出(2x2 にまとめる)でも拾えたかで案内を分ける(Python と同じ)
-                let deep_found = inp.sources.is_empty()
-                    && !zahyou_image::detect_sources_deep(inp.prep, &DetectOpts::deep()).0.is_empty();
-                for line in offline_advice(inp.sources.len(), deep_found, inp.scale, nx, ny, &diag.indexes) {
+                for line in offline_advice(n_best, inp.scale, nx, ny, &diag.indexes) {
                     self.log(&line);
                 }
-                None
             }
+            // 星が 1〜2 個なら解法が「❌ 星が N 個しかない」を出している。0 個の文はここで出す(Python と同じく案内は出さない)
+            OfflineStop::TooFewStars if n_best == 0 => self.log("  ❌ 星が 1 つも無いので解析できません。"),
+            OfflineStop::TooFewStars => {}
+            OfflineStop::NoIndex => self.log("  ❌ 使える星図データがありません。［準備］タブで落としてください。"),
+            // 解法が「❌ オフライン解析が途中で失敗しました」を出している(Python も案内は出さない)
+            OfflineStop::Failed => {}
         }
+        None
     }
 }
 
@@ -1030,24 +1055,18 @@ pub fn offline_prelog<S: AsRef<str>>(
 }
 
 /// すべての試行で解けなかったときの案内(Python の `_solve_offline` の末尾)。
-/// `deep_found` は標準の検出が 0 個のとき、深い検出で星を拾えたか。
+/// `n_best` は標準の検出と深い検出の星の数の多いほう(Python の `n_best`)。
 pub fn offline_advice<S: AsRef<str>>(
-    n_sources: usize,
-    deep_found: bool,
+    n_best: usize,
     scale: Option<f64>,
     nx: usize,
     ny: usize,
     installed: &[S],
 ) -> Vec<String> {
-    let mut out = Vec::new();
-    if n_sources == 0 && !deep_found {
-        out.push("  ❌ 星が 1 つも無いので解析できません。".to_string());
-        return out;
-    }
-    out.push("\n  ❌ すべての条件で解けませんでした。心当たりの順に:".to_string());
-    if n_sources < 15 {
+    let mut out = vec!["\n  ❌ すべての条件で解けませんでした。心当たりの順に:".to_string()];
+    if n_best < 15 {
         out.push(format!(
-            "     ・写っている星が {n_sources} 個と少なめです。露出を伸ばすか、複数フレームを重ねてください。"
+            "     ・写っている星が {n_best} 個と少なめです。露出を伸ばすか、複数フレームを重ねてください。"
         ));
     }
     if let Some((lo, hi)) = scale::index_coverage(installed) {
@@ -1914,7 +1933,7 @@ pub(crate) mod pyref {
         );
     }
 
-    /// Python のログから、解法(第 3 段)が出す行と時刻の入る行をそろえる。
+    /// Python のログから、解法が出す行(pipeline_run.json は解法を「解なし」に差し替えて作った)と時刻の入る行をそろえる。
     pub(crate) fn normalize_log(lines: &[String]) -> Vec<String> {
         let mut out = Vec::new();
         for l in lines {
@@ -2019,13 +2038,8 @@ pub(crate) mod pyref {
     }
 
     /// 解法の代わり(いつも「解なし」。Python の基準値も sv_solve を「解なし」に差し替えて作った)。
-    pub(crate) fn no_solution(
-        _: &OfflineRequest,
-        _: &Catalog,
-        _: &Params,
-        _: &Control,
-    ) -> Result<Option<Solution>, SolveError> {
-        Ok(None)
+    pub(crate) fn no_solution(_: &OfflineRequest, _: &Catalog, _: &Params, _: &Control) -> Result<OfflineOutcome, SolveError> {
+        Ok(tried(None))
     }
 
     /// 試験用の cache.json(目標 1 件、機材の記憶は with_rig のときだけ)。
@@ -2147,13 +2161,13 @@ pub(crate) mod pyref {
         Wcs::from_header_cards(&cards_from_strings(&cards)).ok()
     }
 
-    /// 解法の代わりに正解 WCS を返すもの(解法が仮の実装の間、オフラインの経路を通しで確かめる)。
+    /// 解法の代わりに正解 WCS を返すもの(解法と切り離して、オフラインの経路を通しで確かめる)。
     pub(crate) fn oracle_solver(
         wcs: Wcs,
-    ) -> impl Fn(&OfflineRequest, &Catalog, &Params, &Control) -> Result<Option<Solution>, SolveError> + Sync {
+    ) -> impl Fn(&OfflineRequest, &Catalog, &Params, &Control) -> Result<OfflineOutcome, SolveError> + Sync {
         move |req: &OfflineRequest, _: &Catalog, _: &Params, ctl: &Control| {
             (ctl.log)("  ✅ 解析成功 (正解 WCS で代用)");
-            Ok(Some(Solution {
+            Ok(tried(Some(zahyou_solver::Solution {
                 wcs: wcs.clone(),
                 logodds: 87.77,
                 nmatch: 13,
@@ -2164,7 +2178,7 @@ pub(crate) mod pyref {
                 quads_tried: 0,
                 hypotheses: 0,
                 seconds: 0.0,
-            }))
+            })))
         }
     }
 
@@ -2342,7 +2356,7 @@ pub(crate) mod pyref {
                      _: &Catalog,
                      _: &Params,
                      _: &Control|
-                     -> Result<Option<Solution>, SolveError> { panic!("試験のための panic") };
+                     -> Result<OfflineOutcome, SolveError> { panic!("試験のための panic") };
                 let env2 = RunEnv {
                     cache_file: Some(dir2.join("c.json")),
                     offline_solver: Some(&boom),
@@ -2358,8 +2372,8 @@ pub(crate) mod pyref {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// オンラインの流れ(通信はしない): API キーが無ければ「オンライン解析でエラー」→ オンラインのみなら
-    /// そこで終わり、自動ならオフラインへ切り替える。
+    /// オンラインの流れ(通信はしない): API キーが無ければ、オンラインのみなら「オンライン解析でエラー」で
+    /// そこで終わり、自動なら「エラー」とは書かずに問い合わせを飛ばしてオフラインへ切り替える。
     #[test]
     fn online_without_key() {
         if zahyou_net::api_key_from_env().is_some() {
@@ -2394,17 +2408,311 @@ pub(crate) mod pyref {
                 assert!(!has("[オンライン]") && res.wcs.is_some(), "{l:?}");
                 continue;
             }
-            assert!(has("[オンライン] nova.astrometry.net に問い合わせます (最大 120 秒)"), "{l:?}");
-            assert!(has("⚠️ オンライン解析でエラー: API キーがありません"), "{l:?}");
             match mode {
                 SolveMode::Online => {
+                    assert!(has("[オンライン] nova.astrometry.net に問い合わせます (最大 120 秒)"), "{l:?}");
+                    assert!(has("⚠️ オンライン解析でエラー: API キーがありません"), "{l:?}");
                     assert!(has("SOLVE_MODE='ONLINE' なのでここで終了します。") && !has("[オフライン]"), "{l:?}");
                 }
-                _ => assert!(has("   → オフラインの解析に切り替えます。") && has("[オフライン]"), "{l:?}"),
+                _ => {
+                    assert!(has("[オンライン] nova.astrometry.net の API キーが無いので、問い合わせません"), "{l:?}");
+                    assert!(!has("問い合わせます (最大") && !has("⚠️ オンライン解析でエラー"), "{l:?}");
+                    assert!(has("   → オフラインの解析に切り替えます。") && has("[オフライン]"), "{l:?}");
+                }
             }
             assert!(res.wcs.is_none() && has("❌ 座標を特定できませんでした。"), "{l:?}");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ------------------------------------------------------------ 本物の解法つきの run() ---
+
+    /// app/testdata の場所。
+    fn app_testdata() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata")
+    }
+
+    /// run_solver.json の画像のパス("$ZAHYOU_TEST_IMAGES/…" か、リポジトリからの相対)を実際のパスに。
+    /// リポジトリに無いもの(dev/tcase・dev/realcase は .gitignore)は ZAHYOU_PY_REPO(既定は Python 版の
+    /// リポジトリ)の同じ相対パスも見る(rs/testdata/gen_solver.py と同じ決まり)。
+    pub(crate) fn resolve_image(p: &str) -> PathBuf {
+        if let Some(rest) = p.strip_prefix("$ZAHYOU_TEST_IMAGES/") {
+            let base = std::env::var_os("ZAHYOU_TEST_IMAGES")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(PathBuf::from)
+                .unwrap_or_default();
+            return rest.split('/').fold(base, |b, s| b.join(s));
+        }
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+        let here = p.split('/').fold(repo, |b, s| b.join(s));
+        if here.exists() {
+            return here;
+        }
+        let py_repo = std::env::var_os("ZAHYOU_PY_REPO")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\Users\yoshi\Documents\GitHub\zahyou"));
+        p.split('/').fold(py_repo, |b, s| b.join(s))
+    }
+
+    /// 時刻で変わる数を伏せる: 「(最大 N 秒)」の N と、「1.23 秒」のような小数の秒。
+    pub(crate) fn mask_seconds(line: &str) -> String {
+        let mut s = line.to_string();
+        if let Some(i) = s.find("(最大 ")
+            && let Some(j) = s[i..].find(" 秒)")
+        {
+            s.replace_range(i + "(最大 ".len()..i + j, "X");
+        }
+        // 「<数字>.<数字> 秒」を後ろから探して X にする
+        let mut out = String::new();
+        let mut rest = s.as_str();
+        while let Some(k) = rest.find(" 秒") {
+            let head = &rest[..k];
+            let start = head
+                .char_indices()
+                .rev()
+                .find(|&(_, c)| !(c.is_ascii_digit() || c == '.'))
+                .map_or(0, |(i, c)| i + c.len_utf8());
+            let num = &head[start..];
+            if num.contains('.') && num.chars().any(|c| c.is_ascii_digit()) {
+                out.push_str(&head[..start]);
+                out.push('X');
+            } else {
+                out.push_str(head);
+            }
+            out.push_str(" 秒");
+            rest = &rest[k + " 秒".len()..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    /// 試行のはしごの行か(時刻しだいで変わるので、"advice" の場面では比べない)。
+    fn ladder_line(l: &str) -> bool {
+        let t = l.trim_start_matches('\n');
+        (t.starts_with("  [") && t.contains("(最大 "))
+            || t.starts_with("    · ")
+            || t.starts_with("  ⏱")
+            || t.starts_with("    索引 ")
+            || t.starts_with("  ✅ 解析成功 (")
+    }
+
+    pub(crate) fn normalize_solver_log(lines: &[String], advice_only: bool) -> Vec<String> {
+        lines
+            .iter()
+            .filter(|l| !(advice_only && ladder_line(l)))
+            .map(|l| match l.find("所要時間      : ") {
+                Some(i) => format!("{}所要時間      : X 秒", &l[..i]),
+                None => mask_seconds(l),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn mask_seconds_examples() {
+        assert_eq!(mask_seconds("\n  [1/4] 深い検出の星 15 個 + 全天  (最大 150 秒)"), "\n  [1/4] 深い検出の星 15 個 + 全天  (最大 X 秒)");
+        assert_eq!(
+            mask_seconds("    · 解けました: index-5205-02、対数オッズ 87.8、一致 13 個、quad 1,234 個・仮説 56 個、0.12 秒"),
+            "    · 解けました: index-5205-02、対数オッズ 87.8、一致 13 個、quad 1,234 個・仮説 56 個、X 秒"
+        );
+        assert_eq!(mask_seconds("    索引 a / 一致 3 個 / 対数オッズ 50.0 / quad 7 個 / 0.0 秒"), "    索引 a / 一致 3 個 / 対数オッズ 50.0 / quad 7 個 / X 秒");
+        assert_eq!(mask_seconds("最大 300 秒の 2 秒"), "最大 300 秒の 2 秒");
+    }
+
+    /// 本物の解法を通した run() のログ・結果を、Python の run()(sv_solve も本物)と比べる
+    /// (app/testdata/run_solver.json。gen_run_solver.py が作る)。画像・星図データが手元に無い場面は SKIP。
+    /// 時刻で変わる数(所要時間・「(最大 N 秒)」・小数の秒)だけを伏せる。締め切りで打ち切る場面("advice")は
+    /// 試行のはしごの行を除いて、深い検出・事前のログ・解けなかったときの案内を比べる。
+    /// 既定では、締め切りまで探す 2 場面(焦点距離の書き違い・ピンぼけ。Rust でも 20〜30 秒)を飛ばす。
+    /// 全部は `cargo test -p zahyou run_solver_vs_python_all -- --ignored --nocapture`。
+    #[test]
+    fn run_solver_vs_python() {
+        run_solver_cases(false);
+    }
+
+    #[test]
+    #[ignore]
+    fn run_solver_vs_python_all() {
+        run_solver_cases(true);
+    }
+
+    /// 同じ目録(index_catalog が覚えているもの)をいくつかの解析が同時に使っても止まらない。
+    /// 以前は、索引を開くときの木の検査(rayon で並列)を錠を持ったまま走らせていたので、rayon の作業スレッドが
+    /// 待つ間に横取りした仕事が同じ索引を開こうとして止まった(zahyou-index の IndexFile::data と解法の Store::data)。
+    /// 解析は 1 回ごとに索引の mmap を放すので、毎回開き直す。止まったら 180 秒で失敗にする(スレッドは残るが試験は終わる)。
+    #[test]
+    fn concurrent_runs_do_not_deadlock() {
+        const ROUNDS: usize = 5;
+        // 同じ画像を同時に解く(同じ索引を同時に開くときに止まっていた)。ほかの画像も混ぜる
+        let images = [
+            "$ZAHYOU_TEST_IMAGES/Downloads/Capture_00001 00_10_33.fits",
+            "$ZAHYOU_TEST_IMAGES/Downloads/Capture_00001 00_10_33.fits",
+            "$ZAHYOU_TEST_IMAGES/Downloads/Capture_00001 00_10_33.fits",
+            "$ZAHYOU_TEST_IMAGES/Downloads/C2025A6/C2025A6_00001 04_23_42.fits",
+        ];
+        let paths: Vec<PathBuf> = images.iter().map(|p| resolve_image(p)).filter(|p| p.is_file()).collect();
+        if paths.len() < 3 || !Path::new(DEFAULT_INDEX_DIR).is_dir() {
+            eprintln!("SKIP: 画像か星図データが無い");
+            return;
+        }
+        let dir = temp_dir("concurrent");
+        let (tx, rx) = std::sync::mpsc::channel();
+        for (k, img) in paths.iter().enumerate() {
+            let (tx, img, cache) = (tx.clone(), img.clone(), dir.join(format!("cache_{k}.json")));
+            std::thread::spawn(move || {
+                let mut solved = 0;
+                for _ in 0..ROUNDS {
+                    let _ = std::fs::remove_file(&cache);
+                    let params = RunParams {
+                        mode: InputMode::None,
+                        solve_mode: SolveMode::Offline,
+                        image_path: img.clone(),
+                        offline_timeout_s: 60.0,
+                        ..Default::default()
+                    };
+                    let env = RunEnv { cache_file: Some(cache.clone()), online: Some(false), skip_figures: true, ..Default::default() };
+                    if run_with(&params, &env, &AtomicBool::new(false), &|_: &str| {}).wcs.is_some() {
+                        solved += 1;
+                    }
+                }
+                let _ = tx.send((k, solved));
+            });
+        }
+        drop(tx);
+        for _ in 0..paths.len() {
+            match rx.recv_timeout(Duration::from_secs(180)) {
+                Ok((k, solved)) => assert_eq!(solved, ROUNDS, "{}: 毎回解けるはず", paths[k].display()),
+                Err(_) => panic!("同時に走らせた解析が 180 秒で終わらない(止まっている)"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 締め切りまで探す場面(Rust でも 20 秒以上かかる)。
+    const SLOW_SCENES: [&str; 2] = ["orig_focal_short", "defocus_rig"];
+
+    fn run_solver_cases(include_slow: bool) {
+        let path = app_testdata().join("run_solver.json");
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            eprintln!("SKIP: {} がありません", path.display());
+            return;
+        };
+        let d: Value = serde_json::from_str(&text).expect("run_solver.json を読めない");
+        let dir = temp_dir(if include_slow { "run_solver_all" } else { "run_solver" });
+        let (mut n_runs, mut n_lines, mut bad) = (0, 0, Vec::<String>::new());
+        for r in d["runs"].as_array().unwrap() {
+            let name = s(&r["name"]);
+            if let Some(why) = r.get("skipped") {
+                eprintln!("SKIP {name}: 基準値を作ったとき {}", s(why));
+                continue;
+            }
+            if !include_slow && SLOW_SCENES.contains(&name.as_str()) {
+                eprintln!("---- {name}: 締め切りまで探すので既定では飛ばす(run_solver_vs_python_all で回す)");
+                continue;
+            }
+            let img = resolve_image(&s(&r["path"]));
+            match std::fs::read(&img) {
+                Ok(b) if sha2_like::sha256_hex(&b) == s(&r["sha256"]) => {}
+                Ok(_) => {
+                    eprintln!("SKIP {name}: {} の中身が基準値を作ったときと違う", img.display());
+                    continue;
+                }
+                Err(_) => {
+                    eprintln!("SKIP {name}: {} がありません", img.display());
+                    continue;
+                }
+            }
+            let params = params_from(&r["params"], img.clone());
+            if !params.index_dir.is_dir() && name != "noindex" {
+                eprintln!("SKIP {name}: 星図データがありません");
+                continue;
+            }
+            let cache = dir.join(format!("cache_{name}.json"));
+            write_cache(&cache, r["with_rig"].as_bool().unwrap_or(false));
+            let env = RunEnv { cache_file: Some(cache.clone()), offline_solver: None, online: Some(false), skip_figures: false };
+            let lines = StdMutex::new(Vec::<String>::new());
+            let log = |m: &str| lines.lock().unwrap().push(m.to_string());
+            let t0 = Instant::now();
+            let res = run_with(&params, &env, &AtomicBool::new(false), &log);
+            let secs = t0.elapsed().as_secs_f64();
+            let advice_only = s(&r["compare"]) == "advice";
+            let got = normalize_solver_log(&lines.into_inner().unwrap(), advice_only);
+            let want = normalize_solver_log(&r["log"].as_array().unwrap().iter().map(s).collect::<Vec<_>>(), advice_only);
+            let mut why = Vec::new();
+            if got != want {
+                let mut diff = String::new();
+                for i in 0..got.len().max(want.len()) {
+                    let (g, w) = (got.get(i).map(String::as_str).unwrap_or("<無>"), want.get(i).map(String::as_str).unwrap_or("<無>"));
+                    if g != w {
+                        diff.push_str(&format!("  {i}: Rust {g:?}\n     Python {w:?}\n"));
+                    }
+                }
+                why.push(format!("ログが違う\n{diff}"));
+            }
+            if res.wcs.is_some() != r["solved"].as_bool().unwrap() {
+                why.push(format!("解けたか: Rust {} / Python {}", res.wcs.is_some(), r["solved"]));
+            }
+            if res.figures.len() != r["figures"].as_u64().unwrap() as usize {
+                why.push(format!("図の枚数: Rust {} / Python {}", res.figures.len(), r["figures"]));
+            }
+            match (r.get("summary"), res.summary.as_ref()) {
+                (Some(ps), Some(sm)) => {
+                    // 解の WCS は Python と 1e-6 px で同じ(解法の係の試験)。まとめはそれより粗く比べる
+                    let dra = (sm.center_ra - ps["ra"].as_f64().unwrap()).abs() * sm.center_dec.to_radians().cos();
+                    let ddec = (sm.center_dec - ps["dec"].as_f64().unwrap()).abs();
+                    if dra.max(ddec) * 3600.0 > 1e-3
+                        || rel(sm.scale, ps["scale"].as_f64().unwrap()) > 1e-8
+                        || (sm.pa_screen_up - ps["pa"].as_f64().unwrap()).abs() > 1e-6
+                        || sm.parity_text() != s(&ps["parity"])
+                    {
+                        why.push(format!("まとめが違う: Rust {sm:?} / Python {ps}"));
+                    }
+                }
+                (None, None) => {}
+                (a, b) => why.push(format!("まとめ: Python {a:?} / Rust {b:?}")),
+            }
+            match (r.get("offsets"), &res.offsets) {
+                (Some(po), Some(o)) => {
+                    let e = [(o.sep_arcmin, &po[0]), (o.ra_arcmin, &po[1]), (o.dec_arcmin, &po[2])]
+                        .iter()
+                        .map(|(a, b)| (a - b.as_f64().unwrap()).abs())
+                        .fold(0.0, f64::max);
+                    if e > 1e-6 || o.ra_dir != s(&po[3]) || o.dec_dir != s(&po[4]) {
+                        why.push(format!("ずれが違う: Rust {o:?} / Python {po}"));
+                    }
+                }
+                (None, None) => {}
+                (a, b) => why.push(format!("ずれ: Python {a:?} / Rust {b:?}")),
+            }
+            // 覚えた機材の画素スケール
+            let after = zahyou_net::cache::load_cache_at(&cache);
+            let got_rigs = after.get("rigs").cloned().unwrap_or(Value::Null);
+            let want_rigs = &r["rigs_after"];
+            for (k, v) in want_rigs.as_object().unwrap() {
+                let g = got_rigs.get(k).and_then(Value::as_f64).unwrap_or(f64::NAN);
+                let e = rel(g, v.as_f64().unwrap());
+                if e.is_nan() || e >= 1e-8 {
+                    why.push(format!("機材の記憶 {k}: Rust {g} / Python {v}"));
+                }
+            }
+            if got_rigs.as_object().map(|o| o.len()) != want_rigs.as_object().map(|o| o.len()) {
+                why.push(format!("機材の記憶の数: Rust {got_rigs} / Python {want_rigs}"));
+            }
+            eprintln!(
+                "{} {name}: {} 行 / 解けた {} / Rust {secs:.2} 秒・Python {} 秒",
+                if why.is_empty() { "OK  " } else { "FAIL" },
+                got.len(),
+                res.wcs.is_some(),
+                r["python_seconds"]
+            );
+            if !why.is_empty() {
+                bad.push(format!("{name}: {}", why.join("\n")));
+            }
+            n_runs += 1;
+            n_lines += got.len();
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(bad.is_empty(), "{}", bad.join("\n\n"));
+        eprintln!("本物の解法つきの run(): {n_runs} 場面・{n_lines} 行が Python と同じ(時刻の数を除く)");
     }
 
     /// sha256(試験画像が基準値を作ったときと同じかを見るだけ。依存を足さないよう自前で書く)。

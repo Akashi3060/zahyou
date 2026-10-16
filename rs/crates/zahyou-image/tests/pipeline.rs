@@ -2,7 +2,9 @@
 //!
 //! dev/tcase の全画像と手元の実写について、読み込み・前処理(焼き込み文字のマスクあり/なし)・
 //! 検出(min_sources 12 / 60)・深い検出の結果を Python と比べる。画像が手元に無い(または中身が違う)ときは SKIP。
+//! 画像の path は dev/solver_truth.json と同じ決まり(common::image_path)。
 //! 許す差: 星の位置 1e-4 px、σ 相対 1e-6、光量 相対 1e-9、伸び・FWHM・SNR 相対 1e-6(実際はほぼビット一致)。
+//! 深い検出は上位 50 個の全部の値に加えて、全部の星の位置(xy)と測った値(info)も比べる。
 
 mod common;
 
@@ -10,7 +12,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use common::*;
-use zahyou_image::{DetectOpts, Source, detect_sources, detect_sources_deep, load_image_any, preprocess};
+use zahyou_image::{DeepInfo, DeepOpts, DetectOpts, Source, detect_deep, detect_sources, load_image_any, preprocess};
 
 const POS_TOL: f64 = 1e-4;
 const SIGMA_TOL: f64 = 1e-6;
@@ -50,10 +52,74 @@ fn star_issues(label: &str, py: &Value, got: &(Vec<Source>, Option<f64>), worst:
     out
 }
 
+/// 深い検出の全部の星の位置(xy)と測った値(info)を比べる。worst[0] に位置の差の最大を入れる。
+fn deep_issues(
+    label: &str,
+    py: &Value,
+    got: &(Vec<Source>, Option<f64>, Option<DeepInfo>),
+    worst: &mut [f64; 2],
+) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(xy) = py["xy"].as_array() {
+        for (k, (p, s)) in xy.iter().zip(got.0.iter()).enumerate() {
+            let (px, py_) = (f(&p[0]), f(&p[1]));
+            let d = (px - s.x).abs().max((py_ - s.y).abs());
+            worst[0] = worst[0].max(d);
+            if d > POS_TOL {
+                out.push(format!("{label}: 星 #{k} の位置 ({}, {}) ≠ ({px}, {py_})", s.x, s.y));
+                if out.len() > 6 {
+                    break;
+                }
+            }
+        }
+    }
+    let pi = &py["info"];
+    let Some(info) = got.2 else {
+        if pi.as_object().is_some_and(|o| !o.is_empty()) {
+            out.push(format!("{label}: Rust は info が無い(途中で終わった)が Python にはある"));
+        }
+        return out;
+    };
+    // inf は gen_image.py が文字列 "inf" にしている
+    let num = |v: &Value| -> Option<f64> {
+        match v {
+            Value::String(s) if s == "inf" => Some(f64::INFINITY),
+            Value::Null => None,
+            _ => v.as_f64(),
+        }
+    };
+    let close = |a: Option<f64>, b: Option<f64>| match (a, b) {
+        (Some(a), Some(b)) => rel(a, b) <= 1e-9 || (a.is_infinite() && a == b),
+        (None, None) => true,
+        _ => false,
+    };
+    let checks: [(&str, Option<f64>, Option<f64>); 11] = [
+        ("s_psf", info.s_psf, num(&pi["s_psf"])),
+        ("n_psf", Some(info.n_psf as f64), num(&pi["n_psf"])),
+        ("s", Some(info.s), num(&pi["s"])),
+        ("u", Some(info.u), num(&pi["u"])),
+        ("noise", Some(info.noise), num(&pi["noise"])),
+        ("candidates", Some(info.candidates as f64), num(&pi["candidates"])),
+        ("kept", Some(info.kept as f64), num(&pi["kept"])),
+        ("rejected.saddle", Some(info.rejected.saddle as f64), num(&pi["rejected"]["saddle"])),
+        ("rejected.elong", Some(info.rejected.elong as f64), num(&pi["rejected"]["elong"])),
+        ("rejected.sharp", Some(info.rejected.sharp as f64), num(&pi["rejected"]["sharp"])),
+        ("rejected.ring", Some(info.rejected.ring as f64), num(&pi["rejected"]["ring"])),
+    ];
+    for (name, a, b) in checks {
+        if !close(a, b) {
+            out.push(format!("{label}: info.{name} {a:?} ≠ {b:?}"));
+        }
+    }
+    if !close(Some(info.sharp_max), num(&pi["sharp_max"])) {
+        out.push(format!("{label}: info.sharp_max {} ≠ {:?}", info.sharp_max, num(&pi["sharp_max"])));
+    }
+    out
+}
+
 #[test]
 fn pipeline_matches_python() {
     let j = load_json("image_pipeline.json");
-    let dev = zahyou_dev();
     let mut issues: Vec<String> = Vec::new();
     let mut n_run = 0;
     let mut n_skip = 0;
@@ -66,8 +132,7 @@ fn pipeline_matches_python() {
         "画像", "", "", "", ""
     );
     for it in j["items"].as_array().unwrap() {
-        let name = it["name"].as_str().unwrap();
-        let path: PathBuf = if it["base"] == "tcase" { dev.join("tcase").join(name) } else { PathBuf::from(name) };
+        let path: PathBuf = image_path(it["path"].as_str().unwrap());
         let short: String = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
         let Ok(bytes) = std::fs::read(&path) else {
             println!("  SKIP {short} (手元に無い)");
@@ -145,8 +210,9 @@ fn pipeline_matches_python() {
         let d60 = detect_sources(&prep, &DetectOpts::with_min_sources(60));
         let t_det = t2.elapsed().as_secs_f64();
         let t3 = Instant::now();
-        let deep = detect_sources_deep(&prep, &DetectOpts::deep());
+        let deep3 = detect_deep(&prep, &DeepOpts::default());
         let t_deep = t3.elapsed().as_secs_f64();
+        let deep = (deep3.0.clone(), deep3.1);
 
         check_prep(&mut mine);
         if rel(p2.sigma, f(&pn["sigma"])) > SIGMA_TOL {
@@ -158,6 +224,7 @@ fn pipeline_matches_python() {
         mine.extend(star_issues(&format!("{short} det12"), &it["det12"], &d12, &mut worst));
         mine.extend(star_issues(&format!("{short} det60"), &it["det60"], &d60, &mut worst));
         mine.extend(star_issues(&format!("{short} deep"), &it["deep"], &deep, &mut worst));
+        mine.extend(deep_issues(&format!("{short} deep"), &it["deep"], &deep3, &mut worst));
 
         let ps = &it["py_seconds"];
         let pyt = [f(&ps["load"]), f(&ps["preprocess"]), f(&ps["detect_x2"]), f(&ps["deep"])];
@@ -240,11 +307,13 @@ fn big_synthetic_matches_python() {
     let t_det = t2.elapsed().as_secs_f64();
     let d60 = detect_sources(&prep, &DetectOpts::with_min_sources(60));
     let t3 = Instant::now();
-    let deep = detect_sources_deep(&prep, &DetectOpts::deep());
+    let deep3 = detect_deep(&prep, &DeepOpts::default());
     let t_deep = t3.elapsed().as_secs_f64();
+    let deep = (deep3.0.clone(), deep3.1);
     issues.extend(star_issues("det12", &j["det12"], &d12, &mut worst));
     issues.extend(star_issues("det60", &j["det60"], &d60, &mut worst));
     issues.extend(star_issues("deep", &j["deep"], &deep, &mut worst));
+    issues.extend(deep_issues("deep", &j["deep"], &deep3, &mut worst));
     let ps = &j["py_seconds"];
     println!(
         "6000×4000: 食い違い {} 件、星の位置の差 最大 {:.2e} px。Rust / Python 秒: 読み込み {t_load:.3}/{:.3} 前処理 {t_prep:.3}/{:.3} 検出 {t_det:.3}/{:.3} 深い検出 {t_deep:.3}/{:.3}(試験は opt-level 2)",

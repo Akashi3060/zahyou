@@ -221,3 +221,97 @@ fn internet_check_against_local() {
     assert!(!zahyou_net::internet_available_at("http://127.0.0.1:9", Duration::from_secs(4)));
     eprintln!("つながらない宛先の判定: {:.3} 秒", t.elapsed().as_secs_f64());
 }
+
+/// 状態の問い合わせの最中に中止され、そこへ nova が「解けない」と答えても、画像は送らない。
+#[test]
+fn cancel_with_failure_answer_does_not_upload_image() {
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let c2 = cancel.clone();
+    let srv = fake_nova(move |path, _| match path {
+        "/api/login" => Resp::json("{\"status\": \"success\", \"session\": \"s\"}"),
+        "/api/url_upload" => Resp::json("{\"status\": \"success\", \"subid\": 1}"),
+        "/api/submissions/1" => Resp::json("{\"jobs\": [2]}"),
+        "/api/jobs/2/info" => {
+            // 利用者がこの問い合わせの往復の間に「中止」を押した
+            c2.store(true, std::sync::atomic::Ordering::SeqCst);
+            Resp::json("{\"status\": \"failure\"}")
+        }
+        "/api/upload" => Resp::json("{\"status\": \"success\", \"subid\": 3}"),
+        _ => Resp::new(404, "no"),
+    });
+    let dir = temp_dir("nova-cancel-fail");
+    let img = dir.join("a.fits");
+    std::fs::write(&img, b"SIMPLE  =                    T").unwrap();
+    let src = [(1.0, 2.0)];
+    let req = OnlineRequest {
+        api_key: "K",
+        image_path: Some(&img),
+        sources: Some(&src),
+        width: 10,
+        height: 10,
+        timeout_s: 30.0,
+        hint_radec: None,
+        hint_radius_deg: 5.0,
+        scale_hint: None,
+    };
+    let stop = || cancel.load(std::sync::atomic::Ordering::SeqCst);
+    let r = solve_online_with(&mut client(&srv), &req, &stop, &|_| {});
+    assert_eq!(r, Err(NetError::Cancelled));
+    let paths: Vec<String> = srv.requests().iter().map(|q| q.path.clone()).collect();
+    assert!(!paths.iter().any(|p| p == "/api/upload"), "中止のあとで画像を送った: {paths:?}");
+}
+
+/// 応答が遅いときも、中止すれば応答を待たずにすぐ戻る(状態の問い合わせ・画像の送信)。
+#[test]
+fn cancel_does_not_wait_for_slow_responses() {
+    for slow in ["/api/jobs/2/info", "/api/upload"] {
+        let srv = fake_nova(move |path, _| {
+            if path == slow {
+                std::thread::sleep(Duration::from_secs(5));
+            }
+            match path {
+                "/api/login" => Resp::json("{\"status\": \"success\", \"session\": \"s\"}"),
+                "/api/url_upload" => Resp::json("{\"status\": \"success\", \"subid\": 1}"),
+                "/api/upload" => Resp::json("{\"status\": \"success\", \"subid\": 1}"),
+                "/api/submissions/1" => Resp::json("{\"jobs\": [2]}"),
+                "/api/jobs/2/info" => Resp::json("{\"status\": \"solving\"}"),
+                _ => Resp::new(404, "no"),
+            }
+        });
+        let dir = temp_dir("nova-cancel-slow");
+        let img = dir.join("a.fits");
+        std::fs::write(&img, vec![7u8; 200_000]).unwrap();
+        let src = [(1.0, 2.0)];
+        let req = OnlineRequest {
+            api_key: "K",
+            image_path: Some(&img),
+            // 画像の送信を見るときは星のリストを渡さない(いきなり画像を送る)
+            sources: if slow == "/api/upload" { None } else { Some(&src) },
+            width: 10,
+            height: 10,
+            timeout_s: 60.0,
+            hint_radec: None,
+            hint_radius_deg: 5.0,
+            scale_hint: None,
+        };
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let set_at: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+        let (r, lag) = std::thread::scope(|sc| {
+            sc.spawn(|| {
+                // 遅い要求を投げた頃に中止する
+                std::thread::sleep(Duration::from_millis(600));
+                *set_at.lock().unwrap() = Some(std::time::Instant::now());
+                cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+            });
+            let stop = || cancel.load(std::sync::atomic::Ordering::SeqCst);
+            let r = solve_online_with(&mut client(&srv), &req, &stop, &|_| {});
+            let end = std::time::Instant::now();
+            let lag = set_at.lock().unwrap().map(|t| end.saturating_duration_since(t).as_secs_f64());
+            (r, lag)
+        });
+        eprintln!("{slow} が遅いとき: {r:?}、中止から {lag:?} 秒で戻った");
+        assert_eq!(r, Err(NetError::Cancelled), "{slow}");
+        let lag = lag.expect("中止より先に戻った");
+        assert!(lag < 0.5, "{slow}: 中止から戻るまで {lag:.3} 秒");
+    }
+}

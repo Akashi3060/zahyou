@@ -1,4 +1,4 @@
-//! 星の検出(Python の zahyou_core.detect_sources・_measure・detect_sources_deep)。
+//! 星の検出(Python の zahyou_core.detect_sources・_measure)。深い検出は deep.rs。
 //!
 //! 平滑化した画像をしきい値で 2 値にし、4 連結でまとめ(scipy の label と同じく、ラスター順で最初に
 //! 現れた順に番号)、領域ごとに重心・光量・伸びを測る。しきい値は 12σ から下げていき、
@@ -7,7 +7,6 @@
 use rayon::prelude::*;
 
 use crate::filters::gaussian1;
-use crate::stats::{filter_ordered, sigma_clipped_std};
 use crate::{DetectOpts, Image2D, Prep, Source};
 
 /// 横に続く 1 本(行 y の x0..=x1)。
@@ -279,51 +278,4 @@ pub fn detect_raw(sub: &Image2D, mask: &[bool], sigma: f64, opts: &DetectOpts) -
 /// 標準の検出(`detect_sources(prep.sub, prep.mask, prep.sigma, ...)`)。
 pub fn detect_sources(prep: &Prep, opts: &DetectOpts) -> (Vec<Source>, Option<f64>) {
     detect_raw(&prep.sub, &prep.mask, prep.sigma, opts)
-}
-
-/// 深い検出(`detect_sources_deep`)。画像を 2×2 にまとめてから同じ検出をかけ、座標を元の画素へ戻す
-/// ((bx, by) → (2bx+0.5, 2by+0.5))。4 画素の和で星の光は 4 倍、白色雑音は 2 倍なので SNR が 2 倍になる。
-/// 雑音はまとめた画像で測り直す。Python 版はまとめた画像に min_sources=60 で検出をかける
-/// (ほかは既定値)ので、同じにするには `DetectOpts { min_sources: 60, ..Default::default() }` を渡す。
-pub fn detect_sources_deep(prep: &Prep, opts: &DetectOpts) -> (Vec<Source>, Option<f64>) {
-    let (ny, nx) = (prep.sub.height, prep.sub.width);
-    let (h, w) = (ny / 2 * 2, nx / 2 * 2); // 奇数の端の 1 行・1 列は捨てる
-    if h < 16 || w < 16 || prep.mask.len() != ny * nx || prep.sub.data.len() != ny * nx {
-        return (Vec::new(), None);
-    }
-    let (h2, w2) = (h / 2, w / 2);
-    let s = &prep.sub.data;
-    let m = &prep.mask;
-    let mut s2 = vec![0.0f32; h2 * w2];
-    let mut m2 = vec![false; h2 * w2];
-    s2.par_chunks_mut(w2).zip(m2.par_chunks_mut(w2)).enumerate().for_each(|(i, (srow, mrow))| {
-        let r0 = 2 * i * nx;
-        let r1 = (2 * i + 1) * nx;
-        for j in 0..w2 {
-            let (a, b, c, d) = (r0 + 2 * j, r0 + 2 * j + 1, r1 + 2 * j, r1 + 2 * j + 1);
-            // numpy の reshape(h/2, 2, w/2, 2).sum(axis=(1, 3)) と同じ順: (a00 + a01) + (a10 + a11)
-            srow[j] = (s[a] + s[b]) + (s[c] + s[d]);
-            mrow[j] = m[a] || m[b] || m[c] || m[d];
-        }
-    });
-    let any_free = m2.iter().any(|&v| !v);
-    let sigma2 = {
-        let all_masked = !any_free;
-        let v = if all_masked || !m2.iter().any(|&v| v) {
-            sigma_clipped_std(&s2)
-        } else {
-            let marked: Vec<f32> = s2.iter().zip(m2.iter()).map(|(&v, &k)| if k { f32::NAN } else { v }).collect();
-            sigma_clipped_std(&filter_ordered(&marked, |v| !v.is_nan()))
-        } as f64;
-        if !v.is_finite() || v <= 0.0 { 2.0 * prep.sigma } else { v }
-    };
-    let img2 = Image2D { width: w2, height: h2, data: s2 };
-    let (mut found, thr) = detect_raw(&img2, &m2, sigma2, opts);
-    for c in &mut found {
-        c.x = 2.0 * c.x + 0.5;
-        c.y = 2.0 * c.y + 0.5;
-        c.fwhm *= 2.0;
-        c.area *= 4;
-    }
-    (found, thr)
 }

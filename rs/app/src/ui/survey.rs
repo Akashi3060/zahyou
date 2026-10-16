@@ -164,15 +164,28 @@ pub fn list_repr(v: &[u32]) -> String {
     format!("[{}]", inner.join(", "))
 }
 
+/// 「まとめて準備」でそろえる段のうち、まだ無いもの(scales が空ならおすすめの段。小さい順)。
+pub fn need_scales(scales: &[u32], have: &[u32]) -> Vec<u32> {
+    let mut want: Vec<u32> = if scales.is_empty() { zahyou_net::recommended_scales() } else { scales.to_vec() };
+    want.sort_unstable();
+    want.dedup();
+    want.into_iter().filter(|s| !have.contains(s)).collect()
+}
+
 /// 段 → 落とすファイル名
 pub fn names_of(scales: &[u32]) -> Vec<String> {
     scales.iter().flat_map(|s| index_names(*s)).collect()
 }
 
 /// 「まとめて準備」。足りない段を落として、検査する(Python の prepare_all)。戻り値は survey。
+///
+/// scales を渡せばその段を、空ならおすすめの段(画角 4′ 以上)をそろえる。そろって検査に通っている段は落とさない。
+/// allowed: 利用者に容量を見せて了承を得た段(画面が押したときに数え直したもの)。渡されていて、ここで数え直した
+/// 足りない段がそれより多ければ、落とさずに止める(了承していない量を落とさない)。
 pub fn prepare_all(
     index_dir: &Path,
     scales: &[u32],
+    allowed: Option<&[u32]>,
     log: &dyn Fn(&str),
     progress: &dyn Fn(u64, u64),
     stop: &dyn Fn() -> bool,
@@ -181,9 +194,17 @@ pub fn prepare_all(
     log(&sep);
     log("1. 星図データ");
     let st = survey(index_dir);
-    let mut want: Vec<u32> = if scales.is_empty() { zahyou_net::recommended_scales() } else { scales.to_vec() };
-    want.sort_unstable();
-    let need: Vec<u32> = want.iter().copied().filter(|s| !st.index.scales.contains(s)).collect();
+    let need = need_scales(scales, &st.index.scales);
+    let extra: Vec<u32> = need.iter().copied().filter(|s| allowed.is_some_and(|a| !a.contains(s))).collect();
+    if !extra.is_empty() {
+        let list: Vec<String> = extra.iter().map(|s| s.to_string()).collect();
+        log(&format!(
+            "  確認したあとで足りない段が増えました ({})。落とさずに止めます。もう一度押すと、増えたぶんも含めて容量を確かめます。",
+            list.join(", ")
+        ));
+        report(&st, log);
+        return st;
+    }
     if !need.is_empty() {
         let list: Vec<String> = need.iter().map(|s| s.to_string()).collect();
         log(&format!("  足りない段: {}", list.join(", ")));
@@ -218,6 +239,29 @@ mod tests {
         assert_eq!(g(2000.0), "2000");
         assert_eq!(list_repr(&[5202, 5203]), "[5202, 5203]");
         assert_eq!(list_repr(&[]), "[]");
+    }
+
+    #[test]
+    fn 了承していない段は落とさない() {
+        assert_eq!(need_scales(&[5203, 5202, 5203], &[5203]), vec![5202]);
+        assert_eq!(need_scales(&[], &[]), zahyou_net::recommended_scales());
+        let dir = std::env::temp_dir().join(format!("zahyou-prepare-allowed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let lines = std::sync::Mutex::new(Vec::<String>::new());
+        let log = |s: &str| lines.lock().unwrap().push(s.to_string());
+        let fetched = std::sync::atomic::AtomicBool::new(false);
+        let prog = |_: u64, _: u64| fetched.store(true, std::sync::atomic::Ordering::Relaxed);
+        // 止めの合図は最初から立てておく(万一ここを通り抜けても、ネットへは出ない)
+        let stop = || true;
+        // 了承したのは 5203 だけなのに、5202 も足りない
+        let st = prepare_all(&dir, &[5202, 5203], Some(&[5203]), &log, &prog, &stop);
+        let ls = lines.lock().unwrap().clone();
+        assert!(ls.iter().any(|l| l.contains("確認したあとで足りない段が増えました (5202)")), "{ls:?}");
+        assert!(!ls.iter().any(|l| l.contains("足りない段: ")), "落とそうとした: {ls:?}");
+        assert!(!fetched.load(std::sync::atomic::Ordering::Relaxed));
+        assert!(!st.ready);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

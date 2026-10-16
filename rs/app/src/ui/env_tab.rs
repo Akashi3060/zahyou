@@ -2,7 +2,7 @@
 
 use eframe::egui::{self, RichText, TextEdit};
 
-use super::app::ZahyouApp;
+use super::app::{Action, ZahyouApp};
 use super::survey;
 use super::widgets::{self, Placed};
 
@@ -51,12 +51,12 @@ impl ZahyouApp {
         ui.horizontal(|ui| {
             let b = ui.add_enabled(!self.busy, widgets::run_button("まとめて準備する"));
             if b.clicked() {
-                self.prepare_all();
+                self.request(Action::PrepareAll);
             }
             self.placed.push(Placed { name: "まとめて準備する".into(), rect: b.rect, frame });
             let b = ui.button("状態を確認");
             if b.clicked() {
-                self.survey();
+                self.request(Action::Survey);
             }
             self.placed.push(Placed { name: "状態を確認".into(), rect: b.rect, frame });
             let b = ui.add_enabled(self.busy, egui::Button::new("中止"));
@@ -78,7 +78,7 @@ impl ZahyouApp {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let b = ui.add(egui::Button::new("...").min_size(egui::vec2(30.0, 0.0)));
                     if b.clicked() {
-                        self.choose_indexdir();
+                        self.request(Action::ChooseIndexDir);
                     }
                     placed.push(("...".into(), b.rect));
                     let e = ui.add(
@@ -86,13 +86,17 @@ impl ZahyouApp {
                             .font(super::fonts::path(super::fonts::pt(10.0)))
                             .desired_width(ui.available_width()),
                     );
+                    // 置き場所を書き換えたら、前の置き場所で調べた結果は使わない
+                    if e.changed() {
+                        self.forget_env();
+                    }
                     placed.push(("置き場所".into(), e.rect));
                 });
             });
             ui.add_space(6.0);
             let b = ui.button(format!("おすすめをまとめて落とす (約 {rec_gb:.1} GB)"));
             if b.clicked() {
-                self.download_recommended();
+                self.request(Action::DownloadRecommended);
             }
             placed.push(("おすすめをまとめて落とす".into(), b.rect));
             widgets::muted(
@@ -116,7 +120,7 @@ impl ZahyouApp {
             ui.add_space(4.0);
             let b = ui.button("必要な段を選ぶ");
             if b.clicked() {
-                self.recommend();
+                self.request(Action::Recommend);
             }
             placed.push(("必要な段を選ぶ".into(), b.rect));
             widgets::muted(ui, th, "この 2 つから画角を出して、要る段だけに印を付けます");
@@ -153,7 +157,7 @@ impl ZahyouApp {
             ui.add_space(6.0);
             let b = ui.button("選んだ段を落とす");
             if b.clicked() {
-                self.download_index();
+                self.request(Action::DownloadIndex);
             }
             placed.push(("選んだ段を落とす".into(), b.rect));
             placed

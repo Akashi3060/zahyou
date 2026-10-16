@@ -18,8 +18,28 @@ const PAR_SUM_MIN: usize = 1 << 16;
 const RADIX_MIN: usize = 1 << 15;
 /// 並列の処理単位(要素数)
 const CHUNK: usize = 1 << 16;
-/// σ クリップの読みを並列にする塊(8192 の倍数。和の区切りがそろう)
-const SUPER: usize = NP_BUF * 64;
+/// σ クリップの読みを並列にする塊の最小(8192 の倍数。和の区切りがそろう)
+const SUPER_MIN: usize = NP_BUF * 8;
+
+/// σ クリップの読みを並列にする塊の大きさ(8192 の倍数)。塊ごとに 65536 個のヒストグラムを持つので、
+/// 塊はスレッド数の 2 倍まで、1 つ SUPER_MIN 個以上にする(50 万個でも 7 つに分けて並列に読む)。
+fn super_len(n: usize) -> usize {
+    let parts = (n / SUPER_MIN).clamp(1, 2 * rayon::current_num_threads().max(1));
+    n.div_ceil(parts).div_ceil(NP_BUF).max(1) * NP_BUF
+}
+
+/// 塊ごとのヒストグラムを足し合わせる(ビンを分けて並列に)。
+fn merge_hists(hs: &[&Vec<u32>]) -> Vec<u32> {
+    let mut out = vec![0u32; 65536];
+    out.par_chunks_mut(4096).enumerate().for_each(|(i, o)| {
+        for h in hs {
+            for (a, b) in o.iter_mut().zip(&h[i * 4096..(i + 1) * 4096]) {
+                *a += *b;
+            }
+        }
+    });
+    out
+}
 
 /// float32 の大小と同じ順になる 32 bit の鍵(負の数はビットを反転、正の数は符号ビットを立てる)。
 #[inline]
@@ -319,10 +339,10 @@ pub fn sigma_clipped_std(data: &[f32]) -> f32 {
 }
 
 /// 大きい配列の 1 回目の読み: numpy と同じ和(8192 個ずつのペアワイズ和を順に足す)と、鍵の上位 16 bit のヒストグラム。
-/// 区切りの塊(SUPER 個 = 8192 の倍数)ごとに並列に計算し、和は先頭の区切りから順に足す。
+/// 区切りの塊(super_len 個 = 8192 の倍数)ごとに並列に計算し、和は先頭の区切りから順に足す。
 fn pass_sum_hist(cur: &[f32]) -> (f32, Vec<u32>) {
     let parts: Vec<(Vec<f32>, Vec<u32>)> = cur
-        .par_chunks(SUPER)
+        .par_chunks(super_len(cur.len()))
         .map(|sc| {
             let mut h = vec![0u32; 65536];
             let sums: Vec<f32> = sc
@@ -338,16 +358,12 @@ fn pass_sum_hist(cur: &[f32]) -> (f32, Vec<u32>) {
         })
         .collect();
     let mut res = 0.0f32;
-    let mut h1 = vec![0u32; 65536];
-    for (sums, h) in &parts {
+    for (sums, _) in &parts {
         for &v in sums {
             res += v;
         }
-        for (a, b) in h1.iter_mut().zip(h.iter()) {
-            *a += *b;
-        }
     }
-    (res, h1)
+    (res, merge_hists(&parts.iter().map(|p| &p.1).collect::<Vec<_>>()))
 }
 
 /// 大きい配列の中央値と std(numpy の median・std と同じ値)を、1 回目の読み(和・上位ヒストグラム)の結果と
@@ -374,7 +390,7 @@ fn median_std_big(cur: &[f32], sum: f32, h1: &[u32]) -> (f32, f32) {
         if even && !next_same_bin { (b1 + 1..65536).find(|&i| h1[i] > 0).map(|i| i as u32) } else { None };
     let b1u = b1 as u32;
     let parts: Vec<(Vec<f32>, Vec<u32>, u32)> = cur
-        .par_chunks(SUPER)
+        .par_chunks(super_len(n))
         .map(|sc| {
             let mut h = vec![0u32; 65536];
             let mut mn = u32::MAX;
@@ -400,17 +416,14 @@ fn median_std_big(cur: &[f32], sum: f32, h1: &[u32]) -> (f32, f32) {
         })
         .collect();
     let mut ss = 0.0f32;
-    let mut h2 = vec![0u32; 65536];
     let mut mn = u32::MAX;
-    for (sums, h, m2) in &parts {
+    for (sums, _, m2) in &parts {
         for &v in sums {
             ss += v;
         }
-        for (a, b) in h2.iter_mut().zip(h.iter()) {
-            *a += *b;
-        }
         mn = mn.min(*m2);
     }
+    let h2 = merge_hists(&parts.iter().map(|p| &p.1).collect::<Vec<_>>());
     let std = ((ss as f64 / n as f64) as f32).sqrt();
     // 下位ヒストグラムで k 番目
     let r = k - base;
@@ -499,7 +512,10 @@ mod tests {
     #[test]
     fn fused_median_std_matches() {
         // 中央の 2 つが同じ上位ビン・別の上位ビン・奇数個のどれでも、ふつうの経路と同じ値
-        for (n, scale) in [(70001usize, 0.37f32), (70000, 0.37), (65536, 1e-3), (100000, 3.0e3), (40000, 1.0)] {
+        // 600001 個は塊が複数(super_len)になる大きさ
+        for (n, scale) in
+            [(70001usize, 0.37f32), (70000, 0.37), (65536, 1e-3), (100000, 3.0e3), (40000, 1.0), (600001, 0.011)]
+        {
             let mut a: Vec<f32> = (0..n).map(|i| (((i * 7919) % 10007) as f32 - 5000.0) * scale).collect();
             if n == 40000 {
                 // 半分を 1.0、半分を 2.0(中央の 2 つが別の上位ビン)

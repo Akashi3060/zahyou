@@ -9,13 +9,20 @@
 //!
 //! API キーはソースに書かない。呼ぶ側が引数で渡す([`api_key_from_env`] で環境変数 ASTROMETRY_API_KEY を読める)。
 //! 星のリストは Python 版と同じく 1 始まり(FITS 規約)に直して送る。明るい順に並べて渡すこと。
+//!
+//! 中止: 要求はどれも別のスレッドで投げ、50 ms ごとに中止の合図を見ながら応答を待つ(中止なら待たずに戻る。
+//! 投げた要求は裏で時間切れまで続くことがある = Python の _with_deadline と同じ)。画像を送っている途中なら、
+//! 本文の読み出しを止めて送るのをやめる。中止のあとで新しい要求(特に画像の送信)は始めない。
 
 use crate::http;
 use crate::pyfmt::{py_json, py_urlencode};
 use crate::NetError;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
+use std::io::Read;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 /// nova.astrometry.net(astroquery の conf.server と同じ)
@@ -206,83 +213,120 @@ impl NovaClient {
         }
     }
 
-    fn post_form(&self, path: &str, body: &str) -> Result<Value, String> {
+    fn post_form(&self, path: &str, body: &str, stop: &dyn Fn() -> bool) -> Result<Value, NetError> {
         let url = format!("{}/api/{path}", self.base);
-        let mut resp = self
-            .agent
-            .post(&url)
-            .content_type("application/x-www-form-urlencoded")
-            .send(body.as_bytes())
-            .map_err(|e| http::describe(&e))?;
-        let status = resp.status().as_u16();
-        let text = http::read_text(&mut resp, 4 << 20)?;
-        if status != 200 {
-            return Err(format!("Post of job failed (HTTP {status})"));
-        }
-        serde_json::from_str(&text).map_err(|e| format!("応答を読めません ({e})"))
+        let agent = self.agent.clone();
+        let body = body.to_string();
+        let text = run_stoppable(stop, move |_| {
+            let mut resp = agent
+                .post(&url)
+                .content_type("application/x-www-form-urlencoded")
+                .send(body.as_bytes())
+                .map_err(|e| http::describe(&e))?;
+            let status = resp.status().as_u16();
+            let text = http::read_text(&mut resp, 4 << 20)?;
+            if status != 200 {
+                return Err(format!("Post of job failed (HTTP {status})"));
+            }
+            Ok(text)
+        })?;
+        serde_json::from_str(&text).map_err(|e| NetError::Failed(format!("応答を読めません ({e})")))
     }
 
-    fn get_json(&self, path: &str) -> Result<Value, String> {
+    fn get_json(&self, path: &str, stop: &dyn Fn() -> bool) -> Result<Value, NetError> {
         let url = format!("{}/api/{path}", self.base);
-        let mut resp = self.agent.get(&url).call().map_err(|e| http::describe(&e))?;
-        let status = resp.status().as_u16();
-        let text = http::read_text(&mut resp, 4 << 20)?;
-        if status != 200 {
-            return Err(format!("HTTP {status}"));
-        }
-        serde_json::from_str(&text).map_err(|e| format!("応答を読めません ({e})"))
+        let text = self.get_text(url, "", stop)?;
+        serde_json::from_str(&text).map_err(|e| NetError::Failed(format!("応答を読めません ({e})")))
+    }
+
+    /// GET して本文を文字列で。HTTP 200 でなければ Failed(「{what}HTTP nnn」)。
+    fn get_text(&self, url: String, what: &'static str, stop: &dyn Fn() -> bool) -> Result<String, NetError> {
+        let agent = self.agent.clone();
+        run_stoppable(stop, move |_| {
+            let mut resp = agent.get(&url).call().map_err(|e| http::describe(&e))?;
+            let status = resp.status().as_u16();
+            let text = http::read_text(&mut resp, 4 << 20)?;
+            if status != 200 {
+                return Err(format!("{what}HTTP {status}"));
+            }
+            Ok(text)
+        })
     }
 
     /// API キーでログインする(済んでいれば何もしない)。
-    pub fn login(&mut self, api_key: &str) -> Result<(), String> {
+    pub fn login(&mut self, api_key: &str, stop: &dyn Fn() -> bool) -> Result<(), NetError> {
         if self.session.is_some() {
             return Ok(());
         }
         if api_key.trim().is_empty() {
-            return Err("Astrometry.net の API キーがありません(環境変数 ASTROMETRY_API_KEY か設定で渡す)".into());
+            return Err(NetError::Failed(
+                "Astrometry.net の API キーがありません(環境変数 ASTROMETRY_API_KEY か設定で渡す)".into(),
+            ));
         }
-        let v = self.post_form("login", &login_body(api_key))?;
+        let v = self.post_form("login", &login_body(api_key), stop)?;
         if v.get("status").and_then(|s| s.as_str()) != Some("success") {
-            return Err("Unable to log in to astrometry.net".into());
+            return Err(NetError::Failed("Unable to log in to astrometry.net".into()));
         }
-        let s = v.get("session").and_then(|s| s.as_str()).ok_or("ログインの応答に session がありません")?;
+        let s = v
+            .get("session")
+            .and_then(|s| s.as_str())
+            .ok_or_else(|| NetError::Failed("ログインの応答に session がありません".into()))?;
         self.session = Some(s.to_string());
         Ok(())
     }
 
-    fn session(&self) -> Result<&str, String> {
-        self.session.as_deref().ok_or_else(|| "ログインしていません".into())
+    fn session(&self) -> Result<&str, NetError> {
+        self.session.as_deref().ok_or_else(|| NetError::Failed("ログインしていません".into()))
     }
 
     /// 星のリストを送る。戻り値 subid。
-    pub fn submit_source_list(&self, settings: &[(String, Value)], xs: &[f64], ys: &[f64], width: usize, height: usize) -> Result<u64, String> {
-        validate_settings(settings)?;
+    pub fn submit_source_list(
+        &self,
+        settings: &[(String, Value)],
+        xs: &[f64],
+        ys: &[f64],
+        width: usize,
+        height: usize,
+        stop: &dyn Fn() -> bool,
+    ) -> Result<u64, NetError> {
+        validate_settings(settings).map_err(NetError::Failed)?;
         let body = source_list_body(settings, xs, ys, width, height, self.session()?);
-        let v = self.post_form("url_upload", &body)?;
-        subid(&v)
+        let v = self.post_form("url_upload", &body, stop)?;
+        subid(&v).map_err(NetError::Failed)
     }
 
-    /// 画像そのものを送る。戻り値 subid。
-    pub fn submit_image(&self, settings: &[(String, Value)], path: &Path) -> Result<u64, String> {
-        validate_settings(settings)?;
-        let data = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    /// 画像そのものを送る。戻り値 subid。中止の合図が立てば、送っている途中でも本文の読み出しを止めて Cancelled。
+    pub fn submit_image(&self, settings: &[(String, Value)], path: &Path, stop: &dyn Fn() -> bool) -> Result<u64, NetError> {
+        validate_settings(settings).map_err(NetError::Failed)?;
+        if stop() {
+            return Err(NetError::Cancelled);
+        }
+        let data = std::fs::read(path).map_err(|e| NetError::Failed(format!("{}: {e}", path.display())))?;
         let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into());
         let boundary = make_boundary(&data);
         let (ctype, body) = upload_body(settings, self.session()?, &name, &data, &boundary);
+        drop(data);
         let url = format!("{}/api/upload", self.base);
-        let mut resp = self
-            .upload_agent
-            .post(&url)
-            .content_type(&ctype)
-            .send(&body[..])
-            .map_err(|e| http::describe(&e))?;
-        let status = resp.status().as_u16();
-        let text = http::read_text(&mut resp, 4 << 20)?;
-        if status != 200 {
-            return Err(format!("Post of job failed (HTTP {status})"));
-        }
-        let v: Value = serde_json::from_str(&text).map_err(|e| format!("応答を読めません ({e})"))?;
-        subid(&v)
+        let agent = self.upload_agent.clone();
+        let text = run_stoppable(stop, move |abandon| {
+            // 長さを先に伝える(urllib3 と同じく Content-Length。reader の本文でも chunked にしない)
+            let len = body.len();
+            let mut reader = StopReader { data: &body, pos: 0, abandon: &abandon };
+            let mut resp = agent
+                .post(&url)
+                .content_type(&ctype)
+                .header("Content-Length", len.to_string())
+                .send(ureq::SendBody::from_reader(&mut reader))
+                .map_err(|e| http::describe(&e))?;
+            let status = resp.status().as_u16();
+            let text = http::read_text(&mut resp, 4 << 20)?;
+            if status != 200 {
+                return Err(format!("Post of job failed (HTTP {status})"));
+            }
+            Ok(text)
+        })?;
+        let v: Value = serde_json::from_str(&text).map_err(|e| NetError::Failed(format!("応答を読めません ({e})")))?;
+        subid(&v).map_err(NetError::Failed)
     }
 
     /// 結末が出るまで待つ(astroquery の `monitor_submission`)。状態の問い合わせの失敗は締め切りまで続ける。
@@ -296,28 +340,38 @@ impl NovaClient {
             }
             let mut status = String::new();
             if job.is_none() {
-                match self.get_json(&format!("submissions/{subid}")) {
+                match self.get_json(&format!("submissions/{subid}"), stop) {
                     Ok(v) => job = v.get("jobs").and_then(|j| j.get(0)).and_then(|j| j.as_u64()),
+                    Err(NetError::Cancelled) => return Err(NetError::Cancelled),
                     Err(e) if !warned => {
-                        log(&format!("  - nova の状態を聞けませんでした ({e})。続けて待ちます。"));
+                        log(&format!("  - nova の状態を聞けませんでした ({})。続けて待ちます。", net_msg(&e)));
                         warned = true;
                     }
                     Err(_) => {}
+                }
+                // 問い合わせの間に中止されていたら、次の問い合わせをしない
+                if stop() {
+                    return Err(NetError::Cancelled);
                 }
             }
             if let Some(j) = job {
-                match self.get_json(&format!("jobs/{j}/info")) {
+                match self.get_json(&format!("jobs/{j}/info"), stop) {
                     Ok(v) => status = v.get("status").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+                    Err(NetError::Cancelled) => return Err(NetError::Cancelled),
                     Err(e) if !warned => {
-                        log(&format!("  - nova の状態を聞けませんでした ({e})。続けて待ちます。"));
+                        log(&format!("  - nova の状態を聞けませんでした ({})。続けて待ちます。", net_msg(&e)));
                         warned = true;
                     }
                     Err(_) => {}
                 }
             }
+            // 答えを受け取る間に中止されていたら、その答えでは動かない(failure なら画像を送ることになる)
+            if stop() {
+                return Err(NetError::Cancelled);
+            }
             match (status.as_str(), job) {
                 ("success", Some(j)) => {
-                    let header = self.wcs_file(j).map_err(NetError::Failed)?;
+                    let header = self.wcs_file(j, stop)?;
                     return Ok(Outcome::Solved { header, job_id: j });
                 }
                 ("failure", _) => return Ok(Outcome::Failed),
@@ -330,15 +384,82 @@ impl NovaClient {
     }
 
     /// 解けた WCS(FITS のヘッダー)を受け取る。
-    pub fn wcs_file(&self, job: u64) -> Result<String, String> {
+    pub fn wcs_file(&self, job: u64, stop: &dyn Fn() -> bool) -> Result<String, NetError> {
         let url = format!("{}/wcs_file/{job}", self.base);
-        let mut resp = self.agent.get(&url).call().map_err(|e| http::describe(&e))?;
-        let status = resp.status().as_u16();
-        let text = http::read_text(&mut resp, 4 << 20)?;
-        if status != 200 {
-            return Err(format!("wcs_file: HTTP {status}"));
+        self.get_text(url, "wcs_file: ", stop)
+    }
+}
+
+/// NetError の理由の文(ログ用)。
+fn net_msg(e: &NetError) -> String {
+    match e {
+        NetError::Failed(m) => m.clone(),
+        NetError::Cancelled => "中止".into(),
+    }
+}
+
+/// 要求 f を別のスレッドで走らせ、中止の合図を 50 ms ごとに見ながら終わるのを待つ。
+///
+/// 中止なら f の終わりを待たずに Err(Cancelled) を返し、f に渡した合図(abandon)を立てる(画像の本文の読み出しは
+/// それを見て止まる)。f はそのまま裏で時間切れまで続くことがあるが、結果は捨てる。スレッドを作れなければ
+/// その場で走らせる(そのときは中止を待てない)。
+fn run_stoppable<T: Send + 'static>(
+    stop: &dyn Fn() -> bool,
+    f: impl FnOnce(Arc<AtomicBool>) -> Result<T, String> + Send + 'static,
+) -> Result<T, NetError> {
+    if stop() {
+        return Err(NetError::Cancelled);
+    }
+    let abandon = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = mpsc::channel();
+    let slot = Arc::new(std::sync::Mutex::new(Some(f)));
+    let (slot2, abandon2) = (slot.clone(), abandon.clone());
+    let spawned = std::thread::Builder::new().name("nova-request".into()).spawn(move || {
+        let f = slot2.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(f) = f {
+            let _ = tx.send(f(abandon2));
         }
-        Ok(text)
+    });
+    if spawned.is_err() {
+        // スレッドを作れない(資源切れ)。中止は待てないが、その場で投げる
+        let f = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+        return match f {
+            Some(f) => f(abandon).map_err(NetError::Failed),
+            None => Err(NetError::Failed("要求を始められませんでした".into())),
+        };
+    }
+    loop {
+        if stop() {
+            abandon.store(true, Ordering::Relaxed);
+            return Err(NetError::Cancelled);
+        }
+        match rx.recv_timeout(Duration::from_millis(50)) {
+            Ok(r) => return r.map_err(NetError::Failed),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            // f が panic した
+            Err(mpsc::RecvTimeoutError::Disconnected) => return Err(NetError::Failed("要求の途中で問題が起きました".into())),
+        }
+    }
+}
+
+/// 送る本文の読み出し。abandon が立ったら(中止)誤りを返し、送るのをやめさせる。
+struct StopReader<'a> {
+    data: &'a [u8],
+    pos: usize,
+    abandon: &'a AtomicBool,
+}
+
+impl Read for StopReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.abandon.load(Ordering::Relaxed) {
+            return Err(std::io::Error::other("中止しました"));
+        }
+        // 64 KiB ずつ渡す(中止をこまめに見るため)
+        let rest = &self.data[self.pos.min(self.data.len())..];
+        let n = rest.len().min(buf.len()).min(64 << 10);
+        buf[..n].copy_from_slice(&rest[..n]);
+        self.pos += n;
+        Ok(n)
     }
 }
 
@@ -384,8 +505,8 @@ pub fn solve_online_with(client: &mut NovaClient, req: &OnlineRequest, stop: &dy
         let xs: Vec<f64> = src.iter().map(|p| p.0 + 1.0).collect();
         let ys: Vec<f64> = src.iter().map(|p| p.1 + 1.0).collect();
         log(&format!("  - 検出した {} 個の星の位置だけを送ります。", xs.len()));
-        client.login(req.api_key).map_err(fail)?;
-        let sub = client.submit_source_list(&settings, &xs, &ys, req.width, req.height).map_err(fail)?;
+        client.login(req.api_key, stop)?;
+        let sub = client.submit_source_list(&settings, &xs, &ys, req.width, req.height, stop)?;
         match client.monitor(sub, timeout, stop, log)? {
             Outcome::Solved { header, job_id } => {
                 let cards = split_cards(&header);
@@ -399,14 +520,21 @@ pub fn solve_online_with(client: &mut NovaClient, req: &OnlineRequest, stop: &dy
         if req.image_path.is_none() {
             return Ok(None);
         }
+        // 「解けない」の答えと中止が重なったときに、画像を送り始めない
+        if stop() {
+            return Err(NetError::Cancelled);
+        }
         log("  - 星の位置だけでは解けなかったので、画像そのものを送ります。");
     }
 
     let Some(path) = req.image_path else {
         return Ok(None);
     };
-    client.login(req.api_key).map_err(fail)?;
-    let sub = client.submit_image(&settings, path).map_err(fail)?;
+    if stop() {
+        return Err(NetError::Cancelled);
+    }
+    client.login(req.api_key, stop)?;
+    let sub = client.submit_image(&settings, path, stop)?;
     match client.monitor(sub, timeout, stop, log)? {
         Outcome::Solved { header, job_id } => {
             let cards = split_cards(&header);

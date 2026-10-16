@@ -17,11 +17,38 @@ pub fn load_json(name: &str) -> Value {
     serde_json::from_str(&s).expect("JSON")
 }
 
-/// Python 版の dev フォルダー(環境変数 ZAHYOU_DEV で変えられる)。
+/// リポジトリの根(rs/crates/zahyou-image から 3 つ上)。
+pub fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("..")
+}
+
+/// Python 版の dev フォルダー(環境変数 ZAHYOU_DEV で変えられる。無ければこのリポジトリの dev)。
 pub fn zahyou_dev() -> PathBuf {
-    std::env::var_os("ZAHYOU_DEV")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\Users\yoshi\Documents\GitHub\zahyou\dev"))
+    std::env::var_os("ZAHYOU_DEV").map(PathBuf::from).unwrap_or_else(|| repo_root().join("dev"))
+}
+
+/// image_pipeline.json の path をこの PC のパスにする(gen_image.py の image_path と同じ決まり)。
+/// `$ZAHYOU_TEST_IMAGES/…` は環境変数 ZAHYOU_TEST_IMAGES(無ければホームフォルダー)からの相対。
+/// それ以外はリポジトリからの相対で、`dev/…` がリポジトリに無ければ $ZAHYOU_DEV、隣の ../zahyou/dev の順に探す。
+pub fn image_path(p: &str) -> PathBuf {
+    let join = |base: PathBuf, rest: &str| rest.split('/').fold(base, |b, s| b.join(s));
+    if let Some(rest) = p.strip_prefix("$ZAHYOU_TEST_IMAGES/") {
+        let base = std::env::var_os("ZAHYOU_TEST_IMAGES")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .or_else(|| std::env::var_os("HOME"))
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        return join(base, rest);
+    }
+    let first = join(repo_root(), p);
+    let mut cands = vec![first.clone()];
+    if let Some(rest) = p.strip_prefix("dev/") {
+        if let Some(d) = std::env::var_os("ZAHYOU_DEV") {
+            cands.push(join(PathBuf::from(d), rest));
+        }
+        cands.push(join(repo_root().join("..").join("zahyou").join("dev"), rest));
+    }
+    cands.into_iter().find(|c| c.exists()).unwrap_or(first)
 }
 
 /// 試験用の一時フォルダー(target の下)。

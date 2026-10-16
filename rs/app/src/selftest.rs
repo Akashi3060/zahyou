@@ -285,7 +285,7 @@ fn best_of<T>(repeat: usize, mut f: impl FnMut() -> T) -> (f64, T) {
     }
 }
 
-/// 1 枚の画像を段ごとに測る。解法(第 3 段で中身が入る)は解けたときだけ北が上の段を測る。
+/// 1 枚の画像を段ごとに測る。解法(目標なし・画角も不明のブラインド)で解けたときだけ、その WCS で北が上の段を測る。
 /// 解けなければ、画像に入っている WCS があればそれで北が上の段を測る(合成画像は WCS を持っている)。
 pub fn bench_image(label: &str, path: &Path, repeat: usize) -> Result<BenchImage, String> {
     use zahyou_image::DetectOpts;
@@ -307,9 +307,11 @@ pub fn bench_image(label: &str, path: &Path, repeat: usize) -> Result<BenchImage
     let (nx, ny) = (loaded.data.width, loaded.data.height);
     let diag = pipeline::solver_diagnostics(Path::new(pipeline::DEFAULT_INDEX_DIR));
     let mut wcs = None;
+    // cache.json は空の一時ファイルにする(利用者の機材の記憶で、測るたびに条件が変わらないように)
+    let tmp = std::env::temp_dir().join(format!("zahyou_bench_cache_{}.json", std::process::id()));
+    let _ = std::fs::remove_file(&tmp);
     if let Some(cat) = diag.catalog.as_ref().filter(|_| diag.ok) {
-        let cache = zahyou_net::cache_path();
-        let (scale, _) = crate::scale::estimate_pixel_scale(&loaded.header, None, Some((nx, ny)), &cache);
+        let (scale, _) = crate::scale::estimate_pixel_scale(&loaded.header, None, Some((nx, ny)), &tmp);
         let req = zahyou_solver::OfflineRequest {
             prep: &prep,
             sources: &sources,
@@ -387,7 +389,7 @@ pub fn bench_image(label: &str, path: &Path, repeat: usize) -> Result<BenchImage
 
     // 解析全体(run): 画像の WCS があれば使う・オフライン・目標は既定の天体名(引けなければ既定の赤経赤緯)。
     // cache.json は一時ファイルにする(使う人の記憶を書き換えない)
-    let tmp = std::env::temp_dir().join(format!("zahyou_bench_cache_{}.json", std::process::id()));
+    let has_wcs = crate::scale::existing_wcs(&loaded.header).is_some();
     let env = RunEnv { cache_file: Some(tmp.clone()), online: Some(false), ..Default::default() };
     let params = RunParams {
         solve_mode: SolveMode::Offline,
@@ -411,6 +413,25 @@ pub fn bench_image(label: &str, path: &Path, repeat: usize) -> Result<BenchImage
             res.figures.len()
         ),
     });
+    // 目標なし(完全ブラインド・画角も分からない)で解析全体。画像に WCS が無いときだけ(合成画像は空の本物の
+    // 星ではないので解けない)。上の段は目標(既定の天体)をヒントにするので、別の空の画像ではヒントが外れる
+    if !has_wcs && diag.ok {
+        let blind = RunParams { mode: InputMode::None, ignore_existing_wcs: true, ..params.clone() };
+        let (t, res) = best_of(repeat, || {
+            let _ = std::fs::remove_file(&tmp);
+            pipeline::run_with(&blind, &env, &AtomicBool::new(false), &quiet)
+        });
+        let _ = std::fs::remove_file(&tmp);
+        stages.push(Stage {
+            name: "解析全体 (run・目標なし)",
+            seconds: Some(t),
+            note: format!(
+                "{} / 図 {} 枚",
+                res.how.clone().unwrap_or_else(|| "解けなかった".to_string()),
+                res.figures.len()
+            ),
+        });
+    }
     Ok(BenchImage { label: label.to_string(), path: path.to_path_buf(), width: nx, height: ny, stages })
 }
 

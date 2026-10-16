@@ -4,10 +4,11 @@
 //!
 //! 6000×4000 の合成画像は `python rs/testdata/gen_image.py --big <DIR>` で作る(Python の時間も
 //! `<DIR>\big_expected.json` に入る)。各段の時間は `回数` 回のうち最も速いもの。
+//! 環境変数 ZAHYOU_BENCH_DEEP_JSON にファイル名を入れると、深い検出の全部の星と測った値を JSON で書き出す。
 
 use std::time::Instant;
 
-use zahyou_image::{DetectOpts, detect_sources, detect_sources_deep, load_image_any, preprocess};
+use zahyou_image::{DeepOpts, DetectOpts, detect_deep, detect_sources, load_image_any, preprocess};
 
 fn best<T>(n: usize, mut f: impl FnMut() -> T) -> (f64, T) {
     let mut best = f64::INFINITY;
@@ -60,7 +61,45 @@ fn main() {
     let (t_prep, prep) = best(n, || preprocess(&loaded.data, true));
     let (t_det12, d12) = best(n, || detect_sources(&prep, &DetectOpts::default()));
     let (t_det60, d60) = best(n, || detect_sources(&prep, &DetectOpts::with_min_sources(60)));
-    let (t_deep, deep) = best(n, || detect_sources_deep(&prep, &DetectOpts::deep()));
+    let (t_deep, deep3) = best(n, || detect_deep(&prep, &DeepOpts::default()));
+    if let Some(p) = std::env::var_os("ZAHYOU_BENCH_DEEP_JSON") {
+        // 深い検出の全部の星と測った値を JSON で書き出す(Python の値と突き合わせるため)
+        let stars: Vec<String> = deep3
+            .0
+            .iter()
+            .map(|c| {
+                format!(
+                    "[{:?},{:?},{:?},{:?},{},{:?},{:?},{:?}]",
+                    c.x, c.y, c.flux, c.peak, c.area, c.elong, c.fwhm, c.snr
+                )
+            })
+            .collect();
+        let info = match &deep3.2 {
+            Some(i) => format!(
+                "{{\"s_psf\":{},\"n_psf\":{},\"s\":{:?},\"u\":{:?},\"noise\":{:?},\"candidates\":{},\"kept\":{},\"rejected\":{{\"saddle\":{},\"elong\":{},\"sharp\":{},\"ring\":{}}},\"sharp_max\":\"{}\"}}",
+                i.s_psf.map_or("null".to_string(), |v| format!("{v:?}")),
+                i.n_psf,
+                i.s,
+                i.u,
+                i.noise,
+                i.candidates,
+                i.kept,
+                i.rejected.saddle,
+                i.rejected.elong,
+                i.rejected.sharp,
+                i.rejected.ring,
+                i.sharp_max
+            ),
+            None => "null".to_string(),
+        };
+        let s = format!(
+            "{{\"thr\":{},\"stars\":[{}],\"info\":{info}}}",
+            deep3.1.map_or("null".to_string(), |v| format!("{v:?}")),
+            stars.join(",")
+        );
+        std::fs::write(p, s).expect("書き出し");
+    }
+    let deep = (deep3.0, deep3.1);
     println!(
         "{{\"path\": {:?}, \"width\": {}, \"height\": {}, \"threads\": {}, \"seconds\": {{\"load\": {:.4}, \"preprocess\": {:.4}, \"detect12\": {:.4}, \"detect60\": {:.4}, \"deep\": {:.4}}}, \"sigma\": {}, \"mask_count\": {}, \"det12\": {}, \"det60\": {}, \"deep\": {}}}",
         path,

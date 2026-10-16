@@ -2,13 +2,133 @@
 
 use eframe::egui::{self, RichText};
 
-use super::app::{APP_NAME, ZahyouApp};
+use super::app::{APP_NAME, Action, ZahyouApp};
 use super::fonts::{self, pt};
 use super::settings::settings_dir;
+use super::theme::Theme;
 use super::widgets::{self, Placed};
 use crate::APP_VER;
 
 pub const REPO_URL: &str = "https://github.com/Akashi3060/zahyou";
+
+/// 同梱しているソフトウェアの表示(rs/THIRD-PARTY-NOTICES.md。rs/tools/gen_notices.py が作る)。
+///
+/// exe だけを配っても(更新も exe の入れ替えだけ)表示が一緒に届くよう、exe に埋め込んで
+/// ［使い方］タブで読めるようにする。約 200 KB(13 MB の exe の 1.5% ほど)。
+pub const THIRD_PARTY_NOTICES: &str = include_str!("../../../THIRD-PARTY-NOTICES.md");
+
+/// 文字の幅(等幅の桁数): 英数字は 1、それ以外(日本語・記号)は 2 と数える
+fn char_cols(c: char) -> usize {
+    if c.is_ascii() { 1 } else { 2 }
+}
+
+/// 文を幅 cols 桁で折り返して行に分ける(なるべく空白のところで切る)。どの行も元の文の一部を指す
+fn wrap_lines(text: &str, cols: usize) -> Vec<&str> {
+    let cols = cols.max(20);
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let mut rest = line;
+        loop {
+            // rest の先頭から cols 桁に収まるところまで
+            let mut w = 0;
+            let mut cut = rest.len();
+            let mut space = None;
+            for (i, c) in rest.char_indices() {
+                let cw = char_cols(c);
+                if w + cw > cols && i > 0 {
+                    cut = i;
+                    break;
+                }
+                w += cw;
+                if c == ' ' {
+                    space = Some(i + c.len_utf8());
+                }
+            }
+            if cut >= rest.len() {
+                out.push(rest);
+                break;
+            }
+            // 後ろ半分に空白があれば、そこで切る(語の途中で切らない)
+            if let Some(sp) = space
+                && sp > cut / 2
+                && sp < cut
+            {
+                cut = sp;
+            }
+            out.push(&rest[..cut]);
+            rest = &rest[cut..];
+        }
+    }
+    out
+}
+
+/// 表示を幅 cols 桁で折り返した行。幅が変わらない間は前の結果を使う(画面のスレッドだけが呼ぶ)
+fn notices_wrapped(cols: usize) -> std::rc::Rc<Vec<&'static str>> {
+    type Cache = std::cell::RefCell<Option<(usize, std::rc::Rc<Vec<&'static str>>)>>;
+    thread_local! {
+        static CACHE: Cache = const { std::cell::RefCell::new(None) };
+    }
+    CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        if let Some((k, v)) = c.as_ref()
+            && *k == cols
+        {
+            return v.clone();
+        }
+        let v = std::rc::Rc::new(wrap_lines(THIRD_PARTY_NOTICES, cols));
+        *c = Some((cols, v.clone()));
+        v
+    })
+}
+
+/// 同梱しているソフトウェアの表示の欄。既定は閉じておき、開いたときは見えている行だけを描く
+/// (全部で約 3,600 行あるので、毎フレーム全行を並べると重い)。
+///
+/// 文は等幅で、欄の幅に合わせて自分で折り返す。横のスクロールにしないのは、入れ子のスクロールの欄の
+/// 横のつまみを、egui が外側の欄の下端へ寄せて描くため(この欄が外側の欄の見えている範囲より下にあっても、
+/// 外側の欄の下端に横のつまみが浮いて見える)。
+fn notices_view(ui: &mut egui::Ui, th: &Theme) {
+    let title = RichText::new("同梱しているソフトウェアの表示 (THIRD-PARTY-NOTICES.md)").color(th.ink);
+    egui::CollapsingHeader::new(title).id_salt("third_party_notices").default_open(false).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            widgets::muted(ui, th, "配布物の THIRD-PARTY-NOTICES.md と同じ文です。");
+            if ui.button("全文をコピー").clicked() {
+                ui.ctx().copy_text(THIRD_PARTY_NOTICES.to_string());
+            }
+        });
+        let font = egui::FontId::monospace(pt(9.0));
+        // 1 行の高さ: 日本語の混じる行も英字だけの行も同じ高さで並べる(show_rows は行の高さが揃っている前提)
+        let row_h = ui.painter().layout_no_wrap("Ag漢字".to_string(), font.clone(), th.ink).size().y.ceil().max(1.0);
+        // 1 行の桁数: 枠の内側の幅(枠の余白とつまみの分を引く)を英数字 1 字の幅で割る
+        let char_w = ui.painter().layout_no_wrap("0000000000".to_string(), font.clone(), th.ink).size().x / 10.0;
+        let text_w = ui.available_width() - 8.0 - 2.0 - ui.spacing().scroll.allocated_width();
+        let cols = if char_w > 0.5 { (text_w / char_w).floor().max(1.0) as usize } else { 100 };
+        let lines = notices_wrapped(cols);
+        let area = egui::ScrollArea::vertical().id_salt("third_party_notices_text").max_height(360.0).auto_shrink([false, true]);
+        egui::Frame::new().fill(th.entry).stroke(egui::Stroke::new(1.0, th.border)).inner_margin(egui::Margin::same(4)).show(ui, |ui| {
+            ui.scope(|ui| {
+                // つまみの色は widgets::scroll と同じにする(既定の色はチェックの箱の地と同じで見えにくい)
+                {
+                    let w = &mut ui.visuals_mut().widgets;
+                    w.inactive.bg_fill = th.border;
+                    w.hovered.bg_fill = th.muted;
+                    w.active.bg_fill = th.accent;
+                }
+                ui.spacing_mut().item_spacing.y = 0.0;
+                area.show_rows(ui, row_h, lines.len(), |ui, range| {
+                    for i in range {
+                        let Some(line) = lines.get(i) else { break };
+                        // 見出し(# で始まる行)だけ色を変える
+                        let color = if line.starts_with('#') { th.accent } else { th.ink };
+                        let g = ui.painter().layout_no_wrap((*line).to_string(), font.clone(), color);
+                        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), row_h), egui::Sense::hover());
+                        ui.painter().galley(rect.min, g, color);
+                    }
+                });
+            });
+        });
+    });
+}
 
 /// 手引きの 1 行の種類(Tk の Text のタグ h / b / m に当たる)
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -17,6 +137,8 @@ enum Tag {
     Head,
     Bold,
     Muted,
+    /// 同梱しているソフトウェアの表示(開け閉めできる欄。文は THIRD_PARTY_NOTICES)
+    Notices,
 }
 
 /// 手引きの文(Python 版 v7 の文。WSL の手順は無い)
@@ -50,6 +172,15 @@ fn help_lines() -> Vec<(Tag, String)> {
     add(Plain, "  ・焦点距離が分かる        → 入れてから「必要な段を選ぶ」");
     add(Plain, "      要る段だけに絞れるので、ずっと小さく済みます。");
     add(Muted, "途中で止めても、次に押せば続きから落とし直します。");
+    add(Plain, "");
+    add(Head, "ネットにつながっているとき (オンライン解析)");
+    add(Plain, "[解析] の「方法」が「自動」なら、ネットがあれば先に nova.astrometry.net に問い合わせ、");
+    add(Plain, "解けなければ zahyou の中で解きます (オフライン)。問い合わせには API キーが要ります。");
+    add(Plain, "キーは環境変数 ASTROMETRY_API_KEY に入れてから zahyou を起動してください");
+    add(Plain, "(キーは nova.astrometry.net に登録すると、自分のページで見られます)。");
+    add(Plain, "キーが無ければ問い合わせを飛ばして、はじめからオフラインで解きます。");
+    add(Plain, "「オンラインのみ」はキーが無いと始められません。");
+    add(Muted, "送るのは検出した星の位置です。それで解けなければ画像そのものを送ります。");
     add(Plain, "");
     add(Head, "天体名はオフラインでも使えます (2 回目から)");
     add(Plain, "天体名から座標を調べるにはネットが要りますが、一度調べた名前は");
@@ -90,8 +221,13 @@ fn help_lines() -> Vec<(Tag, String)> {
     add(Muted, "astrometry.net のプログラム (コード) は含んでいません。");
     add(Muted, "星図データ (index ファイル) は Tycho-2 と Gaia DR2 から作られたもので、");
     add(Muted, "この exe には同梱していません ([準備] タブが配布元から落とします)。");
-    add(Muted, "この exe には第三者のライブラリが入っていますが、GPL・LGPL は含みません。");
-    add(Muted, "詳しくは配布ページの THIRD-PARTY-NOTICES.md にあります。");
+    add(Muted, "Gaia のデータは CC BY-NC 3.0 IGO です (商用利用には ESA の許可が要ります)。");
+    add(Muted, "この exe には Rust のライブラリと、画面の既定の書体 (Hack・Ubuntu・Noto Emoji ほか) が");
+    add(Muted, "入っています。どれも MIT・Apache-2.0・BSD・SIL OFL などの許容型で、GPL・LGPL・MPL のものは含みません。");
+    add(Muted, "(リンクのときに入る GCC の実行時ライブラリは、GPL に「実行時ライブラリ例外」が付いたもので、");
+    add(Muted, " exe の配り方には制限がかかりません。)");
+    add(Muted, "一覧と各ライセンスの本文は、下の「同梱しているソフトウェアの表示」を開くと読めます。");
+    add(Notices, "");
     add(Plain, "");
     add(Muted, &format!("{APP_NAME} {APP_VER}   Rust で書き直した版です (画面は egui)。"));
     v
@@ -109,12 +245,12 @@ impl ZahyouApp {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let b = ui.add_enabled(self.update_can_apply && !self.busy, egui::Button::new("更新する"));
                     if b.clicked() {
-                        self.apply_update();
+                        self.request(Action::ApplyUpdate);
                     }
                     placed.push(("更新する".to_string(), b.rect));
                     let b = ui.button("更新を確認");
                     if b.clicked() {
-                        self.check_update();
+                        self.request(Action::CheckUpdate);
                     }
                     placed.push(("更新を確認".to_string(), b.rect));
                 });
@@ -163,10 +299,56 @@ impl ZahyouApp {
                                 ui.label(RichText::new(text).color(th.ink));
                             }
                         }
+                        Tag::Notices => {
+                            ui.add_space(4.0);
+                            notices_view(ui, th);
+                        }
                     }
                 }
                 ui.hyperlink_to(RichText::new(REPO_URL).color(th.accent), REPO_URL);
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn width(s: &str) -> usize {
+        s.chars().map(char_cols).sum()
+    }
+
+    #[test]
+    fn 折り返しても文は欠けず幅に収まる() {
+        for cols in [0, 1, 20, 37, 80, 120] {
+            let lines = wrap_lines(THIRD_PARTY_NOTICES, cols);
+            // 元の行ごとにつなぐと元に戻る(どこも捨てていない)
+            let joined: String = lines.concat();
+            let orig: String = THIRD_PARTY_NOTICES.lines().collect();
+            assert_eq!(joined, orig, "cols = {cols}");
+            for l in &lines {
+                assert!(width(l) <= cols.max(20), "cols = {cols}: {l:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn 変な入力でも止まる() {
+        for t in ["", "\n\n", "あいうえおかきくけこさしすせそたちつてとなにぬねの", &"x".repeat(1000), "a b c d e f g h i j k l m n o p q r s t u v w x y z"] {
+            let lines = wrap_lines(t, 20);
+            assert_eq!(lines.concat(), t.lines().collect::<String>());
+        }
+        // 空白で切れるときは空白の後ろで切る
+        let lines = wrap_lines("aaaa bbbb cccc dddd eeee ffff", 20);
+        assert_eq!(lines, vec!["aaaa bbbb cccc dddd ", "eeee ffff"]);
+    }
+
+    #[test]
+    fn 表示が埋め込まれている() {
+        // 生成物の要るところが入っていること(rs/tools/gen_notices.py が作る)
+        for key in ["Tycho-2", "ESA/Gaia/DPAC", "Lang, D., Hogg", "SIL OPEN FONT LICENSE Version 1.1", "UBUNTU FONT LICENCE Version 1.0", "`ring`", "GCC"] {
+            assert!(THIRD_PARTY_NOTICES.contains(key), "{key} が無い");
+        }
     }
 }

@@ -2,7 +2,7 @@
 
 use eframe::egui::{self, RichText, TextEdit};
 
-use super::app::{ZahyouApp, fig_index};
+use super::app::{Action, ZahyouApp, fig_index};
 use super::fonts::{self, pt};
 use super::settings::{Mode, ResultTab, SOLVE_CHOICES};
 use super::widgets::{self, Placed};
@@ -23,13 +23,13 @@ impl ZahyouApp {
                 self.placed.push(Placed { name: "中止".into(), rect: b.rect, frame: self.window_rect });
                 let b = ui.add_enabled(!self.busy, widgets::run_button("解析を実行"));
                 if b.clicked() {
-                    self.start_analysis();
+                    self.request(Action::StartAnalysis);
                 }
                 self.placed.push(Placed { name: "解析を実行".into(), rect: b.rect, frame: self.window_rect });
                 ui.add_space(8.0);
                 let b = ui.button("参照...");
                 if b.clicked() {
-                    self.choose_image();
+                    self.request(Action::ChooseImage);
                 }
                 self.placed.push(Placed { name: "参照...".into(), rect: b.rect, frame: self.window_rect });
                 ui.add(TextEdit::singleline(&mut self.s.image).font(fonts::path(pt(10.0))).desired_width(ui.available_width()));

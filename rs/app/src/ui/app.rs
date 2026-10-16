@@ -40,6 +40,26 @@ pub enum Progress {
     Det(u64, u64),
 }
 
+/// ダイアログの持ち主(本体の窓)。None なら持ち主なし(自己診断・画面を出さないとき)
+pub type Host<'a> = Option<&'a eframe::Frame>;
+
+/// 画面の部品から頼まれた処理(ダイアログを出しうるもの)。描き終えてから、本体の窓を持ち主にして順に行う
+/// (eframe の Frame は update の間しか借りられないので、描く途中の部品からは直接呼ばない)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Action {
+    ChooseImage,
+    StartAnalysis,
+    SaveFigure(usize),
+    ChooseIndexDir,
+    Survey,
+    Recommend,
+    DownloadRecommended,
+    DownloadIndex,
+    PrepareAll,
+    CheckUpdate,
+    ApplyUpdate,
+}
+
 /// 起動のしかた(画面の撮影・自己診断のときの指定)
 #[derive(Clone, Debug, Default)]
 pub struct Options {
@@ -56,6 +76,8 @@ pub struct Options {
 /// 結果の 3 つの数字の見出しの既定
 pub const CAPS_TARGET: [&str; 3] = ["画像中心から目標までの距離", "赤経 (RA) 方向", "赤緯 (Dec) 方向"];
 pub const DETAIL_START: &str = "画像を選んで「解析を実行」を押してください。";
+/// 「オンラインのみ」で API キーが無いときの知らせ
+pub const ONLINE_NEEDS_KEY: &str = "「オンラインのみ」には nova.astrometry.net の API キーが要ります。\n環境変数 ASTROMETRY_API_KEY にキーを入れてから zahyou を起動し直すか、\n[解析] の「方法」を「自動」か「オフラインのみ」にしてください。";
 
 pub struct ZahyouApp {
     pub s: Settings,
@@ -109,6 +131,8 @@ pub struct ZahyouApp {
     quit_at: Option<Instant>,
     /// 画面の自分の撮影(--shot)
     pub shot: Option<super::shot::ShotPlan>,
+    /// 頼まれた処理(このフレームを描き終えてから行う)
+    actions: Vec<Action>,
 }
 
 impl ZahyouApp {
@@ -157,6 +181,7 @@ impl ZahyouApp {
             window_rect: egui::Rect::NOTHING,
             quit_at: None,
             shot: None,
+            actions: Vec::new(),
         };
         theme::apply(ctx, app.th);
         app.startup();
@@ -218,9 +243,9 @@ impl ZahyouApp {
     }
 
     /// 重い処理を 1 本だけ走らせる(Python の _bg)。動いていれば断る。
-    pub fn bg(&mut self, label: &str, to: LogTo, f: impl FnOnce(&Job) -> String + Send + 'static) -> bool {
+    pub fn bg(&mut self, host: Host, label: &str, to: LogTo, f: impl FnOnce(&Job) -> String + Send + 'static) -> bool {
         if self.busy {
-            self.info("いま別の処理が動いています。");
+            self.info(host, "いま別の処理が動いています。");
             return false;
         }
         self.busy = true;
@@ -292,12 +317,10 @@ impl ZahyouApp {
     }
 
     pub fn log_run_line(&mut self, s: &str) {
-        self.log_run.push_str(s);
-        self.log_run.push('\n');
+        push_log_text(&mut self.log_run, s);
     }
     pub fn log_env_line(&mut self, s: &str) {
-        self.log_env.push_str(s);
-        self.log_env.push('\n');
+        push_log_text(&mut self.log_env, s);
     }
     fn log_to(&mut self, to: LogTo, s: &str) {
         match to {
@@ -307,43 +330,66 @@ impl ZahyouApp {
     }
 
     // ------------------------------------------------------------ ダイアログ ---
-    pub fn info(&mut self, text: &str) {
-        self.dialogs.push(text.to_string());
-        if self.opts.headless {
-            return;
-        }
-        rfd::MessageDialog::new()
-            .set_title(APP_NAME)
-            .set_description(text)
-            .set_level(rfd::MessageLevel::Info)
-            .set_buttons(rfd::MessageButtons::Ok)
-            .show();
+    /// 画面の部品から処理を頼む(描き終えてから行う)
+    pub fn request(&mut self, a: Action) {
+        self.actions.push(a);
     }
-    pub fn warn(&mut self, text: &str) {
+
+    /// 頼まれた処理を行う(ダイアログは host を持ち主にする = 出ている間は本体の窓を操作できないモーダル)
+    pub fn perform(&mut self, a: Action, host: Host) {
+        match a {
+            Action::ChooseImage => self.choose_image(host),
+            Action::StartAnalysis => self.start_analysis(host),
+            Action::SaveFigure(i) => self.save_figure(i, host),
+            Action::ChooseIndexDir => self.choose_indexdir(host),
+            Action::Survey => self.survey(host),
+            Action::Recommend => self.recommend(host),
+            Action::DownloadRecommended => self.download_recommended(host),
+            Action::DownloadIndex => self.download_index(host),
+            Action::PrepareAll => self.prepare_all(host),
+            Action::CheckUpdate => self.check_update(host),
+            Action::ApplyUpdate => self.apply_update(host),
+        }
+    }
+
+    /// 知らせ・確認の箱(Python の messagebox)。持ち主があれば、その窓に従うモーダルにする
+    fn message(
+        &mut self,
+        host: Host,
+        text: &str,
+        level: rfd::MessageLevel,
+        buttons: rfd::MessageButtons,
+    ) -> rfd::MessageDialogResult {
         self.dialogs.push(text.to_string());
         if self.opts.headless {
-            return;
+            return rfd::MessageDialogResult::Cancel;
         }
-        rfd::MessageDialog::new()
-            .set_title(APP_NAME)
-            .set_description(text)
-            .set_level(rfd::MessageLevel::Warning)
-            .set_buttons(rfd::MessageButtons::Ok)
-            .show();
+        let mut d = rfd::MessageDialog::new().set_title(APP_NAME).set_description(text).set_level(level).set_buttons(buttons);
+        if let Some(f) = host {
+            d = d.set_parent(f);
+        }
+        d.show()
+    }
+
+    /// ファイルの選択の箱(持ち主があれば、その窓に従うモーダル)
+    fn file_dialog(host: Host) -> rfd::FileDialog {
+        let d = rfd::FileDialog::new();
+        match host {
+            Some(f) => d.set_parent(f),
+            None => d,
+        }
+    }
+
+    pub fn info(&mut self, host: Host, text: &str) {
+        self.message(host, text, rfd::MessageLevel::Info, rfd::MessageButtons::Ok);
+    }
+    pub fn warn(&mut self, host: Host, text: &str) {
+        self.message(host, text, rfd::MessageLevel::Warning, rfd::MessageButtons::Ok);
     }
     /// 確認(OK / キャンセル)。自己診断では「キャンセル」
-    pub fn ask(&mut self, text: &str) -> bool {
-        self.dialogs.push(text.to_string());
-        if self.opts.headless {
-            return false;
-        }
+    pub fn ask(&mut self, host: Host, text: &str) -> bool {
         matches!(
-            rfd::MessageDialog::new()
-                .set_title(APP_NAME)
-                .set_description(text)
-                .set_level(rfd::MessageLevel::Info)
-                .set_buttons(rfd::MessageButtons::OkCancel)
-                .show(),
+            self.message(host, text, rfd::MessageLevel::Info, rfd::MessageButtons::OkCancel),
             rfd::MessageDialogResult::Ok | rfd::MessageDialogResult::Yes
         )
     }
@@ -369,8 +415,8 @@ impl ZahyouApp {
     }
 
     // ============================================================ 解析 ===
-    pub fn choose_image(&mut self) {
-        let picked = rfd::FileDialog::new()
+    pub fn choose_image(&mut self, host: Host) {
+        let picked = Self::file_dialog(host)
             .set_title("天体画像を選ぶ")
             .add_filter("天体画像", &["fits", "fit", "fts", "fz", "png", "jpg", "jpeg", "tif", "tiff"])
             .add_filter("FITS", &["fits", "fit", "fts", "fz"])
@@ -400,20 +446,31 @@ impl ZahyouApp {
     }
 
     /// 「解析を実行」
-    pub fn start_analysis(&mut self) {
+    pub fn start_analysis(&mut self, host: Host) {
         let path = self.s.image.trim().to_string();
         if path.is_empty() || !Path::new(&path).exists() {
-            self.warn("画像を選んでください。");
+            self.warn(host, "画像を選んでください。");
             return;
         }
         if self.s.mode == Mode::StarName && self.s.name.trim().is_empty() {
             self.warn(
+                host,
                 "目標の天体名を入れてください。\n目標を決めずに画像の向きだけ知りたいときは「指定しない (完全ブラインド)」を選んでください。",
             );
             return;
         }
+        // 探索半径が負・0・数でないと、ヒントの段が黙って捨てられて全天を探すことになる(Python も始める前に止める)
+        if let Some(m) = bridge::radius_problem(&self.s.radius) {
+            self.warn(host, &m);
+            return;
+        }
+        // 「オンラインのみ」は API キーが無いと必ず解けない(Rust 版はキーをソースに持たない)
+        if self.s.solve == super::settings::Solve::Online && zahyou_net::api_key_from_env().is_none() {
+            self.warn(host, ONLINE_NEEDS_KEY);
+            return;
+        }
         if self.busy {
-            self.info("いま別の処理が動いています。");
+            self.info(host, "いま別の処理が動いています。");
             return;
         }
         self.log_run.clear();
@@ -427,7 +484,7 @@ impl ZahyouApp {
         let debug_wcs = self.opts.debug_wcs.clone();
         self.save_settings();
         let cancel = self.cancel.clone();
-        self.bg("解析しています...", LogTo::Run, move |job| {
+        self.bg(host, "解析しています...", LogTo::Run, move |job| {
             let log = |l: &str| job.log(l);
             let r = bridge::run(&params, debug_wcs.as_deref(), &cancel, &log);
             let msg = if job.cancelled() { "中止しました。".to_string() } else { r.status.clone() };
@@ -500,13 +557,13 @@ impl ZahyouApp {
     }
 
     /// 図を保存する(「画像を保存」)
-    pub fn save_figure(&mut self, which: usize) {
+    pub fn save_figure(&mut self, which: usize, host: Host) {
         let Some(src) = self.fig_src.get(which).cloned().flatten() else {
             return;
         };
         // v6 と同じく、拡大・移動しているならその範囲のまま保存する(ダイアログを開く前の表示で決める)
         let view = self.figs.get(which).and_then(|f| f.as_ref()).and_then(|f| f.zoomed_view());
-        let Some(path) = rfd::FileDialog::new()
+        let Some(path) = Self::file_dialog(host)
             .set_title("図を保存")
             .set_file_name("image.png")
             .add_filter("PNG 画像", &["png"])
@@ -525,24 +582,33 @@ impl ZahyouApp {
 
     pub fn handle_fig_action(&mut self, which: usize, a: Option<FigAction>) {
         if let Some(FigAction::Save) = a {
-            self.save_figure(which);
+            self.request(Action::SaveFigure(which));
         }
     }
 
     // ============================================================ 準備 ===
-    pub fn choose_indexdir(&mut self) {
-        if let Some(d) = rfd::FileDialog::new().set_title("星図データの置き場所").pick_folder() {
+    pub fn choose_indexdir(&mut self, host: Host) {
+        if let Some(d) = Self::file_dialog(host).set_title("星図データの置き場所").pick_folder() {
             let d = d.display().to_string();
             self.s.indexdir = d.clone();
+            self.forget_env();
             self.log_env_line(&format!("星図データの置き場所: {d}"));
             self.log_env_line("  「状態を確認」を押すと、この場所で調べ直します。");
         }
     }
 
+    /// 置き場所が変わったとき、前の置き場所で調べた結果を捨てて表を「未確認」に戻す
+    /// (古い結果で「足りない段なし」などと判断しないように)。
+    pub fn forget_env(&mut self) {
+        self.env_state = None;
+        self.env_rows = [(None, "未確認".into()), (None, "未確認".into()), (None, "未確認".into())];
+        self.lbl_env.clear();
+    }
+
     /// 「状態を確認」
-    pub fn survey(&mut self) {
+    pub fn survey(&mut self, host: Host) {
         let dir = self.index_dir();
-        self.bg("星図データを調べています...", LogTo::Env, move |job| {
+        self.bg(host, "星図データを調べています...", LogTo::Env, move |job| {
             let log = |l: &str| job.log(l);
             log(&"=".repeat(56));
             log("状態を確認しています (星図データを 1 本ずつ検査します)...");
@@ -561,6 +627,10 @@ impl ZahyouApp {
     }
 
     fn show_env(&mut self, st: Survey) {
+        // 調べている間に置き場所を変えていたら、前の置き場所の結果なので使わない
+        if st.index.dir != self.index_dir() {
+            return;
+        }
         let idx = &st.index;
         let chk = &st.check;
         self.env_rows[0] = if !idx.ok {
@@ -595,8 +665,13 @@ impl ZahyouApp {
         self.env_state = Some(st);
     }
 
+    /// 押したときの置き場所で、そろって検査に通っている段を数え直す(Python の _have_scales)。
+    ///
+    /// 起動時や「状態を確認」のときの結果(env_state)は使わない。置き場所を変えた直後や、Explorer で星図データを
+    /// 消したあとは古いので、それで「足りない段なし」と判断すると確認なしで何 GB も落とし始める。
+    /// 検査はファイルの大きさと更新時刻で覚えているので、2 回目からは速い。
     fn have_scales(&self) -> Vec<u32> {
-        self.env_state.as_ref().map(|s| s.index.scales.clone()).unwrap_or_default()
+        survey::survey(&self.index_dir()).index.scales
     }
 
     fn marked(&self) -> Vec<u32> {
@@ -604,19 +679,22 @@ impl ZahyouApp {
     }
 
     /// 「必要な段を選ぶ」
-    pub fn recommend(&mut self) {
+    pub fn recommend(&mut self, host: Host) {
         let focal = self.s.focal.trim().parse::<f64>();
         let sensor = self.s.sensor.trim().parse::<f64>();
         let (Ok(focal), Ok(sensor)) = (focal, sensor) else {
             self.info(
+                host,
                 "焦点距離とセンサー横幅 [mm] を入れてください。\n例: 焦点距離 800、センサー横幅 7.4 (1/1.8 型)\n分からなければ、画像 1 枚を解析すると下に「逆算した焦点距離」が出ます。\n\n[解析] タブで画像を選んでおくと、切り出した縦横も見て選びます。",
             );
             return;
         };
-        let have = self.have_scales();
+        let dir = self.index_dir();
         let path = self.s.image.trim().to_string();
-        self.bg("画角を調べています...", LogTo::Env, move |job| {
+        self.bg(host, "画角を調べています...", LogTo::Env, move |job| {
             let log = |l: &str| job.log(l);
+            // 押したときの置き場所で数え直す(前に調べた結果は置き場所を変える前のものかもしれない)
+            let have = survey::survey(&dir).index.scales;
             let Some(fov_w) = zahyou_net::fov_arcmin(focal, sensor) else {
                 log("焦点距離とセンサー横幅から画角を出せません (0 や数でない値)。");
                 return "焦点距離とセンサー横幅を確かめてください。".into();
@@ -655,10 +733,11 @@ impl ZahyouApp {
     }
 
     /// 「おすすめをまとめて落とす」
-    pub fn download_recommended(&mut self) {
+    pub fn download_recommended(&mut self, host: Host) {
         let want = zahyou_net::recommended_scales();
         let have = self.have_scales();
         let need: Vec<u32> = want.iter().copied().filter(|s| !have.contains(s)).collect();
+        let before = self.marks.clone();
         for (k, v) in self.marks.iter_mut() {
             *v = need.contains(k);
         }
@@ -675,20 +754,22 @@ impl ZahyouApp {
             "画角 {minfov}′ 以上をぜんぶそろえます。\n足りない {} 段 / 約 {:.1} GB を\n{} へ落とします。よろしいですか?\n\n回線にもよりますが、数十分かかります。\n途中で中止しても、次に押せば続きから再開します。",
             need.len(),
             mb / 1024.0,
-            self.s.indexdir
+            self.index_dir().display()
         );
-        if !self.ask(&q) {
+        if !self.ask(host, &q) {
+            // やめたら印も押す前に戻す(残すと、続けて「まとめて準備する」を押したときにその段を落とす)
+            self.marks = before;
             self.status = "やめました。".into();
             return;
         }
-        self.start_download(need);
+        self.start_download(host, need);
     }
 
     /// 「選んだ段を落とす」
-    pub fn download_index(&mut self) {
+    pub fn download_index(&mut self, host: Host) {
         let scales = self.marked();
         if scales.is_empty() {
-            self.info("落とす段にチェックを入れてください。");
+            self.info(host, "落とす段にチェックを入れてください。");
             return;
         }
         let mb = zahyou_net::scales_mb(&scales) as f64;
@@ -696,17 +777,17 @@ impl ZahyouApp {
             "{} 段 / 約 {:.1} GB を\n{} へ落とします。よろしいですか?\n\n途中で中止しても、次に押せば続きから再開します。",
             scales.len(),
             mb / 1024.0,
-            self.s.indexdir
+            self.index_dir().display()
         );
-        if !self.ask(&q) {
+        if !self.ask(host, &q) {
             return;
         }
-        self.start_download(scales);
+        self.start_download(host, scales);
     }
 
-    fn start_download(&mut self, scales: Vec<u32>) {
+    fn start_download(&mut self, host: Host, scales: Vec<u32>) {
         let dir = self.index_dir();
-        self.bg("星図データを落としています...", LogTo::Env, move |job| {
+        self.bg(host, "星図データを落としています...", LogTo::Env, move |job| {
             bridge::release_indexes();
             let log = |l: &str| job.log(l);
             let prog = |d: u64, t: u64| job.progress(d, t);
@@ -727,38 +808,39 @@ impl ZahyouApp {
         });
     }
 
-    /// 「まとめて準備する」
-    pub fn prepare_all(&mut self) {
+    /// 「まとめて準備する」(Python の _prepare_all)
+    ///
+    /// 段に印を付けてあればその段を、無ければおすすめの段(画角 4′ 以上)をそろえる。そろっていれば検査だけ。
+    /// 落とす段があるときは、印の有無にかかわらず押したときの置き場所で数え直して容量を見せて聞く。聞いた段より
+    /// 多く足りなくなっていたら(聞いている間に消したなど)、ワーカーは落とさずに止める。
+    pub fn prepare_all(&mut self, host: Host) {
         let scales = self.marked();
-        if scales.is_empty() {
-            let want = zahyou_net::recommended_scales();
-            let have = match &self.env_state {
-                Some(st) => st.index.scales.clone(),
-                None => survey::index_state(&self.index_dir()).scales,
+        let need = survey::need_scales(&scales, &self.have_scales());
+        if !need.is_empty() {
+            let mb = zahyou_net::scales_mb(&need) as f64;
+            let head = if scales.is_empty() {
+                format!("段が選ばれていないので、おすすめ (画角 {}′ 以上) をそろえます。\n", survey::g(zahyou_net::RECOMMENDED_MIN_FOV))
+            } else {
+                "印を付けた段をそろえます。\n".to_string()
             };
-            let need: Vec<u32> = want.iter().copied().filter(|s| !have.contains(s)).collect();
-            if !need.is_empty() {
-                let mb = zahyou_net::scales_mb(&need) as f64;
-                let q = format!(
-                    "段が選ばれていないので、おすすめ (画角 {}′ 以上) をそろえます。\n足りない {} 段 / 約 {:.1} GB を\n{} へ落とします。よろしいですか?\n\n(段は下のチェックか「必要な段を選ぶ」で指定できます。\n途中で中止しても、次に押せば続きから再開します)",
-                    survey::g(zahyou_net::RECOMMENDED_MIN_FOV),
-                    need.len(),
-                    mb / 1024.0,
-                    self.s.indexdir
-                );
-                if !self.ask(&q) {
-                    self.status = "やめました。".into();
-                    return;
-                }
+            let q = format!(
+                "{head}足りない {} 段 / 約 {:.1} GB を\n{} へ落とします。よろしいですか?\n\n(段は下のチェックか「必要な段を選ぶ」で指定できます。\n途中で中止しても、次に押せば続きから再開します)",
+                need.len(),
+                mb / 1024.0,
+                self.index_dir().display()
+            );
+            if !self.ask(host, &q) {
+                self.status = "やめました。".into();
+                return;
             }
         }
         let dir = self.index_dir();
-        self.bg("準備しています...", LogTo::Env, move |job| {
+        self.bg(host, "準備しています...", LogTo::Env, move |job| {
             bridge::release_indexes();
             let log = |l: &str| job.log(l);
             let prog = |d: u64, t: u64| job.progress(d, t);
             let stop = || job.cancelled();
-            let st = survey::prepare_all(&dir, &scales, &log, &prog, &stop);
+            let st = survey::prepare_all(&dir, &scales, Some(&need), &log, &prog, &stop);
             let ready = st.ready;
             job.send(Msg::Env(Box::new(st)));
             if job.cancelled() {
@@ -772,9 +854,9 @@ impl ZahyouApp {
     }
 
     // ============================================================ 更新 ===
-    pub fn check_update(&mut self) {
+    pub fn check_update(&mut self, host: Host) {
         self.update_msg = "確認しています...".into();
-        self.bg("更新を確認しています...", LogTo::Run, move |job| {
+        self.bg(host, "更新を確認しています...", LogTo::Run, move |job| {
             let exe = std::env::current_exe().unwrap_or_default();
             let stop = || job.cancelled();
             let chk = zahyou_net::check_update(&exe, APP_VER, &stop);
@@ -800,13 +882,13 @@ impl ZahyouApp {
         self.update_state = Some(chk);
     }
 
-    pub fn apply_update(&mut self) {
+    pub fn apply_update(&mut self, host: Host) {
         let rel = match &self.update_state {
             Some(st) if st.state == zahyou_net::UpdateState::Available => st.release.clone(),
             _ => None,
         };
         let Some(rel) = rel else {
-            self.info("先に「更新を確認」を押してください。");
+            self.info(host, "先に「更新を確認」を押してください。");
             return;
         };
         let q = format!(
@@ -815,12 +897,16 @@ impl ZahyouApp {
             rel.updated,
             rel.size as f64 / 1e6
         );
-        if !self.ask(&q) {
+        if !self.ask(host, &q) {
             return;
         }
+        // 新しい exe はワーカーがその場で起動し、起動して 0.3 秒ほどで gui.json を読む。それより前に保存しておく
+        // (update.rs の約束。QuitForUpdate を受けてからの保存だけだと、画面のスレッドがダイアログなどで止まって
+        // いるときに新しいほうが古い設定で起動する)。QuitForUpdate での保存は、そのあとの編集のために残す
+        self.save_settings();
         self.tab = TopTab::Run;
         self.out_tab = ResultTab::Log; // こちらからの切り替え(v6 はここで好みを「ログ」に上書きしていた)
-        self.bg("更新しています...", LogTo::Run, move |job| {
+        self.bg(host, "更新しています...", LogTo::Run, move |job| {
             let log = |l: &str| job.log(l);
             log(&"=".repeat(56));
             log(&format!("更新: {} ({} 版)", rel.tag, rel.updated));
@@ -855,8 +941,13 @@ impl ZahyouApp {
     }
 
     // ============================================================ 1 フレーム ===
-    /// 画面 1 枚ぶん(eframe の update からも、画面を出さない自己診断からも呼ぶ)
+    /// 画面 1 枚ぶん(画面を出さない自己診断から。ダイアログの持ち主なし)
     pub fn frame(&mut self, ctx: &egui::Context) {
+        self.frame_with(ctx, None);
+    }
+
+    /// 画面 1 枚ぶん。描き終えたら、頼まれた処理を host(本体の窓)を持ち主にして行う
+    pub fn frame_with(&mut self, ctx: &egui::Context, host: Host) {
         self.pump();
         self.take_dropped(ctx);
         self.placed.clear();
@@ -879,10 +970,19 @@ impl ZahyouApp {
                     TopTab::Help => self.help_tab(ui),
                 }
             });
+        let acts = std::mem::take(&mut self.actions);
+        if !acts.is_empty() {
+            for a in acts {
+                self.perform(a, host);
+            }
+            // 処理が変えた状態(ログ・タブ・busy)を次の 1 枚で描く
+            ctx.request_repaint();
+        }
         self.frames += 1;
         if self.first_frame_ms.is_none() {
             let ms = crate::process_elapsed_ms();
             self.first_frame_ms = Some(ms);
+            crate::FRAME_SHOWN.store(true, Ordering::Relaxed);
             // v6 は「準備できました」を出そうとして、直後に空の一言で上書きしていた(gui.md 7.1)
             if self.status.is_empty() {
                 let font = self.fonts.ui.as_deref().map(|f| f.split(" (").next().unwrap_or(f).to_string());
@@ -927,8 +1027,8 @@ impl ZahyouApp {
 }
 
 impl eframe::App for ZahyouApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.frame(ctx);
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.frame_with(ctx, Some(frame));
         super::shot::after_frame(self, ctx);
     }
 
@@ -943,5 +1043,23 @@ pub fn fig_index(t: ResultTab) -> Option<usize> {
         ResultTab::Orig => Some(0),
         ResultTab::NorthUp => Some(1),
         ResultTab::Log => None,
+    }
+}
+
+/// ログに 1 行足す。絵文字の異体字セレクター U+FE0F(「⚠️」の後ろ半分)は落とす: egui の既定のフォントにも
+/// Consolas にも字形が無く □ になる(HackGen が無い PC の等幅の欄)。字そのもの(⚠)は残るので意味は変わらない。
+fn push_log_text(buf: &mut String, s: &str) {
+    buf.extend(s.chars().filter(|&c| c != '\u{FE0F}'));
+    buf.push('\n');
+}
+
+#[cfg(test)]
+mod log_text_tests {
+    #[test]
+    fn 異体字セレクターを落とす() {
+        let mut b = String::new();
+        super::push_log_text(&mut b, "⚠\u{FE0F} 目標の座標が無い");
+        super::push_log_text(&mut b, "  ✅ 解析成功 (深い検出)");
+        assert_eq!(b, "⚠ 目標の座標が無い\n  ✅ 解析成功 (深い検出)\n");
     }
 }

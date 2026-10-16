@@ -73,7 +73,7 @@ pub fn after_frame(app: &mut ZahyouApp, ctx: &egui::Context) {
     // 解析を通す
     if plan.run && !plan.started && app.frames >= 3 {
         plan.started = true;
-        app.start_analysis();
+        app.start_analysis(None);
     }
     let ready = if plan.run { plan.started && !app.busy } else { app.frames >= 4 };
     if ready && plan.finished_at.is_none() {

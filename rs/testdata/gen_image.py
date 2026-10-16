@@ -6,15 +6,21 @@ zahyou-image(Rust)の照合用の値を Python 基準実装(dev/zahyou_core.py)�
     python gen_image.py --big DIR  # 6000x4000 の合成画像(critic の prof_big.py と同じ作り方)を DIR に作り、
                                    # Python の結果と時間を DIR\\big_expected.json に書く(リポジトリには入れない)
 
+Python 基準実装は既定でこのリポジトリの dev/zahyou_core.py(環境変数 ZAHYOU_DEV で別の dev フォルダーにできる)。
+
 書くもの(このスクリプトと同じフォルダー):
   image_kernels.json   numpy / scipy / astropy の部品(和・中央値・σ クリップ・フィルター・zoom・label)の値
   image_formats.json   小さな合成ファイル(FITS の型・圧縮・PNG/TIFF/JPEG)を gzip+base64 で持ち、load_image_any の結果を書く
-  image_pipeline.json  dev/tcase と手元の実写について、読み込み・前処理・検出の結果を書く(画像そのものは入れない)
+  image_pipeline.json  dev/tcase と手元の実写について、読み込み・前処理・検出の結果を書く(画像そのものは入れない)。
+                       画像の path は dev/solver_truth.json と同じ決まり: リポジトリからの相対(dev/tcase は
+                       test_robust.py が作る)か、$ZAHYOU_TEST_IMAGES/(環境変数。無ければホームフォルダー)からの相対。
+                       dev/tcase がリポジトリに無ければ $ZAHYOU_DEV/tcase、隣の Python 版のリポジトリ ../zahyou/dev/tcase の順に探す
 
 照合の約束(Rust の試験 crates/zahyou-image/tests/{kernels,formats,pipeline}.rs と同じ):
   - ハッシュ ahash(a): float32 は NaN を 0x7fc00000 にそろえた 32 bit の値 b_i(bool・uint8 は 0/1・値)について
     Σ (b_i + 1) * (i * 0x9E3779B97F4A7C15 + 0x632BE59BD9B4E019)  (mod 2^64)。16 進 16 桁の文字列
-  - 星は明るい順の上位 50 個の (x, y, flux)
+  - 星は明るい順の上位 50 個の (x, y, flux, peak, area, elong, fwhm, snr)。深い検出は全部の星の (x, y) も持つ(xy)。
+    深い検出は info(s_psf・s・u・雑音・候補の数・捨てた理由ごとの数・鋭さの上限。秒は除く)も持つ
 """
 import base64
 import gzip
@@ -30,8 +36,10 @@ import numpy as np
 warnings.simplefilter("ignore")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ZAHYOU_DEV = os.environ.get("ZAHYOU_DEV", r"C:\Users\yoshi\Documents\GitHub\zahyou\dev")
+REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
+ZAHYOU_DEV = os.environ.get("ZAHYOU_DEV") or os.path.join(REPO, "dev")
 sys.path.insert(0, ZAHYOU_DEV)
+IMAGES_VAR = "$ZAHYOU_TEST_IMAGES/"
 import zahyou_core as zc                                  # noqa: E402
 
 from astropy.io import fits                               # noqa: E402
@@ -521,6 +529,47 @@ def sources_list(found, n=50):
              float(c["elong"]), float(c["fwhm"]), float(c["snr"])] for c in found[:n]]
 
 
+def image_path(p):
+    """image_pipeline.json の path をこの PC のパスにする(dev/test_solver_real.py の image_path と同じ決まり)。
+    dev/ で始まるものは、リポジトリに無ければ $ZAHYOU_DEV、隣の ../zahyou/dev の順に探す。"""
+    if p.startswith(IMAGES_VAR):
+        base = os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~")
+        return os.path.join(base, *p[len(IMAGES_VAR):].split("/"))
+    cands = [os.path.join(REPO, *p.split("/"))]
+    if p.startswith("dev/"):
+        rest = p[len("dev/"):].split("/")
+        cands.append(os.path.join(ZAHYOU_DEV, *rest))
+        cands.append(os.path.join(REPO, "..", "zahyou", "dev", *rest))
+    for c in cands:
+        if os.path.exists(c):
+            return os.path.normpath(c)
+    return cands[0]
+
+
+def tcase_dir():
+    for d in (os.path.join(REPO, "dev", "tcase"), os.path.join(ZAHYOU_DEV, "tcase"),
+              os.path.join(REPO, "..", "zahyou", "dev", "tcase")):
+        if os.path.isdir(d):
+            return os.path.normpath(d)
+    return None
+
+
+def deep_record(sub, mask, sigma):
+    """深い検出の結果(上位 50 個の全部の値・全部の星の (x, y)・info)と、かかった秒数。"""
+    info = {}
+    t0 = time.perf_counter()
+    found, thr = zc.detect_sources_deep(sub, mask, sigma, info=info)
+    dt = time.perf_counter() - t0
+    info.pop("seconds", None)
+    for k, v in list(info.items()):
+        if isinstance(v, (np.floating, np.integer)):
+            v = info[k] = v.item()
+        if isinstance(v, float) and not np.isfinite(v):
+            info[k] = str(v)                              # JSON に無い inf は文字列 "inf" にする
+    return {"n": len(found), "thr": thr, "stars": sources_list(found),
+            "xy": [[float(c["x"]), float(c["y"])] for c in found], "info": info}, dt
+
+
 def run_pipeline(path):
     t0 = time.perf_counter()
     r = run_load(path)
@@ -543,34 +592,32 @@ def run_pipeline(path):
         found, thr = zc.detect_sources(sub, mask, sigma, min_sources=ms)
         r[key] = {"n": len(found), "thr": thr, "stars": sources_list(found)}
     t4 = time.perf_counter()
-    found, thr = zc.detect_sources_deep(sub, mask, sigma)
-    t5 = time.perf_counter()
-    r["deep"] = {"n": len(found), "thr": thr, "stars": sources_list(found)}
-    r["py_seconds"] = {"load": t1 - t0, "preprocess": t2 - t1, "detect_x2": t4 - t3, "deep": t5 - t4}
+    r["deep"], t_deep = deep_record(sub, mask, sigma)
+    r["py_seconds"] = {"load": t1 - t0, "preprocess": t2 - t1, "detect_x2": t4 - t3, "deep": t_deep}
     return r
 
 
 def gen_pipeline():
-    tdir = os.path.join(ZAHYOU_DEV, "tcase")
+    tdir = tcase_dir()
     items = []
-    if os.path.isdir(tdir):
+    if tdir:
         for nm in sorted(os.listdir(tdir)):
             if nm.lower().endswith((".fits", ".fit", ".png", ".jpg", ".tif")):
-                items.append(("tcase", nm, os.path.join(tdir, nm)))
-    real = [r"C:\Users\yoshi\Downloads\Capture_00001 00_10_33.fits",
-            r"C:\Users\yoshi\Downloads\02013I_00010 20_47_25.fits",
-            r"C:\Users\yoshi\Downloads\phaethon_00001.fits",
-            r"C:\Users\yoshi\Downloads\20261031 3200 Phaethon StarChart 40arcmin.png",
-            r"C:\Users\yoshi\Documents\claude\nextcloud-fitsviewer\samples\sharpcap-16bit.fits",
-            r"C:\Users\yoshi\Documents\claude\nextcloud-fitsviewer\samples\siril-rgb-float.fit"]
+                items.append("dev/tcase/" + nm)
+    real = [IMAGES_VAR + "Downloads/Capture_00001 00_10_33.fits",
+            IMAGES_VAR + "Downloads/02013I_00010 20_47_25.fits",
+            IMAGES_VAR + "Downloads/phaethon_00001.fits",
+            IMAGES_VAR + "Downloads/20261031 3200 Phaethon StarChart 40arcmin.png",
+            IMAGES_VAR + "Documents/claude/nextcloud-fitsviewer/samples/sharpcap-16bit.fits",
+            IMAGES_VAR + "Documents/claude/nextcloud-fitsviewer/samples/siril-rgb-float.fit"]
     for p in real:
-        if os.path.exists(p):
-            items.append(("abs", p, p))
+        if os.path.exists(image_path(p)):
+            items.append(p)
     out = []
-    for base, name, path in items:
+    for rel in items:
+        path = image_path(rel)
         r = run_pipeline(path)
-        r["base"] = base
-        r["name"] = name
+        r["path"] = rel
         print(f"  {os.path.basename(path)[:40]:40s} {'OK ' if r['ok'] else 'ERR'} "
               f"{r.get('prep', {}).get('sigma', '')} det60={r.get('det60', {}).get('n', '')} "
               f"deep={r.get('deep', {}).get('n', '')}")
@@ -603,20 +650,21 @@ def gen_big(outdir):
     t2 = time.perf_counter()
     found60, thr60 = zc.detect_sources(sub, mask, sigma, min_sources=60)
     t3 = time.perf_counter()
-    deep, thrd = zc.detect_sources_deep(sub, mask, sigma)
-    t4 = time.perf_counter()
+    deep_rec, t_deep = deep_record(sub, mask, sigma)
+    t4 = t3 + t_deep
+    t4b = time.perf_counter()
     b = zc.load_image_any(p)
     t5 = time.perf_counter()
     res.update({"sigma": float(sigma), "mask_count": int(mask.sum()), "info": info, "sub": stats(sub),
                 "det12": {"n": len(found), "thr": thr, "stars": sources_list(found)},
                 "det60": {"n": len(found60), "thr": thr60, "stars": sources_list(found60)},
-                "deep": {"n": len(deep), "thr": thrd, "stars": sources_list(deep)},
+                "deep": deep_rec,
                 "load_data": stats(b.data),
                 "py_seconds": {"preprocess": t1 - t0, "detect12": t2 - t1, "detect60": t3 - t2, "deep": t4 - t3,
-                               "load": t5 - t4}})
+                               "load": t5 - t4b}})
     with open(os.path.join(outdir, "big_expected.json"), "w", encoding="utf-8") as f:
         json.dump(res, f, ensure_ascii=False, indent=1)
-    print(json.dumps(res["py_seconds"]), res["sigma"], len(found), len(deep))
+    print(json.dumps(res["py_seconds"]), res["sigma"], len(found), deep_rec["n"])
 
 
 def dump(name, obj):

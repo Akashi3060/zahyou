@@ -13,7 +13,8 @@
 //! - stats.rs    numpy / astropy と同じ和・中央値・σ クリップ
 //! - filters.rs  scipy.ndimage と同じフィルター(中央値・一様・ガウス・二項・zoom)
 //! - prep.rs     前処理(背景・ホットピクセル・縁・焼き込み文字)
-//! - detect.rs   星の検出(4 連結のラベル・重心・深い検出)
+//! - detect.rs   星の検出(4 連結のラベル・重心)
+//! - deep.rs     深い検出(星の幅に合わせてぼかし、局所の雑音の u 倍を超える極大を拾う。2026-10-16 版)
 //!
 //! 画素は 0 始まり(x = 列、y = 行)。`Image2D` の行 0 は Python 版の `bundle.data` の行 0 と同じ
 //! (FITS は先頭の行 = 画像の下、PNG/JPEG/TIFF は画面の上)。表示の上下は `Loaded::flip_y` で持つ。
@@ -21,6 +22,7 @@
 #![forbid(unsafe_code)]
 
 mod array;
+mod deep;
 mod detect;
 mod filters;
 mod fits;
@@ -32,7 +34,8 @@ mod raster;
 mod stats;
 mod tile;
 
-pub use detect::{detect_raw, detect_sources, detect_sources_deep};
+pub use deep::{detect_deep, detect_deep_raw, detect_sources_deep};
+pub use detect::{detect_raw, detect_sources};
 pub use load::{LoadError, load_image_any, looks_inverted};
 pub use prep::preprocess;
 pub use zahyou_wcs::{Card, CardValue};
@@ -99,22 +102,23 @@ pub struct Prep {
 }
 
 /// 検出した星 1 つ(Python の `_measure` の dict と `snr`)。
+/// 深い検出(`detect_deep`)の星は、Python の `detect_sources_deep` と同じく意味が少し違う(括弧の中)。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Source {
-    /// 重心(画素、0 始まり)
+    /// 重心(画素、0 始まり)(深い検出: ぼかした像の 3×3 に対数の放物線を当てた頂の位置)
     pub x: f64,
     pub y: f64,
-    /// 領域内の背景差引の値の和
+    /// 領域内の背景差引の値の和(深い検出: ぼかした像の頂の値から出したガウスの全光量。並べ替えの目安)
     pub flux: f64,
-    /// 領域内の最大値
+    /// 領域内の最大値(深い検出: 頂の画素の前処理後の値)
     pub peak: f64,
-    /// 領域の画素数(深い検出では元の画素に直して 4 倍)
+    /// 領域の画素数(深い検出: FWHM の円の面積。目安)
     pub area: usize,
-    /// 伸び(長軸 / 短軸)
+    /// 伸び(長軸 / 短軸)(深い検出: 1)
     pub elong: f64,
-    /// 2.3548 × √((vx + vy) / 2)(深い検出では 2 倍)
+    /// 2.3548 × √((vx + vy) / 2)(深い検出: 2.3548 × 星像の σ。全部の星で同じ値)
     pub fwhm: f64,
-    /// 開口 SNR = flux / (σ √area)
+    /// 開口 SNR = flux / (σ √area)(深い検出: ぼかした像の頂の値 / その場所の雑音)
     pub snr: f64,
 }
 
@@ -145,9 +149,65 @@ impl DetectOpts {
         DetectOpts { min_sources: n, ..Default::default() }
     }
 
-    /// 深い検出で Python 版が使う条件(まとめた画像に min_sources = 60、ほかは既定値)。
-    /// `detect_sources_deep(prep, &DetectOpts::deep())` が Python の `detect_sources_deep(sub, mask, sigma)` と同じ。
+    /// 以前の深い検出(2×2 にまとめて min_sources = 60 で検出)の条件。今の `detect_sources_deep` が使うのは
+    /// `max_sources`(既定 400)だけなので、`detect_sources_deep(prep, &DetectOpts::deep())` は
+    /// Python の `detect_sources_deep(sub, mask, sigma)` と同じ。新しく書くなら `detect_deep(prep, &DeepOpts::default())`。
     pub fn deep() -> DetectOpts {
         DetectOpts::with_min_sources(60)
     }
+}
+
+/// 深い検出の条件(Python の `detect_sources_deep` の引数)。既定値は Python と同じ。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DeepOpts {
+    /// 明るい順にこれだけ返す(既定 400)
+    pub max_sources: usize,
+    /// 雑音だけの画像で画像全体に出てよい偽の極大の数の見込み(既定 2.0)。しきい値 u はこれから決める
+    pub target_false: f64,
+    /// しきい値 u(局所の雑音の倍数)の下限(既定 4.0)。上限は 8 付近
+    pub min_u: f64,
+}
+
+impl Default for DeepOpts {
+    fn default() -> Self {
+        DeepOpts { max_sources: 400, target_false: 2.0, min_u: 4.0 }
+    }
+}
+
+/// 深い検出で捨てた候補の数(理由ごと。Python の info["rejected"])。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct DeepRejected {
+    /// もっと明るい星との間の谷が浅い(同じ星の肩・光条のこぶ)
+    pub saddle: usize,
+    /// ぼかした像の曲率で見た伸びが 4 倍を超える(光跡・線)
+    pub elong: usize,
+    /// 鋭さが明るい星の典型の 2 倍を超える(ベイヤーで十字に広がったホットピクセル)
+    pub sharp: usize,
+    /// まわりの輪の中央値より十分高くない(大きなかぶりの上の背景の当てはめの残り)
+    pub ring: usize,
+}
+
+/// 深い検出で測った値(Python の `detect_sources_deep(..., info=dict)` が入れるもの)。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DeepInfo {
+    /// 星像の σ [画素](明るい星から測れなければ None)
+    pub s_psf: Option<f64>,
+    /// 星像の σ を測るのに使った星の数
+    pub n_psf: usize,
+    /// ぼかしに使ったガウスの σ [画素](1〜8)
+    pub s: f64,
+    /// しきい値(局所の雑音の倍数)
+    pub u: f64,
+    /// ぼかした画像の雑音(σ クリップの標準偏差)
+    pub noise: f64,
+    /// 候補(しきい値を超える局所の極大。明るい順に max(4000, 10 × max_sources) 個まで)の数
+    pub candidates: usize,
+    /// 残った星の数(max_sources で切る前)
+    pub kept: usize,
+    /// 捨てた理由ごとの数
+    pub rejected: DeepRejected,
+    /// 鋭さ(中心 / 上下左右の平均)の上限(明るい星の典型の 2 倍。測れなければ inf)
+    pub sharp_max: f64,
+    /// かかった秒数
+    pub seconds: f64,
 }
