@@ -171,21 +171,8 @@ pub fn all_passed(rows: &[Check]) -> bool {
     !rows.is_empty() && rows.iter().all(|r| r.ok)
 }
 
-/// `--selftest`(画面の項目なし)。結果を表示し、`out` があれば UTF-8 で書く。戻り値は終了コード(全部通れば 0)。
-// main.rs の --selftest は画面の項目も足す gui の入口(ui/cli.rs)を使うので、今はどこからも呼ばれない
-#[allow(dead_code)]
-pub fn selftest(image: &Path, mode: Option<SolveMode>, out: Option<&Path>) -> i32 {
-    let mut log = String::new();
-    let rows = selftest_rows(image, mode, None, &RunEnv::default(), &mut log);
-    let text = format_report(&rows, &log);
-    if let Some(p) = out
-        && let Err(e) = std::fs::write(p, format!("{text}\n"))
-    {
-        eprintln!("結果を書けませんでした: {}: {e}", p.display());
-    }
-    println!("{text}");
-    if all_passed(&rows) { 0 } else { 1 }
-}
+// `--selftest` の入口は画面の項目も足す ui/cli.rs の `selftest`(記憶と設定を一時へ向けてから
+// selftest_rows と gui_selftest::run を通す)。画面の項目なしの入口は使われていなかったので消した(2026-10-17)。
 
 // ================================================================== 速さの物差し ===
 

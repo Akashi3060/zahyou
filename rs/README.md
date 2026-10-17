@@ -65,8 +65,11 @@ T=$(mktemp -d)
 export ZAHYOU_CACHE="$T/cache.json" ZAHYOU_SETTINGS="$T/gui.json" LOCALAPPDATA="$T"
 ```
 
-`--selftest` と `--shot` は gui.json だけを自分で一時ファイルへ向ける。**cache.json は向けない**(Python 版の自己診断と
-同じく、解けた画素スケールを覚える)ので、手で動かすときは上の 3 つを設定する。
+`--selftest` は gui.json と cache.json の両方を自分で一時ファイルへ向ける(ZAHYOU_SETTINGS・ZAHYOU_CACHE が無いとき。
+cache.json は空から始めて終わったら消すので、結果はその PC の記憶によらない。2026-10-17 から。以前は Python 版の自己診断と
+同じく cache.json は利用者のものを読み書きしていた)。覚えた値で確かめたいときは ZAHYOU_CACHE に cache.json の写しを指す。
+`--shot`・`--first-frame` は gui.json だけを向ける(**cache.json は向けない**)ので、手で動かすときは上の 3 つを設定する。
+試験 `app/tests/selftest_isolation.rs` が、3 つを外した exe の `--selftest` で `%LOCALAPPDATA%\zahyou` ができないことを見る。
 
 ## exe の入口
 

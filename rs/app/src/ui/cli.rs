@@ -46,8 +46,9 @@ pub fn selftest(args: &[String]) -> i32 {
     };
     let debug_wcs = arg_value(args, "--debug-wcs").map(PathBuf::from);
     let target = crate::selftest::SELFTEST_TARGET;
-    // 利用者の設定には触れない
+    // 利用者の設定にも記憶にも触れない
     isolate_settings();
+    let temp_cache = isolate_cache();
     let image = PathBuf::from(image);
 
     // --- 解析の項目(pipeline 係) ---
@@ -86,6 +87,9 @@ pub fn selftest(args: &[String]) -> i32 {
     }
     let text = crate::selftest::format_report(&rows, &log);
     emit(args, &text);
+    if let Some(p) = temp_cache {
+        let _ = std::fs::remove_file(p);
+    }
     if crate::selftest::all_passed(&rows) { 0 } else { 1 }
 }
 
@@ -95,6 +99,25 @@ pub fn isolate_settings() {
         let p = std::env::temp_dir().join(format!("zahyou-selftest-{}.json", std::process::id()));
         super::settings::override_path(p);
     }
+}
+
+/// 自己診断は、記憶(cache.json)も空の一時ファイルへ向ける。利用者の覚えた座標・画素スケールを読まず
+/// (結果がその PC の記憶によらない)、自己診断の画像の画素スケールや目標の座標を書き足さない。
+/// 環境変数 ZAHYOU_CACHE があればそれを使う(覚えた値で確かめたいときは、利用者の cache.json の写しを指す)。
+/// 向けた一時ファイルを返す(終わったら消す)。以前は gui.json だけを向けていた(docs/rust-port.md 11 節)。
+fn isolate_cache() -> Option<PathBuf> {
+    let p = selftest_cache_path(std::env::var_os("ZAHYOU_CACHE"), &std::env::temp_dir(), std::process::id())?;
+    let _ = std::fs::remove_file(&p);
+    zahyou_net::cache::override_path(p.clone());
+    Some(p)
+}
+
+/// [`isolate_cache`] の行き先(環境変数を引数で受ける。試験用)。ZAHYOU_CACHE が空でなければ None(そちらを使う)。
+fn selftest_cache_path(env_cache: Option<std::ffi::OsString>, temp: &Path, pid: u32) -> Option<PathBuf> {
+    if env_cache.is_some_and(|v| !v.is_empty()) {
+        return None;
+    }
+    Some(temp.join(format!("zahyou-selftest-{pid}-cache.json")))
 }
 
 /// エンジンの読み込みを確かめる(Python の --engine-check に当たる)
@@ -256,4 +279,19 @@ pub fn bench(args: &[String]) -> i32 {
     json.push_str(&format!(" \"notes\": [{}]\n}}", notes_json.join(", ")));
     emit(args, &json);
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 自己診断の記憶は_zahyou_cache_が無ければ一時のファイル() {
+        let t = Path::new(r"C:\temp-for-test");
+        let mine = t.join("zahyou-selftest-42-cache.json");
+        assert_eq!(selftest_cache_path(None, t, 42), Some(mine.clone()));
+        assert_eq!(selftest_cache_path(Some("".into()), t, 42), Some(mine));
+        // 指定があればそちら(cache.json の場所は zahyou_net::cache_path が環境変数から決める)
+        assert_eq!(selftest_cache_path(Some(r"D:\copy\cache.json".into()), t, 42), None);
+    }
 }

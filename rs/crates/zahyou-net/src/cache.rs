@@ -18,8 +18,21 @@ use std::sync::Mutex;
 /// 読み・足し・書きを 1 つずつにする(同じプロセスの別スレッドどうし)。
 static LOCK: Mutex<()> = Mutex::new(());
 
+/// [`override_path`] で決めた場所。
+static OVERRIDE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// このプロセスの cache.json を別のファイルにする(起動直後に 1 回だけ。2 回目からは何もしない)。
+/// 環境変数 ZAHYOU_CACHE より優先する。自己診断が利用者の記憶を読み書きしないため(app の `--selftest`)。
+pub fn override_path(p: PathBuf) {
+    let _ = OVERRIDE.set(p);
+}
+
 /// cache.json の場所(Python の `_cache_path`)。必要ならフォルダーを作り、Temp の古いファイルを引き継ぐ。
+/// [`override_path`] で決めてあればそのファイル(フォルダーも作らず、引き継ぎもしない)。
 pub fn cache_path() -> PathBuf {
+    if let Some(p) = OVERRIDE.get() {
+        return p.clone();
+    }
     cache_path_from(
         std::env::var_os("ZAHYOU_CACHE"),
         std::env::var_os("LOCALAPPDATA"),

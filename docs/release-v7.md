@@ -146,7 +146,7 @@ cargo test --workspace -- --include-ignored
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-exe そのものを確かめる。**利用者の `%LOCALAPPDATA%\zahyou` に触れないよう、3 つとも一時へ向ける**(`--selftest` は cache.json を一時へ向けない):
+exe そのものを確かめる。**利用者の `%LOCALAPPDATA%\zahyou` に触れないよう、3 つとも一時へ向ける**(`--selftest` は 2026-10-17 から自分で gui.json と cache.json を一時へ向けるが、`--first-frame` は gui.json だけ、`--engine-check`・`--update-check` と手で開く画面は向けない):
 
 ```bash
 T=$(mktemp -d)
