@@ -21,7 +21,9 @@ from tkinter import ttk
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-IMAGE = r"C:\Users\yoshi\Downloads\Capture_00001 00_10_33.fits"
+# 試験の画像は $ZAHYOU_TEST_IMAGES(無ければホームフォルダー)の下(作者のホームの絶対パスをソースに書かない)
+IMAGE = os.path.join(os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~"),
+                     "Downloads", "Capture_00001 00_10_33.fits")
 
 # 押しても安全なように差し替えるもの
 DIALOGS = []

@@ -15,7 +15,7 @@ print_solution)と、その下の matplotlib 3.10・astropy 7.1(WCSAxes・SkyCoo
     plot_layout.json     plot_original・plot_north_up をそのまま呼んで描いた図の配置(軸の矩形・題・軸名の外接矩形、px)。
                          游ゴシック(GUI と同じ font.family)で描いた値なので、Rust も游ゴシックがあるときだけ比べる
 
-Python 版の dev フォルダーは環境変数 ZAHYOU_PY_DEV(既定 C:\\Users\\yoshi\\Documents\\GitHub\\zahyou\\dev)。
+Python 版の dev フォルダーは環境変数 ZAHYOU_PY_DEV(既定は $ZAHYOU_PY_REPO、無ければ ~/Documents/GitHub/zahyou の下の dev)。
 Python 版のフォルダーには何も書かない(__pycache__ も作らない)。乱数の種は固定。
 """
 import json
@@ -26,7 +26,8 @@ import warnings
 
 sys.dont_write_bytecode = True
 os.environ.setdefault("MPLBACKEND", "Agg")
-DEV = os.environ.get("ZAHYOU_PY_DEV", r"C:\Users\yoshi\Documents\GitHub\zahyou\dev")
+PY_REPO = os.environ.get("ZAHYOU_PY_REPO") or os.path.join(os.path.expanduser("~"), "Documents", "GitHub", "zahyou")
+DEV = os.environ.get("ZAHYOU_PY_DEV") or os.path.join(PY_REPO, "dev")
 sys.path.insert(0, DEV)
 
 import numpy as np                                                    # noqa: E402

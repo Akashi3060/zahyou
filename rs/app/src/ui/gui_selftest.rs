@@ -169,9 +169,20 @@ pub fn run(image: &Path, target: &str, force: Option<Solve>, debug_wcs: Option<s
 mod tests {
     use super::*;
 
+    /// 試験の画像: `$ZAHYOU_TEST_IMAGES/Downloads/<name>`(ZAHYOU_TEST_IMAGES が無ければホームフォルダー。
+    /// 作者のホームの絶対パスをソースに書かない)。
+    fn test_image(name: &str) -> std::path::PathBuf {
+        std::env::var_os("ZAHYOU_TEST_IMAGES")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default()
+            .join("Downloads")
+            .join(name)
+    }
+
     #[test]
     fn 中止すると中止しましたと出る() {
-        let img = Path::new(r"C:\Users\yoshi\Downloads\Capture_00001 00_10_33.fits");
+        let img = test_image("Capture_00001 00_10_33.fits");
         if !img.exists() {
             eprintln!("SKIP: {} が無い", img.display());
             return;
@@ -209,11 +220,7 @@ mod tests {
     #[test]
     #[ignore]
     fn 中止の遅れを測る() {
-        let base = std::env::var_os("ZAHYOU_TEST_IMAGES")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .map(std::path::PathBuf::from)
-            .unwrap_or_default();
-        let img = base.join("Downloads").join("Capture_00001 00_55_14.fits");
+        let img = test_image("Capture_00001 00_55_14.fits");
         if !img.exists() || !Path::new(crate::pipeline::DEFAULT_INDEX_DIR).is_dir() {
             eprintln!("SKIP: {} か星図データが無い", img.display());
             return;

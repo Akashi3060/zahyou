@@ -18,8 +18,10 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+# 既定の試験の画像は $ZAHYOU_TEST_IMAGES(無ければホームフォルダー)の下(作者のホームの絶対パスをソースに書かない)
 IMAGE = (sys.argv[1] if len(sys.argv) > 1
-         else r"C:\Users\yoshi\Downloads\Capture_00001 00_10_33.fits")
+         else os.path.join(os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~"),
+                           "Downloads", "Capture_00001 00_10_33.fits"))
 
 
 def main():

@@ -19,7 +19,8 @@ zahyou-index(Rust)の照合用の値を Python 基準実装(dev/solver_index.py)
   - code_ball の答えは (問い合わせの番号, quad の番号) を '<u4' で交互に並べたバイト列の sha256(16 進)
   - stars_in_cone の答えは星の番号の並び('<u4')の sha256
   - 実数は repr(最短で元に戻る桁)。Rust は serde_json の float_roundtrip で同じビットに戻す
-Python 版のリポジトリは環境変数 ZAHYOU_DEV で変えられる(既定 C:\\Users\\yoshi\\Documents\\GitHub\\zahyou\\dev)。
+Python 版の dev フォルダーは環境変数 ZAHYOU_DEV で変えられる(既定は $ZAHYOU_PY_REPO、無ければ
+~/Documents/GitHub/zahyou の下の dev。作者のホームの絶対パスをソースに書かない)。
 """
 import hashlib
 import json
@@ -36,7 +37,8 @@ import numpy as np
 warnings.simplefilter("ignore")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ZAHYOU_DEV = os.environ.get("ZAHYOU_DEV", r"C:\Users\yoshi\Documents\GitHub\zahyou\dev")
+PY_REPO = os.environ.get("ZAHYOU_PY_REPO") or os.path.join(os.path.expanduser("~"), "Documents", "GitHub", "zahyou")
+ZAHYOU_DEV = os.environ.get("ZAHYOU_DEV") or os.path.join(PY_REPO, "dev")
 sys.path.insert(0, ZAHYOU_DEV)
 import solver_index as si                                  # noqa: E402
 

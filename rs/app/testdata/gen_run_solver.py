@@ -45,7 +45,7 @@ matplotlib.use("Agg")
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 DEV = os.path.join(REPO, "dev")
-DEFAULT_PY_REPO = r"C:\Users\yoshi\Documents\GitHub\zahyou"
+DEFAULT_PY_REPO = os.path.join(os.path.expanduser("~"), "Documents", "GitHub", "zahyou")
 INDEX_DIR = os.environ.get("ZAHYOU_INDEX_DIR", r"C:\AstrometryData")
 TARGET = "UCAC4 660-021020"
 TARGET_RADEC = (61.91199157844, 41.98626242835)   # 手元の cache.json の値(gen_pipeline.py と同じ)

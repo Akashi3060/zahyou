@@ -8,6 +8,7 @@ Python 基準実装(dev/solver_index.py)で同じ問い合わせについて測�
 問い合わせは index_ball_<tag>.json(gen_index.py が作ったもの。半径 0.01 の 1000 問と bench_cone)。
 答えの件数と sha256 も基準値と比べる。星図データは C:\\AstrometryData(ZAHYOU_INDEX_DIR)。
 プライベートメモリは Windows の PrivateUsage(GetProcessMemoryInfo)。
+Python 版の dev フォルダーは環境変数 ZAHYOU_DEV(既定は $ZAHYOU_PY_REPO、無ければ ~/Documents/GitHub/zahyou の下の dev)。
 """
 import ctypes
 import hashlib
@@ -24,7 +25,8 @@ import numpy as np
 warnings.simplefilter("ignore")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ZAHYOU_DEV = os.environ.get("ZAHYOU_DEV", r"C:\Users\yoshi\Documents\GitHub\zahyou\dev")
+PY_REPO = os.environ.get("ZAHYOU_PY_REPO") or os.path.join(os.path.expanduser("~"), "Documents", "GitHub", "zahyou")
+ZAHYOU_DEV = os.environ.get("ZAHYOU_DEV") or os.path.join(PY_REPO, "dev")
 sys.path.insert(0, ZAHYOU_DEV)
 import solver_index as si                                  # noqa: E402
 

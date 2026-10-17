@@ -10,7 +10,7 @@ zahyou-net の照合用の値を Python 版(基準実装)から作る。
                         resolve_target_name のキャッシュの鍵と書き方
   astroquery / astropy  nova・VizieR・Sesame へ送る要求そのもの(通信は差し替えて、外へは出さない)
 
-Python 版のリポジトリは環境変数 ZAHYOU_PY_REPO で変えられる(既定 C:\\Users\\yoshi\\Documents\\GitHub\\zahyou)。
+Python 版のリポジトリは環境変数 ZAHYOU_PY_REPO で変えられる(既定 ~/Documents/GitHub/zahyou)。
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ import tempfile
 import urllib.error
 import urllib.parse
 
-REPO = os.environ.get("ZAHYOU_PY_REPO", r"C:\Users\yoshi\Documents\GitHub\zahyou")
+REPO = os.environ.get("ZAHYOU_PY_REPO") or os.path.join(os.path.expanduser("~"), "Documents", "GitHub", "zahyou")
 sys.path.insert(0, os.path.join(REPO, "gui"))
 sys.path.insert(0, os.path.join(REPO, "dev"))
 

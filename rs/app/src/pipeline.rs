@@ -2104,12 +2104,13 @@ pub(crate) mod pyref {
     }
 
     /// pipeline_run.json の試験画像をそろえる(手元の画像の sha256 が同じときだけ)。(WCS を足した版, そのままの版, 作業フォルダー)
+    /// 画像のパス("$ZAHYOU_TEST_IMAGES/…")は resolve_image と同じ決まりでこの PC のパスにする。
     pub(crate) fn run_images(d: &Value, tag: &str) -> Option<(PathBuf, PathBuf, PathBuf)> {
         if d.get("skipped").is_some() {
             eprintln!("SKIP: 基準値を作ったときに試験画像が無かった");
             return None;
         }
-        let img = PathBuf::from(s(&d["image"]));
+        let img = resolve_image(&s(&d["image"]));
         let Ok(bytes) = std::fs::read(&img) else {
             eprintln!("SKIP: 試験画像がありません: {}", img.display());
             return None;
@@ -2184,7 +2185,7 @@ pub(crate) mod pyref {
                 "plain" => plain.clone(),
                 // 手元のほかの実写(dev/realcase の real_flip.fits・real.png)。無いか中身が違えば SKIP
                 _ => {
-                    let p = PathBuf::from(s(&r["image_path"]));
+                    let p = resolve_image(&s(&r["image_path"]));
                     match std::fs::read(&p) {
                         Ok(b) if sha2_like::sha256_hex(&b) == s(&r["image_path_sha256"]) => p,
                         _ => {
@@ -2570,15 +2571,18 @@ pub(crate) mod pyref {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata")
     }
 
-    /// run_solver.json の画像のパス("$ZAHYOU_TEST_IMAGES/…" か、リポジトリからの相対)を実際のパスに。
-    /// リポジトリに無いもの(dev/tcase・dev/realcase は .gitignore)は ZAHYOU_PY_REPO(既定は Python 版の
-    /// リポジトリ)の同じ相対パスも見る(rs/testdata/gen_solver.py と同じ決まり)。
+    /// ホームフォルダー(USERPROFILE、無ければ HOME)。作者のホームの絶対パスをソースに書かないため。
+    fn home_dir() -> PathBuf {
+        std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).unwrap_or_default()
+    }
+
+    /// 基準値(run_solver.json・pipeline_run.json)の画像のパス("$ZAHYOU_TEST_IMAGES/…" か、リポジトリからの相対)を
+    /// 実際のパスに。$ZAHYOU_TEST_IMAGES の既定はホームフォルダー。リポジトリに無いもの(dev/tcase・dev/realcase は
+    /// .gitignore)は ZAHYOU_PY_REPO(既定 ~/Documents/GitHub/zahyou = Python 版のリポジトリ)の同じ相対パスも見る
+    /// (rs/testdata/gen_solver.py と同じ決まり)。
     pub(crate) fn resolve_image(p: &str) -> PathBuf {
         if let Some(rest) = p.strip_prefix("$ZAHYOU_TEST_IMAGES/") {
-            let base = std::env::var_os("ZAHYOU_TEST_IMAGES")
-                .or_else(|| std::env::var_os("USERPROFILE"))
-                .map(PathBuf::from)
-                .unwrap_or_default();
+            let base = std::env::var_os("ZAHYOU_TEST_IMAGES").map(PathBuf::from).unwrap_or_else(home_dir);
             return rest.split('/').fold(base, |b, s| b.join(s));
         }
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
@@ -2588,7 +2592,7 @@ pub(crate) mod pyref {
         }
         let py_repo = std::env::var_os("ZAHYOU_PY_REPO")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from(r"C:\Users\yoshi\Documents\GitHub\zahyou"));
+            .unwrap_or_else(|| home_dir().join("Documents").join("GitHub").join("zahyou"));
         p.split('/').fold(py_repo, |b, s| b.join(s))
     }
 

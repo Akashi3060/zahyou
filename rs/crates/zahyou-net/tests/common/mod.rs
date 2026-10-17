@@ -309,12 +309,19 @@ pub fn fake_index(indexid: u32, healpix: i32, data: usize) -> Vec<u8> {
 
 // ------------------------------------------------------------- python -m http.server ---
 
+/// 試験に使う Python: ZAHYOU_PYTHON、無ければホームフォルダーの下の Python 3.13(利用者ごとの既定の入れ先)、
+/// それも無ければ PATH の python。ホームフォルダーから組み立てるのは、作者のホームの絶対パスをソースに書かないため。
+/// LOCALAPPDATA から組み立てないのは、試験は LOCALAPPDATA を一時フォルダーへ向けて回す決まりだから。
 pub fn python_exe() -> PathBuf {
     if let Some(p) = std::env::var_os("ZAHYOU_PYTHON") {
         return PathBuf::from(p);
     }
-    let p = PathBuf::from(r"C:\Users\yoshi\AppData\Local\Programs\Python\Python313\python.exe");
-    if p.exists() { p } else { PathBuf::from("python") }
+    const UNDER_HOME: [&str; 6] = ["AppData", "Local", "Programs", "Python", "Python313", "python.exe"];
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from);
+    match home.map(|h| UNDER_HOME.iter().fold(h, |p, s| p.join(s))) {
+        Some(p) if p.exists() => p,
+        _ => PathBuf::from("python"),
+    }
 }
 
 /// `python -m http.server` を localhost に立てる。Python が無ければ None(試験は SKIP)。

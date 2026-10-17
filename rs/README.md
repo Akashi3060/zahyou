@@ -23,7 +23,7 @@ tools                 同梱物の表示(THIRD-PARTY-NOTICES.md)を作る・ラ�
   リンカーは UCRT64 の gcc)。**rustup は入れない**(rustup の gnu は MSVCRT 前提で、UCRT64 の gcc と混ぜると壊れる)。
 - シェルは Git Bash。最初に `export PATH=/c/msys64/ucrt64/bin:$PATH`。
 - 試験の一部(照合値の作り直しと Python 側の速さ)には Python 3.13 と numpy・scipy・astropy・matplotlib
-  (`C:\Users\yoshi\AppData\Local\Programs\Python\Python313\python.exe`)。
+  (`%USERPROFILE%\AppData\Local\Programs\Python\Python313\python.exe`。zahyou-net の試験は `ZAHYOU_PYTHON` で変えられる)。
 - 星図データ `C:\AstrometryData`(index-*.fits)。無ければ、それが要る試験は `SKIP` と出して通す。
 
 ## ビルド
@@ -48,7 +48,7 @@ cargo test -p zahyou run_solver_vs_python_all -- --ignored --nocapture   # 締�
 ```
 
 - 試験の画像は `$ZAHYOU_TEST_IMAGES/…`(既定はホームフォルダー)か、リポジトリからの相対。リポジトリに無い
-  `dev/realcase`・`dev/tcase`(.gitignore)は `ZAHYOU_PY_REPO`(既定 `C:\Users\yoshi\Documents\GitHub\zahyou`)の同じ場所を見る。
+  `dev/realcase`・`dev/tcase`(.gitignore)は `ZAHYOU_PY_REPO`(既定 `~/Documents/GitHub/zahyou`)の同じ場所を見る。
   中身(sha256)が照合値を作ったときと違えば SKIP。
 - `--ignored` の中身: 解法の全部の合成星野・全部の実写・解けてはいけない画像(締め切り 30 秒)と、GitHub の Releases・
   nova.astrometry.net への疎通・星図データの置き場所への HEAD(読むだけ。画像も星のリストも送らない)。
@@ -104,7 +104,7 @@ exe は windows サブシステムなので、結果はコンソールに出な�
 ## 照合値を作り直す(Python 基準実装 = リポジトリの dev/)
 
 ```bash
-PY=/c/Users/yoshi/AppData/Local/Programs/Python/Python313/python.exe
+PY=~/AppData/Local/Programs/Python/Python313/python.exe
 $PY -B testdata/gen_wcs.py ; $PY -B testdata/gen_index.py ; $PY -B testdata/gen_image.py
 $PY -B testdata/gen_plot.py ; $PY -B testdata/gen_net.py ; $PY -B testdata/gen_pipeline.py
 $PY -B testdata/gen_solver.py                 # 合成 6〜7 分・実写 10 分ほど

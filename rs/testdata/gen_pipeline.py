@@ -8,6 +8,9 @@ app の pipeline.rs / scale.rs の照合用の値を Python 版(基準実装)で
   --oracle   $ZAHYOU_ORACLE、無ければ $ZAHYOU_TEST_IMAGES(無ければ ~)/Documents/claude/zahyou/testdata/oracle
              (WSL 版 astrometry.net の正解。リポジトリには入れない作者のデータ。docs/rust-port.md 11 節)
   試験画像   $ZAHYOU_TEST_IMAGES(無ければ ~)/Downloads/Capture_00001 00_10_33.fits(試験の画像と同じ決まり)
+pipeline_run.json の画像のパスも同じ決まりの形で書く(Rust の試験 pipeline.rs の resolve_image がこの PC のパスにする):
+  image は "$ZAHYOU_TEST_IMAGES/Downloads/…"、dev/realcase の画像(runs の image_path)はリポジトリからの相対
+  "dev/realcase/…"(zahyou-rs に無ければ $ZAHYOU_PY_REPO の同じ相対パス)。
 
 書くもの(このスクリプトと同じフォルダー):
   pipeline_format.json   六十進の書き方(astropy の to_string)・{:g}・{:.Nf}・赤経赤緯の文字列の読み方(SkyCoord)
@@ -52,7 +55,8 @@ IMAGES = os.environ.get("ZAHYOU_TEST_IMAGES") or HOME
 DEFAULT_ZAHYOU = os.environ.get("ZAHYOU_PY_REPO") or os.path.join(HOME, "Documents", "GitHub", "zahyou")
 DEFAULT_ORACLE = (os.environ.get("ZAHYOU_ORACLE")
                   or os.path.join(IMAGES, "Documents", "claude", "zahyou", "testdata", "oracle"))
-TEST_IMAGE = os.path.join(IMAGES, "Downloads", "Capture_00001 00_10_33.fits")
+TEST_IMAGE_REL = "$ZAHYOU_TEST_IMAGES/Downloads/Capture_00001 00_10_33.fits"   # JSON に書く形
+TEST_IMAGE = os.path.join(IMAGES, *TEST_IMAGE_REL.split("/")[1:])
 INDEX_DIR = r"C:\AstrometryData"
 TARGET = "UCAC4 660-021020"
 TARGET_RADEC = (61.91199157844, 41.98626242835)   # 手元の cache.json の値(Gaia DR3 で精密化したもの)
@@ -446,12 +450,13 @@ class _OracleSolution:
         self.seconds = 0.0
 
 
-REALCASE = os.path.join(DEFAULT_ZAHYOU, "dev", "realcase")
+REALCASE_REL = "dev/realcase"      # JSON にはリポジトリからの相対で書く(dev/realcase は .gitignore)
+REALCASE = os.path.join(DEFAULT_ZAHYOU, *REALCASE_REL.split("/"))
 
 
 def gen_run(ns, oracle):
     if not os.path.exists(TEST_IMAGE):
-        return {"skipped": f"試験画像がありません: {TEST_IMAGE}"}
+        return {"skipped": f"試験画像がありません: {TEST_IMAGE_REL}"}
     work = tempfile.mkdtemp(prefix="zahyou_gen_run_")
     cards = wcs_card_images(oracle)
     with_wcs = os.path.join(work, "zahyou_wcs_test.fits")
@@ -487,7 +492,7 @@ def gen_run(ns, oracle):
         ("oracle_png", os.path.join(REALCASE, "real.png"), {"IGNORE_EXISTING_WCS": True, "FOCAL_LENGTH_MM": 818.0},
          False, "real_png"),
     ]
-    out = {"wcs_cards": cards, "image": TEST_IMAGE, "image_sha256": sha256(TEST_IMAGE), "runs": []}
+    out = {"wcs_cards": cards, "image": TEST_IMAGE_REL, "image_sha256": sha256(TEST_IMAGE), "runs": []}
     for row in scen:
         name, which, over, with_rig = row[:4]
         sub = row[4] if len(row) > 4 else None
@@ -542,7 +547,7 @@ def gen_run(ns, oracle):
             extra["oracle"] = sub
             extra["oracle_cards"] = oracle_cards
         if which not in ("wcs", "plain"):
-            extra["image_path"] = which
+            extra["image_path"] = REALCASE_REL + "/" + os.path.basename(which)
             extra["image_path_sha256"] = sha256(which)
         out["runs"].append({"name": name, "which": which if which in ("wcs", "plain") else "other",
                             "params": {k: ns[k] for k in base if k != "CANCEL_EVENT"},

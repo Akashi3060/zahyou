@@ -1,7 +1,8 @@
 # 設計書: zahyou の Rust 版(第 2 段)
 
 2026-10-15 作成、2026-10-16 に第 3 波(解法の組み込み)の結果を 7 節に、同日のユーザーの決定(API キーの欄・描画方式・β 版)を
-9・10 節に書き足した。2026-10-17 の保守(試験の正解データ・試験の一時フォルダー・自己診断の記憶・文書と版の試験)は 11 節。ブランチ `native-rs`(作業フォルダー `C:\Users\yoshi\Documents\GitHub\zahyou-rs`)。
+9・10 節に書き足した。2026-10-17 の保守(試験の正解データ・試験の一時フォルダー・自己診断の記憶・文書と版の試験)は 11 節
+(11.1 節の残り = 試験と生成スクリプトの既定のパスは 2026-10-18 に決着)。ブランチ `native-rs`(作業フォルダー `C:\Users\yoshi\Documents\GitHub\zahyou-rs`)。
 ビルドと試験の手順は [../rs/README.md](../rs/README.md)。
 第 1 段(Python 版の自前エンジン、ブランチ `native-solver`)の設計は [design-native-solver.md](design-native-solver.md)。
 
@@ -946,10 +947,33 @@ commit は `37adbc4`(正解データ)・`0b394e3`(一時フォルダー)・`bd0e
 - 確かめ: 写した oracle で `gen_pipeline.py` を一時の写しから走らせ(34 秒)、正解 WCS から作る値(`pipeline_run.json` の `wcs_cards` と
   各 run の `oracle_cards`、`pipeline_summary.json` の全部)がリポジトリの値と同じになった。`pipeline_scale.json`・`pipeline_run.json` の
   ほかの値は、Python 版(native-solver)の新しいログの文と星図データの案内の文で変わる(今回は作り直していない)。
-- 残り: ほかの生成スクリプト(`gen_index.py`・`gen_net.py`・`gen_plot.py`・`gen_wcs.py`・`gen_solver.py`・`bench_index.py`・
-  `app/testdata/gen_run_solver.py`)、Rust の試験(`zahyou-solver/tests/common`・`pipeline.rs`・`ui/gui_selftest.rs`・`zahyou-net/tests/common`)、
-  `gui/test_*.py` には、作者のホームの絶対パスが既定値としてまだ約 25 か所残る。生成した `pipeline_run.json` の `image` も絶対パス
-  (Rust の試験はこれをそのまま開く)。配る exe には入らない(試験と生成スクリプトだけ)。
+- ~~残り: ほかの生成スクリプト・Rust の試験・`gui/test_*.py` に、作者のホームの絶対パスが既定値としてまだ約 25 か所残る。生成した
+  `pipeline_run.json` の `image` も絶対パス~~ → **2026-10-18 に決着**。`gen_pipeline.py` と同じ決まり(環境変数、無ければホームフォルダー)に
+  そろえた。この PC では全部前と同じパスになる。リポジトリに残る `C:\Users\yoshi` は docs の記録と、下の `image_formats.json` の 1 か所だけ:
+  - Python 版のリポジトリ: `$ZAHYOU_PY_REPO`、無ければ `~/Documents/GitHub/zahyou`(`gen_net.py`・`gen_solver.py`・`app/testdata/gen_run_solver.py`、
+    Rust の `zahyou-solver/tests/common` の `py_repo_dir` と `pipeline.rs` の `pyref::resolve_image`)。
+  - dev フォルダー: 変数名はそのまま(`gen_index.py`・`bench_index.py` は `ZAHYOU_DEV`、`gen_plot.py`・`gen_wcs.py` は `ZAHYOU_PY_DEV`)で、
+    既定を「Python 版のリポジトリ(上と同じ決まり)の下の `dev`」にした。
+  - 試験の画像: `$ZAHYOU_TEST_IMAGES`(無ければホームフォルダー)の下(`gui/test_buttons.py`・`test_gui.py`・`test_result_tab.py`、
+    `ui/gui_selftest.rs` の 2 つの試験は共通の `test_image`)。Rust のホームフォルダーは `USERPROFILE`(無ければ `HOME`)。
+    `zahyou-solver/tests/common` の最後の逃げ道だった `C:\Users\yoshi` も外した。
+  - 試験の Python(`zahyou-net/tests/common` の `python_exe`): `ZAHYOU_PYTHON`、無ければ `~/AppData/Local/Programs/Python/Python313/python.exe`、
+    それも無ければ PATH の `python`。`%LOCALAPPDATA%` から組み立てないのは、試験は LOCALAPPDATA を一時へ向けて回す決まりだから。
+  - `pipeline_run.json`: 作り直さず、絶対パスの 3 か所だけを書き換えた(`image` → `$ZAHYOU_TEST_IMAGES/Downloads/Capture_00001 00_10_33.fits`、
+    `runs` の oracle_flip・oracle_png の `image_path` → `dev/realcase/real_flip.fits`・`dev/realcase/real.png`)。作り直すと上の確かめのとおり
+    Python 版の新しいログの文でほかの値も変わるため。書き換えた 3 か所を元の値に戻すと元の JSON と同じになることを確かめた(ほかのバイトは同じ)。
+    読み側(`pyref::run_images` と `run_log_vs_python` の dev/realcase の場面)は `resolve_image` を通す(前の絶対パスの JSON もそのまま開ける)。
+    `gen_pipeline.py` も同じ形で書くように直した(画像が無いときの `skipped` の文も)。直した `gen_pipeline.py` を一時の写しから走らせ、
+    作った `pipeline_run.json` の `image`・`image_path`・sha256・正解の WCS がリポジトリの値と同じで、作者のホームの絶対パスが 0 個なのを確かめた。
+  - 説明の文: `rs/README.md`(Python の場所・`ZAHYOU_PY_REPO` の既定・照合値の作り直しの `PY=`)と `zahyou-solver/tests/README.md` の表も同じ書き方に。
+  - 確かめ: 直した既定値の代入を各ファイルから ast で取り出して評価し、14 か所が前のパスと一致、環境変数で変えた 7 通りも期待どおり。
+    `cargo test -p zahyou -p zahyou-net -p zahyou-solver -- --skip live` は 164 本通過・失敗 0(無視 9。11.5 節と同じ本数)。`--nocapture` で回し直し、
+    画像・Python を使う試験に SKIP が無いこと(run() のログは 17 通り全部、dev/realcase の 2 場面も照合。zahyou-net は新しい既定の Python で
+    http.server を立てた)を確かめた。clippy の指摘 0。`tools/test_tools.py` 15 本・`gen_notices.py --check`・`check_licenses.py` OK、
+    `tools/test_make_release_assets.py` 31 本通過(`target-release` の exe を `ZAHYOU_RELEASE_EXE` で渡した)。利用者の `%LOCALAPPDATA%\zahyou` の
+    cache.json・gui.json の sha256 は前後で同じ。`gui/test_*.py` は走らせていない(`test_result_tab.py` は Python 版の設定 gui.json を退避・削除・復元するため)。
+  - 残すもの: `rs/testdata/image_formats.json` の 1 か所は、Pillow のエラー文に入った一時ファイルのパス(`…\AppData\Local\Temp\tmp…\not_an_image.png`)で、
+    既定値ではなく Python が出した文の記録(Rust の試験は文の頭だけ比べる)。この文書の 3 節・7.5 節などに書いた既定のパスも、そのときの記録として残す。
 
 ### 11.2 zahyou-net の試験が一時フォルダーを残さない
 

@@ -8,7 +8,7 @@
     wcs_header.json   いろいろな形のヘッダー(CD・PC+CDELT・CROTA2・LONPOLE・極・solve-field の実物)を astropy が読んだ結果
     wcs_offsets.json  目標までのずれ・位置角・その向きへ進んだ点(astropy)
 
-Python 版の dev フォルダーは環境変数 ZAHYOU_PY_DEV(既定 C:\\Users\\yoshi\\Documents\\GitHub\\zahyou\\dev)。
+Python 版の dev フォルダーは環境変数 ZAHYOU_PY_DEV(既定は $ZAHYOU_PY_REPO、無ければ ~/Documents/GitHub/zahyou の下の dev)。
 Python 版のフォルダーには何も書かない(__pycache__ も作らない)。乱数の種は固定。
 """
 import json
@@ -19,7 +19,8 @@ import textwrap
 import warnings
 
 sys.dont_write_bytecode = True
-DEV = os.environ.get("ZAHYOU_PY_DEV", r"C:\Users\yoshi\Documents\GitHub\zahyou\dev")
+PY_REPO = os.environ.get("ZAHYOU_PY_REPO") or os.path.join(os.path.expanduser("~"), "Documents", "GitHub", "zahyou")
+DEV = os.environ.get("ZAHYOU_PY_DEV") or os.path.join(PY_REPO, "dev")
 sys.path.insert(0, DEV)
 
 import numpy as np                                                    # noqa: E402

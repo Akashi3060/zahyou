@@ -17,7 +17,9 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import zahyou_gui as g                                        # noqa: E402
 
-IMAGE = r"C:\Users\yoshi\Downloads\Capture_00001 00_10_33.fits"
+# 試験の画像は $ZAHYOU_TEST_IMAGES(無ければホームフォルダー)の下(作者のホームの絶対パスをソースに書かない)
+IMAGE = os.path.join(os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~"),
+                     "Downloads", "Capture_00001 00_10_33.fits")
 CFG = g.settings_path()
 BAK = CFG + ".tabtest-bak"
 

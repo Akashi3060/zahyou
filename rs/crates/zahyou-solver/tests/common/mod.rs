@@ -7,7 +7,7 @@
 //!   ZAHYOU_TESTDATA      基準値の JSON(既定 rs/testdata)
 //!   ZAHYOU_TEST_IMAGES   $ZAHYOU_TEST_IMAGES/ で始まる画像のパスの基点(既定はホームフォルダー)
 //!   ZAHYOU_PY_REPO       リポジトリからの相対の画像が zahyou-rs に無いとき(dev/tcase・dev/realcase は
-//!                        .gitignore)に見る Python 版のリポジトリ(既定 C:\Users\yoshi\Documents\GitHub\zahyou)
+//!                        .gitignore)に見る Python 版のリポジトリ(既定 ~/Documents/GitHub/zahyou)
 //!   ZAHYOU_SOLVER_DEADLINE  解ける場合の 1 回の締め切り [秒](既定 120)
 #![allow(dead_code)]
 
@@ -37,10 +37,15 @@ pub fn index_dir() -> PathBuf {
     std::env::var_os("ZAHYOU_INDEX_DIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\AstrometryData"))
 }
 
+/// ホームフォルダー(USERPROFILE、無ければ HOME)。作者のホームの絶対パスをソースに書かないため。
+pub fn home_dir() -> PathBuf {
+    std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).unwrap_or_default()
+}
+
 pub fn py_repo_dir() -> PathBuf {
     std::env::var_os("ZAHYOU_PY_REPO")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\Users\yoshi\Documents\GitHub\zahyou"))
+        .unwrap_or_else(|| home_dir().join("Documents").join("GitHub").join("zahyou"))
 }
 
 /// 解ける場合の締め切り [秒]。
@@ -71,10 +76,7 @@ pub fn load_truth() -> Option<Value> {
 pub fn image_path(rel: &str) -> PathBuf {
     const VAR: &str = "$ZAHYOU_TEST_IMAGES/";
     if let Some(rest) = rel.strip_prefix(VAR) {
-        let base = std::env::var_os("ZAHYOU_TEST_IMAGES")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
-            .unwrap_or_else(|| PathBuf::from(r"C:\Users\yoshi"));
+        let base = std::env::var_os("ZAHYOU_TEST_IMAGES").map(PathBuf::from).unwrap_or_else(home_dir);
         return rest.split('/').fold(base, |p, s| p.join(s));
     }
     let q = rel.split('/').fold(repo_dir(), |p, s| p.join(s));

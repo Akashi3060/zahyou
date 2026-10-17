@@ -33,7 +33,7 @@ dev/ のファイルは読むだけで書き換えない(trace は一時フォ�
     LOCALAPPDATA を一時フォルダーに向けてから zahyou_core を読む。
   - 画像の path は solver_truth.json の決まり($ZAHYOU_TEST_IMAGES/ で始まるか、リポジトリからの相対)。
     リポジトリからの相対で zahyou-rs に無いもの(dev/tcase・dev/realcase は .gitignore)は、環境変数
-    ZAHYOU_PY_REPO(既定 C:\\Users\\yoshi\\Documents\\GitHub\\zahyou)の同じ相対パスも見る。
+    ZAHYOU_PY_REPO(既定 ~/Documents/GitHub/zahyou)の同じ相対パスも見る。
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ warnings.simplefilter("ignore")
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 DEFAULT_DEV = os.path.join(REPO, "dev")
-DEFAULT_PY_REPO = r"C:\Users\yoshi\Documents\GitHub\zahyou"
+DEFAULT_PY_REPO = os.path.join(os.path.expanduser("~"), "Documents", "GitHub", "zahyou")
 IMAGES_VAR = "$ZAHYOU_TEST_IMAGES/"
 
 # 利用者の記憶ファイル・設定を読まない・書かない(zahyou_core を読む前に決める)
