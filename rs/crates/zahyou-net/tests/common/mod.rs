@@ -198,12 +198,46 @@ impl Counter {
 
 // ------------------------------------------------------------- 一時フォルダー ---
 
-/// 試験ごとの空のフォルダー(%TMP%\zahyou-net-tests\<名前>-<pid>)。
-pub fn temp_dir(name: &str) -> PathBuf {
+/// 試験ごとの空のフォルダー(%TMP%\zahyou-net-tests\<名前>-<pid>)。`&Path` として使え、値が消えるときに中身ごと消す。
+/// 以前は消しておらず、試験を回すたびに pid ごとのフォルダーがたまっていた(2026-10-17 に 511 個・75 MB)。
+/// 試験が落ちて巻き戻るときは、中を調べられるよう消さずに場所を出す。
+pub struct TempDir(PathBuf);
+
+impl TempDir {
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for TempDir {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for TempDir {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!("試験が落ちたので一時フォルダーを残します: {}", self.0.display());
+            return;
+        }
+        // 親(zahyou-net-tests)は消さない。並んで走るほかの試験が中に作ろうとしているところかもしれない
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+pub fn temp_dir(name: &str) -> TempDir {
     let d = std::env::temp_dir().join("zahyou-net-tests").join(format!("{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
-    d
+    TempDir(d)
 }
 
 // ------------------------------------------------------------- 照合用の値 ---

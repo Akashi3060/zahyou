@@ -213,7 +213,7 @@ fn cache_file_roundtrip() {
     assert_eq!(rig_key(" ZWO ", "C8", 968, 548, "1", "2032.0"), "ZWO|C8|968x548|bin1|f2032.0");
 
     // 置き場所の決め方(ZAHYOU_CACHE → LOCALAPPDATA\zahyou → 古い Temp のものを引き継ぐ)
-    let over = cache::cache_path_from(Some(d.join("x.json").into()), None, None, d.clone());
+    let over = cache::cache_path_from(Some(d.join("x.json").into()), None, None, d.to_path_buf());
     assert_eq!(over, d.join("x.json"));
     let tmp = d.join("tmp");
     std::fs::create_dir_all(&tmp).unwrap();
