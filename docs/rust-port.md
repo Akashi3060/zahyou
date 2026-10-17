@@ -1,7 +1,7 @@
 # 設計書: zahyou の Rust 版(第 2 段)
 
 2026-10-15 作成、2026-10-16 に第 3 波(解法の組み込み)の結果を 7 節に、同日のユーザーの決定(API キーの欄・描画方式・β 版)を
-9・10 節に書き足した。ブランチ `native-rs`(作業フォルダー `C:\Users\yoshi\Documents\GitHub\zahyou-rs`)。
+9・10 節に書き足した。2026-10-17 の保守(試験の正解データ・試験の一時フォルダー・自己診断の記憶・文書と版の試験)は 11 節。ブランチ `native-rs`(作業フォルダー `C:\Users\yoshi\Documents\GitHub\zahyou-rs`)。
 ビルドと試験の手順は [../rs/README.md](../rs/README.md)。
 第 1 段(Python 版の自前エンジン、ブランチ `native-solver`)の設計は [design-native-solver.md](design-native-solver.md)。
 
@@ -57,7 +57,7 @@ rs/
   tools                 同梱物の表示(THIRD-PARTY-NOTICES.md)とライセンスの検査
 ```
 
-依存の向き: `wcs` ← `index` ← `solver` ← `app`、`wcs` ← `plot` ← `app`、`image` ← `solver`/`app`、`index` ← `net`(ダウンロードの検査)。
+依存の向き: `wcs` ← `index` ← `solver` ← `app`、`wcs` ← `image` ← `solver`/`plot`/`app`、`wcs` ← `plot` ← `app`、`index` ← `net`(ダウンロードの検査)← `app`。`plot` は `image` の `Image2D`・`Source` と、numpy とビット一致する σ クリップ(伸張の範囲)を使う(2026-10-17 に各 crate の Cargo.toml と突き合わせて `image` ← `plot` と `wcs` ← `image` を足した)。
 
 ## 3. 共通の約束
 
@@ -489,9 +489,11 @@ OpenGL 133〜134 / 131 MB。**exe**: 13,897,216 バイト(+58,880 バイト)。
   (星図データをまだ持っていない最初の利用者は、Python 版なら解けたが Rust 版では解く手段が無い)。Python と同じ既定のキーを使うか、
   画面にキーの欄を設けて資格情報マネージャーなどへ保存するか。~~ → 2026-10-16 に決着: 画面に欄を設け、既定は作者のキー(v6 と同じ)、
   gui.json に平文で覚える(10.2 節)。画像そのものを外へ送ることは、同意を取らずに送ってよいと決まった(10.9 節。v6 と同じく、送る前には聞かない)。
-- **深い検出の同点の順**(low、基準実装の直し): dev/zahyou_core.py の 604 行 `np.argsort(-sm1[ys, xs])` と 750 行 `np.argsort(-vals)` に
+- ~~**深い検出の同点の順**(low、基準実装の直し): dev/zahyou_core.py の 604 行 `np.argsort(-sm1[ys, xs])` と 750 行 `np.argsort(-vals)` に
   `kind="stable"` を付ける。実行時に差し替えた試しで、平らな頂の合成 54 枚が Rust とビットまで一致し、rs/testdata の 47 枚は変わらない。
-  直したら deep.rs 冒頭の注記を「Python も安定な並べ替えなので同点の順も同じ」に書き換える。
+  直したら deep.rs 冒頭の注記を「Python も安定な並べ替えなので同点の順も同じ」に書き換える。~~ → 2026-10-16 に決着: native-solver の
+  `7922b07`(2 か所に `kind="stable"`。test_robust 38/38・実写の回帰 22/22 で結果は変わらず)を `53e485e` で native-rs に取り込み、
+  直下の `zahyou_engine.py` にも入っている。deep.rs 冒頭の注記も「基準実装の Python も 2026-10-16 から安定な並べ替え」に書き換え済み。
 - **書き込み中の索引**(low、設計上の違い): ほかのプロセスが書き込み用に開いている間は、Rust はその索引を開けない(mmap を安全に
   使うための共有モード)。その索引しか合わない画像は、閉じられるまで Rust では解けない(Python は解く)。文言は正しくなり、次の試行で開き直す。
 - 解析を実行中も「参照...」は押せる(点検の「ついでに」の案。ダイアログはモーダルになり、更新の前に設定を保存するようになったので、
@@ -854,7 +856,7 @@ WARP は起動から 1.5 秒の間に CPU を 11 秒使う(全部のコアでシ
 
 | | 決定 | 反映 |
 |---|---|---|
-| 6 | オンライン解析で nova.astrometry.net に送るとき、**`publicly_visible = "n"`(公開しない)を付ける**。Rust 版と Python 版(ノートブックを含む)の両方。文書に「nova に送ったものは第三者に見られることがある」と書く | 下のとおり。Python 版(`dev/zahyou_core.py` の `solve_online`。ノートブックはこれを使う)は native-solver の係が直し、あとで人が取り込む |
+| 6 | オンライン解析で nova.astrometry.net に送るとき、**`publicly_visible = "n"`(公開しない)を付ける**。Rust 版と Python 版(ノートブックを含む)の両方。文書に「nova に送ったものは第三者に見られることがある」と書く | 下のとおり。Python 版(`dev/zahyou_core.py` の `solve_online`。ノートブックはこれを使う)は native-solver の係が直し、あとで人が取り込む(→ native-solver の `b878079` を `53e485e` で取り込み済み。11 節) |
 
 **根拠**(claude-research の調べ物 `notes/zahyou-v7-release-facts-20261016.md`。公式の文書とサーバー・astroquery・gh のソースを読んだだけで、
 nova へ送ったり Release を作ったりはしていない。出典の URL は docs/release-v7.md 0.1 節):
@@ -911,5 +913,106 @@ nova へ送ったり Release を作ったりはしていない。出典の URL �
 
 - 本物の nova の扱い(`"n"` で本当に一覧から隠れるか)は確かめていない(送っていない)。docs/release-v7.md 0 節の残りの 1 に、β の間に一度
   「オンラインのみ」で送って確かめるときの見どころを足した。
-- β の資産のノートブック(`zahyou_v7_beta.ipynb`・`zahyou_engine.py`)は、Python 版の直し(native-solver)を取り込んで `dev/build_nb.py` で
-  作り直すまで、`publicly_visible` を付けずに送る。β を出す前に取り込むこと。
+- ~~β の資産のノートブック(`zahyou_v7_beta.ipynb`・`zahyou_engine.py`)は、Python 版の直し(native-solver)を取り込んで `dev/build_nb.py` で
+  作り直すまで、`publicly_visible` を付けずに送る。β を出す前に取り込むこと。~~ → 2026-10-16 に決着: `b878079` を `53e485e` で取り込み、
+  `dev/build_nb.py` で作り直した。β1(`8b7060c`)と β2(`0b73d36`)の `zahyou_engine.py` は `solve_online` で `publicly_visible: "n"` を付ける。
+
+## 11. 2026-10-17 の保守(試験の正解データ・試験の一時フォルダー・自己診断の記憶・文書と版)
+
+β2 を出したあとに残りの作業を洗い出し、ユーザーの判断が要らず、コードと文書だけで済むものを直した(push・タグ・Release はしていない)。
+commit は `37adbc4`(正解データ)・`0b394e3`(一時フォルダー)・`bd0ecca`(自己診断の記憶)と、この節を書いた文書と版の試験の commit。
+
+### 11.1 試験の正解データをリポジトリの外の残る場所へ
+
+- WSL 版 astrometry.net の正解(`oracle`: 366 ファイル・4,944,704 バイト。`tests-data`: 159 ファイル・160,570,516 バイト)が、作ったときの
+  Claude の一時の作業場所(scratchpad。いずれ消える)にしか無く、`rs/testdata/gen_pipeline.py` の `--oracle` の既定と
+  `dev/solver_truth.json` の `sources` がそこを指していた(`--oracle` の既定は作者のホームの絶対パスでもあった)。
+- **写し先は `%USERPROFILE%\Documents\claude\zahyou\testdata\{oracle,tests-data}`**(リポジトリの外)。全ファイルの sha256 を元と照合して一致
+  (写し先の `SHA256SUMS.txt` に 525 行。`sha256sum -c` で照合できる)。元は消していない。写し先の `README.md` に出どころと使うものを書いた。
+- 置き場所の比べ方(作者の撮った画像の写し(`tests-data\truth\<tag>\image.fits` など)を含むので、リポジトリに入れない前提):
+
+| 候補 | 判断 |
+|---|---|
+| リポジトリの中の .gitignore の下(`rs/target-*` など) | 採らない。`cargo clean`・`git clean -fdx`・ワークツリーの削除で消え、.gitignore を直したときに作者のデータが commit に入りうる |
+| `Documents\GitHub\zahyou-testdata`(リポジトリの横) | 採らない。バックアップが無く、リポジトリを置く場所に git でないフォルダーが混ざる |
+| R:(TrueNAS の `tank/TrueNAS`) | 採らない。試験が NAS につながることに依存し、R: は Nextcloud の外部ストレージとして Web からも見える |
+| `%LOCALAPPDATA%\zahyou` | 採らない。アプリの記憶と設定の置き場所で、試験はここを一時へ向けて回す決まり |
+| **`Documents\claude\zahyou\testdata`** | **採った**。作者の作業フォルダーの zahyou の材料(ブログの下書きなど)の横。試験の画像の決まり `$ZAHYOU_TEST_IMAGES/Documents/claude/…` がすでに同じ形で使っている(nextcloud-fitsviewer の見本の FITS)。毎日の暗号化バックアップの対象で、`.fits` と 5 MiB 超えを除く WCS・JSON・PNG(約 13 MB)が入る |
+
+- ソースには作者のホームの絶対パスを書かない: `gen_pipeline.py` の `--oracle` の既定は `$ZAHYOU_ORACLE`、無ければ `$ZAHYOU_TEST_IMAGES`
+  (無ければ `~`)の下の `Documents/claude/zahyou/testdata/oracle`。同じファイルの Python 版のリポジトリ(`$ZAHYOU_PY_REPO`、無ければ
+  `~/Documents/GitHub/zahyou`)と試験画像(`$ZAHYOU_TEST_IMAGES/Downloads/…`)も同じ形にした。この PC では前と同じパスになる。
+  `dev/solver_truth.json` の `sources` も同じ決まりのパスで書き、置き場所の説明(`where`)を足した。
+- 確かめ: 写した oracle で `gen_pipeline.py` を一時の写しから走らせ(34 秒)、正解 WCS から作る値(`pipeline_run.json` の `wcs_cards` と
+  各 run の `oracle_cards`、`pipeline_summary.json` の全部)がリポジトリの値と同じになった。`pipeline_scale.json`・`pipeline_run.json` の
+  ほかの値は、Python 版(native-solver)の新しいログの文と星図データの案内の文で変わる(今回は作り直していない)。
+- 残り: ほかの生成スクリプト(`gen_index.py`・`gen_net.py`・`gen_plot.py`・`gen_wcs.py`・`gen_solver.py`・`bench_index.py`・
+  `app/testdata/gen_run_solver.py`)、Rust の試験(`zahyou-solver/tests/common`・`pipeline.rs`・`ui/gui_selftest.rs`・`zahyou-net/tests/common`)、
+  `gui/test_*.py` には、作者のホームの絶対パスが既定値としてまだ約 25 か所残る。生成した `pipeline_run.json` の `image` も絶対パス
+  (Rust の試験はこれをそのまま開く)。配る exe には入らない(試験と生成スクリプトだけ)。
+
+### 11.2 zahyou-net の試験が一時フォルダーを残さない
+
+- 試験の `temp_dir` は `%TEMP%\zahyou-net-tests\<名前>-<pid>` を作るだけで消しておらず、試験を回すたびにたまっていた(511 個・75 MB)。
+- `temp_dir` は `TempDir`(`&Path` として使え、値が消えるときに中身ごと消す)を返すようにした。試験が落ちて巻き戻るときは、中を調べられるよう
+  消さずに場所を出す。親の `zahyou-net-tests` は、並んで走るほかの試験とぶつからないよう消さない。
+- `ZAHYOU_OFFLINE_TESTS=1` で `cargo test -p zahyou-net -- --skip live` を回し、前後でフォルダーの数が変わらない(511 → 511、空から回して 0 → 0)。
+- すでに残っていた 511 個は、全部が試験の名前(`temp_dir("…")` の 28 種と、点検で一度だけ作られた `verify-v1`〜`v3`)に `-<pid>` が付いたものと
+  確かめて消した(一覧は共有のノートのフォルダーの `zahyou-net-tests-leftovers-20261017.tsv`)。
+- ほかの crate(zahyou-image・zahyou-solver)の試験の一時フォルダーは、cargo の `CARGO_TARGET_TMPDIR`(target の下)に固定の名前
+  (`zahyou-image-tests\<sub>`・`zahyou-solver-tests\<sub>`)で作るので、回すたびに増えはしない。
+
+### 11.3 `--selftest` は利用者の記憶(cache.json)も一時へ向ける
+
+- 以前の `--selftest` は gui.json だけを一時へ向け、cache.json は利用者の `%LOCALAPPDATA%\zahyou\cache.json` を読み書きしていた
+  (Python 版の自己診断に合わせ、解けた画素スケールを覚える形。rs/README.md に「cache.json は向けない」と書いてあった)。
+  手順書は 3 つの環境変数を一時へ向けるよう書いていたが、付け忘れると、自己診断の画像の機材の画素スケールと目標の座標が利用者の記憶に足され、
+  結果も記憶で変わる(覚えていれば 1.595′、空なら 1.594′。8.2 節)。手順書の書き方では足りないと判断し、exe の側で直した。
+- `zahyou_net::cache::override_path`(プロセスの cache.json を差し替える。1 回だけ、ZAHYOU_CACHE より優先)を足し、`--selftest` は
+  ZAHYOU_CACHE が無ければ `%TEMP%\zahyou-selftest-<pid>-cache.json`(空から)へ向けて、終わったら消す。ZAHYOU_CACHE があればそちら
+  (覚えた値で確かめたいときは、利用者の cache.json の写しを指す)。画面の解析(`bridge::run` → `pipeline::run`)も `cache_path()` を通るので、
+  画面の項目の解析にも効く。`--shot`・`--first-frame` は今までどおり gui.json だけを向ける。
+- 試験: `app/tests/selftest_isolation.rs` が、ZAHYOU_CACHE・ZAHYOU_SETTINGS を外し、LOCALAPPDATA と TEMP を試験のフォルダーへ向けて本物の exe で
+  `--selftest`(リポジトリの `app/testdata/few_two.fits`、オフライン、起動時の更新の確認はつながらないプロキシ `0.0.0.0:9` で止める)を走らせ、
+  `%LOCALAPPDATA%\zahyou` ができないこと・一時の記憶が残らないことを見る。直す前の exe で落ちる(`%LOCALAPPDATA%\zahyou` を作った)ことを確かめた。
+  ほかに `zahyou-net/tests/cache_override.rs`(差し替えはプロセス全体に効くので 1 本だけのファイル)と、行き先を決める関数の試験。
+- 実写(`Capture_00001 00_10_33.fits`)で debug の exe を 3 つの環境変数なしで `--selftest --offline`: **25/25**・rc=0、0.916′ 東・1.304′ 北・
+  1.4610″/px(手順書の「空の cache.json」の値と同じ)、一時の LOCALAPPDATA と TEMP は空のまま。
+- 使われていなかった `selftest::selftest()`(画面の項目なしの入口。`#[allow(dead_code)]`)を消した。
+
+### 11.4 文書と版の試験
+
+- **版の試験**: `version_text` は `if 版 == "7.0.0-beta.2" { … }` の形で版の文字を持ち、版を上げて直し忘れると条件が外れて黙って通っていた。
+  版の文字を試験から外し、cargo が分けた大・中・小・プレリリースと `parse_version` の読み方が同じかを見る形にした。さらに
+  `version_in_docs_matches_cargo` を足した: README・`dev/make_manual.py`・`dev/nb_main.py`・`zahyou_engine.py` の「数.数.数-beta.数」をすべて拾い、
+  Cargo.toml の版と違えば場所を出して落ちる(README の 1 か所を古い版にして落ちることを確かめた)。`NB_VERSION` も見る。
+- `docs/release-v7.md` 2 節: 版を上げるときに直す場所を全部(Cargo.toml・Cargo.lock・`NB_VERSION` → build_nb.py・make_manual.py の 3 か所・
+  README の 8 行・app-help.png の撮り直し・マニュアルの組み直し)と、直し忘れたときに何が止めるかの表にした。
+- `docs/release-v7.md` 8 節の 3: 「v6 の Release 本文の `main` を `v6` に置き換える」は成り立たない(タグ `v6` = `ecf7618` の木に `docs/`・`gui/`・
+  `LICENSE`・`THIRD-PARTY-NOTICES.md` が無く、本文のリンク 13 個のうち `main` を含む 12 個が全部 404 になる)。固定先を v6 の exe を建てた木と
+  同じ木の `b25a42f`(40 桁の SHA。読める名前が要るなら新しいタグ)に直し、README の見出しへのリンクも固定する形にした。`3936e02` はどのブランチにも
+  無いので使わない。
+- `docs/release-v7.md` 0 節・6 節と、この文書の 8.4・10.10: 「深い検出の同点の順」と「Python 版の公開しない指定をあとで取り込む」は
+  `7922b07`・`b878079` を `53e485e` で取り込んで済んでいたので、決着を書いた。
+- `docs/release-v7.md` 4 節・`rs/README.md`: `--selftest` が cache.json も一時へ向けるようになったことを書いた(11.3 節)。
+- 2 節の依存の図に `image` ← `plot` と `wcs` ← `image` を足した。`zahyou-solver/src/lib.rs` の「code_ball の問い合わせ 2048 個」を実装の
+  `BALL_CHUNK` = 512 に合わせた(Python は 2048)。
+- `dev/README.md`: 「この版(v7-dev)」を v7 に、マニュアルの節を v4 に(v3 の本文のままという記述と、星図データの配置の「2.3」→ v4 の 4.4)、
+  同梱物の表示の節は Python の exe 用で、配る exe のものは `rs/THIRD-PARTY-NOTICES.md` だと書いた。`dev/make_index_zips.py` の説明の「2.3」も同じ。
+- `gui/README.md`: 冒頭に「いま配っている v7 の exe はこのフォルダーのものではない(Rust 版は rs/)」と、ここが v6 と試作版の Python の画面の記録だと書いた。
+
+### 11.5 試験(実測)
+
+同じ機械(Core Ultra 7 265K)。cargo の試験は ZAHYOU_CACHE・ZAHYOU_SETTINGS・LOCALAPPDATA を一時のフォルダーへ向け、`ZAHYOU_OFFLINE_TESTS=1`。
+
+| 試験 | 結果 |
+|---|---|
+| `cargo test -p zahyou -p zahyou-net -p zahyou-solver -- --skip live` | **164 本通過・失敗 0**(zahyou 82・zahyou-net 46・zahyou-solver 36。無視 9 本は既定どおり回していない)。1 分 31 秒 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | 指摘 0 |
+| `tools/test_tools.py`・`tools/gen_notices.py --check`・`tools/check_licenses.py` | 15 本通過・最新(クレート 213 個)・許可リストの外なし |
+| `tools/test_make_release_assets.py`(β2 の exe を `ZAHYOU_RELEASE_EXE` で渡した) | 31 本通過 |
+| 試験の前後の `%TEMP%\zahyou-net-tests` | 0 個 → 0 個 |
+| 利用者の `%LOCALAPPDATA%\zahyou` の cache.json・gui.json | sha256 は作業の前後で同じ |
+
+- 変えていない crate(zahyou-wcs・zahyou-index・zahyou-image・zahyou-plot)の試験と、`--include-ignored` の重い試験は回していない。
+  exe の release ビルドはしていない(配る exe は β2 のまま)。

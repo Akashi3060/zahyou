@@ -33,7 +33,8 @@
 | `nb_main.py` | `run()` 本体 |
 | `build_nb.py` | 上を組み立てて .ipynb と zahyou_engine.py を書き出す |
 
-**この版（v7-dev）で消したもの**: `setup_wsl.ps1`（WSL へ astrometry.net を入れる）、
+**v7 で消したもの**（試作の間は `v7-dev` と呼んでいた。ノートブック版の版は今は `nb_main.py` の `NB_VERSION` で、
+exe と同じ版。版を上げるときの直し方は [../docs/release-v7.md](../docs/release-v7.md) の 2 節）: `setup_wsl.ps1`（WSL へ astrometry.net を入れる）、
 `test_wsl_e2e.py`（本物の WSL の solve-field で解く）、`test_offline_sim.py`（solve-field をスタブに替えた試験）。
 エンジンからは WSL を呼ぶ関数（`_run`・`_bash`・`wsl_available`・`to_solver_path`・`run_solve_field`・
 `_wcs_from_dir`・`_clean_outputs`）と、solve-field に渡すファイルを書く `write_xylist`・`write_solver_fits` を消した。
@@ -157,7 +158,7 @@ python make_index_zips.py 5204 5203 5202 --out C:\AstrometryData\dist
 ```
 
 段ごとに `AstrometryData-index-<段>.zip` を作る。中身は `AstrometryData/index-....fits`
-なので、`C:\` 直下に展開すればマニュアル 2.3 の配置になる。
+なので、`C:\` 直下に展開すればマニュアル 4.4 の配置になる（v4。v3 では 2.3）。
 段ごとの README と `SHA256SUMS.txt` も一緒に出力する。
 中身の星のデータには元の星表（Tycho-2 / Gaia DR2）の条件がかかる
 （[../THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)）。zip の中の README には、その条件
@@ -167,10 +168,15 @@ python make_index_zips.py 5204 5203 5202 --out C:\AstrometryData\dist
 ## マニュアル PDF
 
 ```
-python make_manual.py                 # ../天体画像解析プログラム「zahyou」導入・運用マニュアルv3.pdf
+python make_manual.py                 # ../天体画像解析プログラム「zahyou」導入・運用マニュアルv4.pdf
 ```
 
-マニュアルの本文は v6（WSL を使う版）のまま。試作版に合わせた書き直しはまだしていない。
+マニュアル v4 は v7（デスクトップ版は Rust の exe、いまはβ版）の本文。v6（WSL を使う版）の v3 の PDF は
+リポジトリ直下に残してある（配布ページが v6 のまま。[../docs/release-v7.md](../docs/release-v7.md) の 8 節）。
+作成日時などを固定して組む（ReportLab の `invariant`）ので、同じ `make_manual.py` とフォントからは同じバイトの PDF になる。
+`make_manual.py` を直したら PDF も組み直して一緒に commit する（`rs/tools/make_release_assets.py` の manual の検査が、
+組み直したものとリポジトリの PDF をバイト単位で比べる）。表紙と 9.1 に版の文字があるので、版を上げたら直す
+（release-v7.md の 2 節。直し忘れは試験 `version_in_docs_matches_cargo` が見つける）。
 
 | ファイル | 中身 |
 |---|---|
@@ -189,6 +195,9 @@ python make_manual.py                 # ../天体画像解析プログラム「z
 python make_notices.py                # ../THIRD-PARTY-NOTICES.md を書き出す
 python make_notices.py --check        # 中身が古くなっていないか見るだけ
 ```
+
+これは Python の画面を固めた exe（`gui/`、PyInstaller。v6 と試作版）とリポジトリ直下の `THIRD-PARTY-NOTICES.md` 用。
+配っている v7 の exe（Rust）の表示は `rs/THIRD-PARTY-NOTICES.md` で、`rs/tools/gen_notices.py` が作る（release-v7.md の 3 節）。
 
 ライブラリの表は、建てた exe の TOC（`gui/build/onefile/zahyou/Analysis-00.toc`）から作る。
 表の前後の文（出典・星図データの条件・Gaia の謝辞）は `make_notices.py` の `HEAD` / `TAIL` に書いてあるので、

@@ -22,7 +22,7 @@ use crate::APP_VER;
 
 pub const APP_NAME: &str = "zahyou";
 
-/// 起動したときのログの 1 行目(例「zahyou v7.0.0-beta.1 (β版・Rust 版)   フォント: …」。正式版なら「(Rust 版)」)。
+/// 起動したときのログの 1 行目(例「zahyou v7.0.0-beta.N (β版・Rust 版)   フォント: …」。正式版なら「(Rust 版)」)。
 /// 窓を開いていれば、次の行に描き方と GPU(`RENDER_INFO`)を書く。
 /// 解析ログの見出し(pipeline の「  zahyou 版   画像名」)は Python の基準値と比べる行なので、そちらには添えない
 pub fn startup_line(fonts: &str) -> String {

@@ -1597,17 +1597,100 @@ mod tests {
         // ログの見出し・画面の版名・exe の ProductVersion(build.rs)は同じ「v + パッケージの版」
         assert_eq!(v, crate::APP_VER);
         assert_eq!(v, format!("v{}", env!("CARGO_PKG_VERSION")));
-        if env!("CARGO_PKG_VERSION") == "7.0.0-beta.2" {
-            assert_eq!(v, "v7.0.0-beta.2");
-        }
-        // 更新の確認が版を読めること(読めないと、正式版の扱い = GitHub の latest だけを見ることになる)
+        // 版の文字はここに書かない。以前は `if 版 == "7.0.0-beta.2" { … }` の形で、版を上げて直し忘れると条件が外れ、
+        // 黙って通っていた。代わりに cargo が分けた大・中・小・プレリリースと、更新の確認の読み方が同じかを見る
+        // (読めないと、正式版の扱い = GitHub の latest だけを見ることになる)。文書に書いた版は次の試験
         let parsed = zahyou_net::update::parse_version(&v).unwrap_or_else(|| panic!("版名を読めません: {v}"));
-        assert_eq!(parsed.major, 7, "{v}");
-        // β版(プレリリース)なら、更新の確認は GitHub のプレリリースも含めた一覧から v7 の新しいものを探す
+        let num = |s: &str| s.parse::<u64>().unwrap();
+        assert_eq!(
+            (parsed.major, parsed.minor, parsed.patch),
+            (
+                num(env!("CARGO_PKG_VERSION_MAJOR")),
+                num(env!("CARGO_PKG_VERSION_MINOR")),
+                num(env!("CARGO_PKG_VERSION_PATCH"))
+            ),
+            "{v}"
+        );
+        assert_eq!(parsed.pre.join("."), env!("CARGO_PKG_VERSION_PRE"), "{v}");
+        // β版(プレリリース)なら、更新の確認は GitHub のプレリリースも含めた一覧から同じ大きな版の新しいものを探し、
+        // 題・起動のログ・［使い方］に「β版」と添える
         if env!("CARGO_PKG_VERSION_PRE").starts_with("beta") {
             assert!(parsed.is_prerelease(), "{v}");
             assert_eq!(zahyou_net::update::prerelease_label(&v), Some("β版"));
         }
+    }
+
+    /// 版を上げたときに直す文書(docs/release-v7.md 2 節)が、Cargo.toml の版と同じ版を書いているか。
+    /// 「数.数.数-beta.数」の形をすべて拾い、今の版と違うものがあれば落とす(版の文字は試験に書かない)。
+    /// 正式版(プレリリースの部分なし)にしたら、β の版の文字が 1 つでも残っていれば落ちる
+    /// (README とマニュアルを正式版の形にする。docs/release-v7.md 8 節の 2)。`-beta.N` の書き方は拾わない。
+    #[test]
+    fn version_in_docs_matches_cargo() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+        let ver = env!("CARGO_PKG_VERSION");
+        let mut bad = Vec::new();
+        let mut seen = 0;
+        for rel in ["README.md", "dev/make_manual.py", "dev/nb_main.py", "zahyou_engine.py"] {
+            let text = std::fs::read_to_string(repo.join(rel)).unwrap_or_else(|e| panic!("{rel} を読めない: {e}"));
+            for (line_no, line) in text.lines().enumerate() {
+                for tok in beta_versions(line) {
+                    seen += 1;
+                    if tok != ver {
+                        bad.push(format!("{rel}:{}: {tok}", line_no + 1));
+                    }
+                }
+            }
+        }
+        assert!(bad.is_empty(), "Cargo.toml の版 {ver} と違う版が書いてある(docs/release-v7.md 2 節):\n{}", bad.join("\n"));
+        if env!("CARGO_PKG_VERSION_PRE").starts_with("beta") {
+            assert!(seen >= 4, "β の版の文字が見つからない({seen} 個)。拾い方が壊れていないか");
+        }
+        // ノートブック版の見出しの版は、β でも正式版でも "v" + 同じ版
+        let nb = std::fs::read_to_string(repo.join("dev").join("nb_main.py")).unwrap();
+        assert!(nb.contains(&format!("NB_VERSION = \"v{ver}\"")), "dev/nb_main.py の NB_VERSION が v{ver} でない");
+        let engine = std::fs::read_to_string(repo.join("zahyou_engine.py")).unwrap();
+        assert!(
+            engine.contains(&format!("NB_VERSION = \"v{ver}\"")),
+            "zahyou_engine.py の NB_VERSION が v{ver} でない(python dev/build_nb.py で作り直す)"
+        );
+    }
+
+    /// 行の中の「数.数.数-beta.数」をすべて返す(前後が英数字・"." なら別の語の一部とみなして拾わない)。
+    fn beta_versions(line: &str) -> Vec<&str> {
+        let b = line.as_bytes();
+        let mut out = Vec::new();
+        let mut from = 0;
+        while let Some(i) = line[from..].find("-beta.").map(|i| i + from) {
+            from = i + 1;
+            let mut s = i;
+            while s > 0 && (b[s - 1].is_ascii_digit() || b[s - 1] == b'.') {
+                s -= 1;
+            }
+            let mut e = i + "-beta.".len();
+            while e < b.len() && b[e].is_ascii_digit() {
+                e += 1;
+            }
+            let core = &line[s..i];
+            let parts: Vec<&str> = core.split('.').collect();
+            let word_before = s > 0 && b[s - 1].is_ascii_alphanumeric() && b[s - 1] != b'v';
+            let word_after = e < b.len() && (b[e].is_ascii_alphanumeric() || (b[e] == b'.' && b.get(e + 1).is_some_and(u8::is_ascii_digit)));
+            if e > i + "-beta.".len()
+                && parts.len() == 3
+                && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|c| c.is_ascii_digit()))
+                && !word_before
+                && !word_after
+            {
+                out.push(&line[s..e]);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn beta_versions_finds_only_full_versions() {
+        assert_eq!(beta_versions("いまは β版（7.0.0-beta.2）。v7.0.0-beta.10 と v7.0.0-beta.N"), vec!["7.0.0-beta.2", "7.0.0-beta.10"]);
+        assert_eq!(beta_versions("releases/tag/v7.0.0-beta.3)"), vec!["7.0.0-beta.3"]);
+        assert!(beta_versions("正式版 7.0.0 と 0.0-beta.1 と x7.0.0-beta.1 と 7.0.0-beta.1a").is_empty());
     }
 
     #[test]

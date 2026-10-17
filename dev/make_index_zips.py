@@ -6,7 +6,7 @@ C:\\AstrometryData の index ファイルを、画角の段ごとに zip へま�
 
 利用者が「自分の画角に必要な段だけ」落とせるように、scale ごとに分ける。
 zip の中身は AstrometryData/index-....fits なので、
-C:\\ 直下に展開すればマニュアル 2.3 の配置になる。
+C:\\ 直下に展開すればマニュアル 4.4 の配置になる(v4。v3 では 2.3)。
 """
 from __future__ import annotations
 

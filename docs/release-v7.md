@@ -24,7 +24,7 @@ main に統合してふつうの Release で出す。** 1〜7 節がβ版、8 �
 | 描画 | **DirectX 12 を既定**(主の画面の GPU・小さな塊)。開けなければ OpenGL → ソフトウェア描画(WARP) | 手で選ぶ引数 `--dx12` / `--glow` / `--gpu display\|low\|high\|warp`。想定は「Windows 11 が動く、RAM 8 GB 以上のノート PC」 |
 | v6 からの移り方 | **v7 は当面β版。v6 の自動更新の対象にしない** | 版 7.0.0-beta.N をプレリリースで出す(v6 の更新係が見る latest に出ない)。β 自身は v7 の新しいβ版と正式版を探す |
 | 画像を外へ送ること | **同意を取らずに送ってよい**(今の動きのまま。v6 と同じ) | 方法が「自動」か「オンラインのみ」で、キーがあり、ネットにつながっていると、まず検出した星の位置(と画像の大きさ・手がかり)を、それで解けなければ画像ファイルそのもの(ファイル名も)を nova.astrometry.net へ送る。送らない方法(方法を「オフラインのみ」/ API キーの欄を空)と一緒に、README・マニュアル 2.3・［使い方］タブに書いた |
-| nova へ送るときの公開の扱い(3 回目) | **公開しない指定 `publicly_visible = "n"` を付ける**(Rust 版と Python 版(ノートブックを含む)の両方)。文書には「nova に送ったものは第三者に見られることがある」と書く | Rust: `zahyou_net::nova::PUBLICLY_VISIBLE`・`private_settings`(星の位置のリストと画像の両方の request-json の先頭に付ける。呼ぶ側が別の値を渡しても `"n"`)。Python: `dev/zahyou_core.py` の `solve_online` の設定(同じく先頭。native-solver で直し、あとで取り込む)。試験は偽の nova が受け取った本文と astroquery の記録(`rs/testdata/gen_net.py`)で。README・マニュアル 2.3・［使い方］タブ・rs/README.md に「公開しない指定を付けて送る。ただし第三者に見られることがある」を足した(0.1 節の注意のとおり、`"n"` でも完全には隠れない場合がある) |
+| nova へ送るときの公開の扱い(3 回目) | **公開しない指定 `publicly_visible = "n"` を付ける**(Rust 版と Python 版(ノートブックを含む)の両方)。文書には「nova に送ったものは第三者に見られることがある」と書く | Rust: `zahyou_net::nova::PUBLICLY_VISIBLE`・`private_settings`(星の位置のリストと画像の両方の request-json の先頭に付ける。呼ぶ側が別の値を渡しても `"n"`)。Python: `dev/zahyou_core.py` の `solve_online` の設定(同じく先頭。native-solver の `b878079` で直し、`53e485e` で native-rs に取り込んだ。β1 の資産から入っている)。試験は偽の nova が受け取った本文と astroquery の記録(`rs/testdata/gen_net.py`)で。README・マニュアル 2.3・［使い方］タブ・rs/README.md に「公開しない指定を付けて送る。ただし第三者に見られることがある」を足した(0.1 節の注意のとおり、`"n"` でも完全には隠れない場合がある) |
 | β の Release の資産 | **exe 以外も付ける**(v6 の Release に合わせる) | `zahyou.exe`・`zahyou_v7_beta.ipynb` と `zahyou_engine.py`・`zahyou-manual-v4.pdf`・`LICENSE.txt`・`THIRD-PARTY-NOTICES.md`(rs/ のもの)・`SHA256SUMS.txt`。`rs/tools/make_release_assets.py` がそろえて検査する(6 節)。ノートブックはエンジンを名前で探すので、改名しても動く(確かめた) |
 
 残っていること:
@@ -84,9 +84,26 @@ Release を作って試したり、nova へ送ったりはしていない。ソ�
 (窓の題・ログ・［使い方］・更新の確認)、exe の版情報(FileVersion `7.0.0-beta.N`・ProductVersion `v7.0.0-beta.N`・数の版 7.0.0.0・
 プレリリースなら VS_FF_PRERELEASE)も付いて変わる。`-beta.N` などのプレリリースの版は、題・起動のログ・［使い方］に「(β版)」が付く。
 
-- β の N を上げるたびにここを直す(`Cargo.lock` の zahyou 自身の版も変わる)。
-- **ノートブック版の版も一緒に直す**: `dev/nb_main.py` の `NB_VERSION`(`"v"` + 同じ版。ログの見出しに出る)→ `python dev/build_nb.py`。
-  食い違うと 6 節の notebook の検査が止める。
+ただし版の文字は exe の外にも書いてある。**版を上げるときに直す場所は全部で次の 7 つ**(β2 の版上げ `0b73d36` で直したものと同じ。
+上から順に):
+
+| | 直す場所 | 直し方 | 直し忘れたら |
+|---|---|---|---|
+| 1 | `rs/Cargo.toml` の `[workspace.package] version` | 手で(`7.0.0-beta.N` / 正式版は `7.0.0`) | (元) |
+| 2 | `rs/Cargo.lock`(ワークスペースの 7 つの crate の版) | `cargo check --workspace` などで cargo が書き換える(手で直さない)。4 節の `--locked` より前に済ませる | 4 節の `cargo build --locked` が止まる |
+| 3 | `dev/nb_main.py` の `NB_VERSION`(ノートブック版のログの見出し) | `"v"` + 同じ版 → `python dev/build_nb.py`(直下の `zahyou_engine.py` を作り直す) | 試験 `version_in_docs_matches_cargo` と 6 節の notebook の検査 |
+| 4 | `dev/make_manual.py` の 3 か所(冒頭の説明・表紙の表の「版」の行・9.1 の「ウィンドウの題」) | 手で | 試験 `version_in_docs_matches_cargo` |
+| 5 | `README.md` の 8 行(冒頭の HTML コメント・「いまの v7 はβ版」・Releases へのリンク 3 つ(「まずはこちら」とノートブックは文字と URL の両方、SHA256 の段落は URL だけ)・app-help.png の注記・「起動と大きさ」の表の見出し・「ウィンドウの題」) | 手で。`grep -n "beta\.[0-9]" README.md` で全部出る。exe の大きさと起動の時間は 4 節で建てた exe の実測に | 試験 `version_in_docs_matches_cargo`(数字は分からない) |
+| 6 | `docs/img/app-help.png`(［使い方］の「いまの版」が写る) | 4 節で建てた exe で `python rs/tools/shoot_docs.py --exe … --only app-help`(5 節) | 試験では分からない。撮ったものを目で見る |
+| 7 | マニュアル PDF(`…マニュアルv4.pdf`。4 の文字と 6 の写真を貼っている) | 4 と 6 のあとで `python dev/make_manual.py`(5 節) | 6 節の manual の検査(組み直したものとバイト単位で比べる) |
+
+- 試験 `version_in_docs_matches_cargo`(`rs/app/src/pipeline.rs`)は、README・`dev/make_manual.py`・`dev/nb_main.py`・`zahyou_engine.py` の
+  「数.数.数-beta.数」をすべて拾い、`Cargo.toml` の版と違うものがあれば場所を出して落ちる(`-beta.N` の書き方は拾わない)。
+  正式版(`7.0.0`)にしたら、β の版の文字が 1 つでも残っていれば落ちる(8 節の 2 で README とマニュアルを正式版の形にする)。
+- 試験に版の文字は書かない(2026-10-17 から)。それまでは `version_text` の試験が `if 版 == "7.0.0-beta.2" { … }` の形で版の文字を持ち、
+  版を上げて直し忘れると条件が外れて黙って通っていた(β2 の版上げではこの文字も直す場所の 1 つだった)。今の `version_text` は、
+  cargo が分けた大・中・小・プレリリースと更新の確認の読み方(`parse_version`)が同じかを、版によらず見る。
+- `docs/release-v7.md`(この文書の 10 節の記録)と `docs/rust-port.md` の版の文字は、その時の記録なので直さない。
 - 解析ログの見出しの版名は、Python の基準値と比べるときに伏せてある(10.4 節)ので、版を上げても `run_solver_vs_python` は落ちない。
 - 版を上げた exe を Release より前に動かしても、更新の確認は v6 を勧めない(β は同じ大きな版の新しいものだけを探す。正式版は
   latest が今より古ければ「最新版です」。10.4 節)。
@@ -250,8 +267,9 @@ python rs/tools/make_release_assets.py --exe "$(cygpath -w $EXE)" --out "$(cygpa
   ホームのパスが無いことも確かめる。31 本。4 節の置き換えを付けずに建てた exe なら、ホームのパスの試験が落ちる)。
 - 2026-10-16 に、`7.0.0-beta.1`(help_tab.rs を直したあとの release の exe、14,039,040 バイト)で 4 つの検査が通り、`sha256sum -c` で 6 つとも OK。
   公開しない指定を入れたあと(exe 14,041,088 バイト・マニュアル v4 を組み直したもの)も同じく通った(rust-port.md 10.10)。
-  **ノートブックの資産(`zahyou_v7_beta.ipynb`・`zahyou_engine.py`)は、Python 版の公開しない指定(native-solver)を取り込んで
-  `dev/build_nb.py` で作り直してからそろえる**(取り込む前のものは `publicly_visible` を付けずに送る)。
+  ノートブックの資産(`zahyou_v7_beta.ipynb`・`zahyou_engine.py`)の公開しない指定は、Python 版の直し(native-solver の `b878079`)を
+  `53e485e` で取り込み、`dev/build_nb.py` で作り直してある(β1 の資産から `solve_online` が `publicly_visible: "n"` を付ける。
+  以前ここに「取り込んでからそろえる」と書いていた残りは、これで済んだ)。
 
 SHA256 は Release の本文にも書く(SHA256SUMS.txt を貼る)。正式版では配布ページの `はじめにお読みください.txt` にも書く(8 節)。
 
@@ -306,10 +324,25 @@ gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false --latest=fa
    2〜6 節をやり直す(版を上げると「(β版)」は自然に消える。ノートブックの資産名は `zahyou_v7.ipynb` になる)。
 2. README を正式版の形にする: β版のタグへのリンク(`releases/tag/v7.0.0-beta.N`)を `releases/latest` に戻し、「いまの v7 はβ版です」と
    「v6 とβ版」の段落、ノートブックの入手先の β の注記を書き換える(README 冒頭の HTML コメントに書いてある)。マニュアルの表紙の「版」の行と
-   2.1・9.1・付録 B も同じ。
-3. **v6 の Release 本文の画像を v6 のタグに固定する。** v6 の本文は `raw.githubusercontent.com/Akashi3060/zahyou/main/docs/img/app-*.png`
-   (`app-analyze`・`app-numbers`・`app-prepare`)を見ているので、main の写真を v7 にすると、v6 の Release ページに v7 の画面
-   (WSL の行の無い［準備］タブ)が出る。`main` を `v6` に置き換えた本文で `gh release edit v6 --notes-file …`。**main への統合の前に**行う。
+   2.1・9.1・付録 B も同じ。2 節の試験 `version_in_docs_matches_cargo` が、β の版の文字の残りを場所つきで出す。
+3. **v6 の Release 本文のリンクを、v6 の exe を建てた木に固定する。** v6 の本文のリンクは 13 個で、うち 12 個が `main` を指す
+   (`raw.githubusercontent.com/Akashi3060/zahyou/main/docs/img/` の画面写真 3 枚(`app-analyze`・`app-numbers`・`app-prepare`)と
+   ダウンロードの警告の図 6 枚、`github.com/Akashi3060/zahyou/blob/main/` の `LICENSE`・`THIRD-PARTY-NOTICES.md`・`gui/README.md`)。
+   残りの 1 個は既定のブランチの README の見出し `github.com/Akashi3060/zahyou#動作環境`。main を v7 にすると、v6 の Release ページに
+   v7 の画面(WSL の行の無い［準備］タブ)と v7 の文書が出る。固定した本文で `gh release edit v6 --notes-file …`。**main への統合の前に**行う。
+   - **固定先は `b25a42f74236b2d05bf984993a8b4b44eaf4ee00`**(今の main の先頭。「更新したあと新しい exe が起動しない問題を直した (#23)」、
+     2026-09-18)。v6 の配っている exe を建てた木と同じ木(木のハッシュ `84dacb9d…`)で、リンク先の 12 個が全部ある(2026-10-17 に
+     `git cat-file -e b25a42f:<パス>` で確かめた)。URL の `main` を 40 桁の SHA に置き換える
+     (`raw.githubusercontent.com/Akashi3060/zahyou/b25a42f74236b2d05bf984993a8b4b44eaf4ee00/docs/img/app-analyze.png`、
+     `github.com/Akashi3060/zahyou/blob/b25a42f74236b2d05bf984993a8b4b44eaf4ee00/LICENSE`)。README の見出しは
+     `github.com/Akashi3060/zahyou/blob/b25a42f74236b2d05bf984993a8b4b44eaf4ee00/README.md#動作環境`(b25a42f の README に `# 動作環境` がある)。
+     読める名前にしたければ、b25a42f に新しいタグ(例 `v6-docs`)を付けて push し、SHA の代わりに使う(タグもユーザーの了承のあとで)。
+   - **タグ `v6`(= `ecf7618`、2026-08-31)には固定しない。** その木には `docs/`・`gui/`・`LICENSE`・`THIRD-PARTY-NOTICES.md` が無く、
+     `main` を `v6` に置き換えると 12 個が全部 404 になる(以前のこの節は「`main` を `v6` に置き換える」と書いていたが、成り立たない)。
+     `v6` はブランチ(`fecece4`)とタグの両方にある名前でもあり、`git` でも「ambiguous」と言われる。
+   - **`3936e02` も使わない。** v6 の exe を建てた PR #23 の commit そのもの(木は b25a42f と同じ)だが、main には squash で `b25a42f` として入り、
+     `3936e02` はどのブランチ・タグからもたどれない。GitHub 側でいつまで引けるか分からない。
+   - 書き換えたら、本文のリンクを 13 個とも開いて 200 になることを確かめてから出す。
 4. タグ `v7.0.0`(main の統合したあとの commit)で **ふつうの Release(Latest)**。ここで v6 の全員と β の利用者に入れ替えが出る(1 節)。
    新しく公開する正式の Release は API の既定で latest になるが、Docs の画面の説明と書き方が食い違っている(0.1 節)ので、**`--latest` を明示する**。
    β と同じく下書きで作って中身を見てから出す(資産は 6 節。ノートブックは `zahyou_v7.ipynb`)。下書きは latest にできないので、

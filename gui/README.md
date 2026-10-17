@@ -1,4 +1,12 @@
-# zahyou デスクトップ版 (exe)
+# zahyou デスクトップ版 (Python の画面。v6 と試作版 v7-dev)
+
+> **いま配っている v7 の exe (β版) は、このフォルダーのものではありません。**
+> v7 のデスクトップ版は Rust で書き直したもので、ソースは [`rs/`](../rs/)
+> (説明は [rs/README.md](../rs/README.md)、配り方は [docs/release-v7.md](../docs/release-v7.md))。
+> ここにあるのは v6 まで配っていた Python (tkinter) の画面と、それを PyInstaller で exe に固めるスクリプト、
+> その試作版 (`v7-dev`) で、記録と試しのために残しています (残すかは release-v7.md の 9 節)。
+> 使い方は利用者向けの [README](../README.md) を見てください。この下の「102 MB」「起動に 4 秒」「試作版は更新の確認をしない」
+> などは、この Python の exe の話です。
 
 ノートブックを開かずに、**exe をダブルクリックするだけ**で使える版です。
 解析そのものはノートブック版とまったく同じ ([`zahyou_engine.py`](../zahyou_engine.py)
