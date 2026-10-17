@@ -21,8 +21,9 @@
  "truth_choice": "同じ画像の正解が 2 組あるもの(real_orig・3I_00010・phaethon_00001)は、zahyou の引数のまま solve_offline を呼んだ oracle を採り、tests-data(スケールを 0.8〜1.25 倍に絞るなど引数が違う)は alt に入れた。2 組の WCS はカードの値まで同じ(alt.vs_truth が 0)。記録されていた中心が 0.03″ 違ったのは、tests-data の集計が EQUINOX = 2000 のヘッダーを astropy で FK5 と読み、.icrs で ICRS へ変換したため (フレームの差 0.0316″)。索引の星は ICRS で、zahyou の normalize_wcs_header も RADESYS = 'ICRS' にするので、ここでは変換しない値を正解にした(tests-data だけの 4 件の reported_vs_truth に出ている 0.02〜0.03″ も同じ理由)",
  "truth_tan_note": "truth_tan は solve-field が一致させた星(.corr)に TAN だけを当て直した参考値。正解は 2 次の SIP なので、TAN だけの解は完全でも中心で 0.2〜0.6″(星図は 1.3″)・回転で最大 0.05° ほど正解とずれる(2 次の歪みの平均が TAN の定数項に入るため)。合否は truth で決め、truth_tan は外れたときの切り分けに使う",
  "sources": {
-  "oracle": "scratchpad\\oracle\\truth.json(2026-10-15 14:30。zahyou_engine.py の solve_offline をそのまま呼び、--match none だけ外した)",
-  "tests-data": "scratchpad\\tests-data\\regression_manifest.json・truth_all.json・truth\\<tag>\\job.wcs"
+  "oracle": "$ZAHYOU_TEST_IMAGES/Documents/claude/zahyou/testdata/oracle/truth.json(2026-10-15 14:30。zahyou_engine.py の solve_offline をそのまま呼び、--match none だけ外した)",
+  "tests-data": "$ZAHYOU_TEST_IMAGES/Documents/claude/zahyou/testdata/tests-data/regression_manifest.json・truth_all.json・truth/<tag>/job.wcs",
+  "where": "どちらもリポジトリに入れない作者のデータ(画像の写しを含む)。作ったときの一時の作業場所から 2026-10-17 に写し、全ファイルの sha256 を照合した(同じフォルダーの SHA256SUMS.txt)。$ZAHYOU_TEST_IMAGES は試験の画像と同じ決まり(無ければホームフォルダー)。docs/rust-port.md 11 節"
  },
  "target_offset_baseline": {
   "image": "real_orig",

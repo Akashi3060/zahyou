@@ -3,6 +3,12 @@ app の pipeline.rs / scale.rs の照合用の値を Python 版(基準実装)で
 
   python -B gen_pipeline.py [--zahyou <Python 版のリポジトリ>] [--oracle <WSL 版の正解 WCS のフォルダー>]
 
+既定の場所は環境変数とホームフォルダーから組み立てる(作者のホームの絶対パスをソースに書かない):
+  --zahyou   $ZAHYOU_PY_REPO、無ければ ~/Documents/GitHub/zahyou
+  --oracle   $ZAHYOU_ORACLE、無ければ $ZAHYOU_TEST_IMAGES(無ければ ~)/Documents/claude/zahyou/testdata/oracle
+             (WSL 版 astrometry.net の正解。リポジトリには入れない作者のデータ。docs/rust-port.md 11 節)
+  試験画像   $ZAHYOU_TEST_IMAGES(無ければ ~)/Downloads/Capture_00001 00_10_33.fits(試験の画像と同じ決まり)
+
 書くもの(このスクリプトと同じフォルダー):
   pipeline_format.json   六十進の書き方(astropy の to_string)・{:g}・{:.Nf}・赤経赤緯の文字列の読み方(SkyCoord)
   pipeline_scale.json    estimate_pixel_scale・rig_key・implied_focal_length・index_coverage・blind_scale_bounds・
@@ -41,10 +47,12 @@ from astropy.coordinates import SkyCoord, Angle               # noqa: E402
 from astropy.io import fits                                   # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_ZAHYOU = r"C:\Users\yoshi\Documents\GitHub\zahyou"
-DEFAULT_ORACLE = (r"C:\Users\yoshi\AppData\Local\Temp\claude\C--Users-yoshi-Documents-claude"
-                  r"\fb71678c-4525-4bf2-8222-ab7e97f0e7b4\scratchpad\oracle")
-TEST_IMAGE = r"C:\Users\yoshi\Downloads\Capture_00001 00_10_33.fits"
+HOME = os.path.expanduser("~")
+IMAGES = os.environ.get("ZAHYOU_TEST_IMAGES") or HOME
+DEFAULT_ZAHYOU = os.environ.get("ZAHYOU_PY_REPO") or os.path.join(HOME, "Documents", "GitHub", "zahyou")
+DEFAULT_ORACLE = (os.environ.get("ZAHYOU_ORACLE")
+                  or os.path.join(IMAGES, "Documents", "claude", "zahyou", "testdata", "oracle"))
+TEST_IMAGE = os.path.join(IMAGES, "Downloads", "Capture_00001 00_10_33.fits")
 INDEX_DIR = r"C:\AstrometryData"
 TARGET = "UCAC4 660-021020"
 TARGET_RADEC = (61.91199157844, 41.98626242835)   # 手元の cache.json の値(Gaia DR3 で精密化したもの)
