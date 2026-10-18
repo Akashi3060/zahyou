@@ -189,6 +189,10 @@ fn help_lines() -> Vec<(Tag, String)> {
     add(Plain, "どちらも「公開しない」の指定 (publicly_visible = n) を付けて送ります。");
     add(Bold, "ただし、nova.astrometry.net に送ったものは第三者に見られることがあります");
     add(Plain, "(nova の仕組み上、一覧や画像ファイルからは完全には隠れない場合があります)。");
+    add(Plain, "  ・nova のトップや画像の一覧、送ったものの詳細ページには出ません。");
+    add(Plain, "  ・nova の検索ページ・利用者のページには、送った時刻と API キーの持ち主のアカウント名が出ます。");
+    add(Plain, "  ・番号が分かれば、解いた位置と向き・送った星の座標・星を点で描いた絵が見えます。");
+    add(Plain, "星の位置だけで解けたときは、写真そのものは送りません。");
     add(Plain, "送りたくないときは、「方法」を「オフラインのみ」にするか、API キーの欄を空にしてください。");
     add(Muted, "キーは設定 (下の置き場所の gui.json) に覚えます。");
     add(Plain, "");
@@ -216,8 +220,11 @@ fn help_lines() -> Vec<(Tag, String)> {
     add(Plain, "消しても解析には影響しません。設定が初期状態に戻るだけです。");
     add(Plain, "");
     add(Head, "新しい版に入れ替える / やめる");
-    add(Plain, "新しい zahyou.exe を、古いものに上書きするだけです。");
+    add(Plain, "上の「更新を確認」→「更新する」で入れ替えられます。");
+    add(Plain, "手で入れ替えるなら、新しい zahyou.exe を古いものに上書きするだけです。");
     add(Plain, "設定も覚えた座標も引き継がれ、星図データはそのままで構いません。");
+    add(Plain, "v6 から入れ替えたときに横に残る zahyou.exe.bak (v6 の exe、約 102 MB) は、");
+    add(Plain, "この版が動いたら消してかまいません。");
     add(Plain, "v6 までに WSL へ入れた astrometry.net は、もう使いません。");
     add(Plain, "要らなければマニュアル 9 章の手順で消せます。");
     add(Plain, "やめるときは、zahyou.exe と上の置き場所を消してください。");
@@ -382,6 +389,13 @@ mod tests {
         assert!(text.contains("「公開しない」の指定 (publicly_visible = n) を付けて送ります"), "公開しない指定が書かれていない");
         assert!(text.contains("nova.astrometry.net に送ったものは第三者に見られることがあります"), "第三者に見られうることが書かれていない");
         assert!(text.contains("完全には隠れない場合があります"), "公開しない指定でも隠れきらないことが書かれていない");
+        // 2026-10-18 に実サイトで確かめた結果(何が隠れて何が見えるか)と、星の位置で解ければ写真は送らないこと
+        assert!(text.contains("送ったものの詳細ページには出ません"), "隠れるものが書かれていない");
+        assert!(text.contains("API キーの持ち主のアカウント名が出ます"), "見えるものが書かれていない");
+        assert!(text.contains("写真そのものは送りません"), "星の位置で解ければ写真を送らないことが書かれていない");
+        // 正式版(2026-10-18): v6 からボタンで入れ替えた人が最初に読むので、入れ替えの方法と .bak の扱いを書く
+        assert!(text.contains("「更新を確認」→「更新する」で入れ替えられます"), "ボタンでの入れ替えが書かれていない");
+        assert!(text.contains("zahyou.exe.bak"), "v6 の .bak の扱いが書かれていない");
     }
 
     #[test]

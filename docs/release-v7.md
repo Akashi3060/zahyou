@@ -9,8 +9,8 @@ v6 までの手順(`gui/build_exe.ps1` = PyInstaller、`dev/make_notices.py`)を
 ビルドと試験の細かい説明は [../rs/README.md](../rs/README.md)、決定と実測は [rust-port.md](rust-port.md) の 9・10 節
 (β版の出し方の元は 10.7 節)。
 
-**v7 は当面β版(7.0.0-beta.N)を GitHub のプレリリースで出す。1〜2 か月使って安定を確かめてから、正式版 7.0.0 を
-main に統合してふつうの Release で出す。** 1〜7 節がβ版、8 節が正式版。push・タグ・Release・配布ページの更新は、
+**v7 は当初、β版(7.0.0-beta.N)を GitHub のプレリリースで出し、1〜2 か月使って安定を確かめてから正式版 7.0.0 を
+main に統合してふつうの Release で出す、とした。** 1〜7 節がβ版、8 節が正式版。push・タグ・Release・配布ページの更新は、
 どれもユーザーの了承のあとで行う。
 **2026-10-18 にユーザーが「回数については目安程度で、動作に問題が無いことが確認できれば、v7 をリリースしたい」とした。**
 `native-rs` の版は 7.0.0 に上げ、README・マニュアルを正式版の形にした(8 節の 1・2)。残りは 8 節の冒頭(「2026-10-18 の時点」)。
@@ -25,7 +25,7 @@ main に統合してふつうの Release で出す。** 1〜7 節がβ版、8 �
 |---|---|---|
 | API キー | ［解析］タブの「解析」の枠に欄(伏せ字・「表示」・「元に戻す」)。**既定は元のキー(v6 と同じ)** | gui.json の `api_key` に平文で保存。空なら問い合わせない。環境変数 ASTROMETRY_API_KEY は gui.json に `api_key` が無いときの初めの値だけ。キーの値は文書・ログ・画面の文に書かない |
 | 描画 | **DirectX 12 を既定**(主の画面の GPU・小さな塊)。開けなければ OpenGL → ソフトウェア描画(WARP) | 手で選ぶ引数 `--dx12` / `--glow` / `--gpu display\|low\|high\|warp`。想定は「Windows 11 が動く、RAM 8 GB 以上のノート PC」 |
-| v6 からの移り方 | **v7 は当面β版。v6 の自動更新の対象にしない** | 版 7.0.0-beta.N をプレリリースで出す(v6 の更新係が見る latest に出ない)。β 自身は v7 の新しいβ版と正式版を探す |
+| v6 からの移り方 | **v7 は当面β版。v6 の自動更新の対象にしない** | 版 7.0.0-beta.N をプレリリースで出す(v6 の更新係が見る latest に出ない)。β 自身は v7 の新しいβ版と正式版を探す。**→ 2026-10-18 に正式版へ切り替えた(8 節)** |
 | 画像を外へ送ること | **同意を取らずに送ってよい**(今の動きのまま。v6 と同じ) | 方法が「自動」か「オンラインのみ」で、キーがあり、ネットにつながっていると、まず検出した星の位置(と画像の大きさ・手がかり)を、それで解けなければ画像ファイルそのもの(ファイル名も)を nova.astrometry.net へ送る。送らない方法(方法を「オフラインのみ」/ API キーの欄を空)と一緒に、README・マニュアル 2.3・［使い方］タブに書いた |
 | nova へ送るときの公開の扱い(3 回目) | **公開しない指定 `publicly_visible = "n"` を付ける**(Rust 版と Python 版(ノートブックを含む)の両方)。文書には「nova に送ったものは第三者に見られることがある」と書く | Rust: `zahyou_net::nova::PUBLICLY_VISIBLE`・`private_settings`(星の位置のリストと画像の両方の request-json の先頭に付ける。呼ぶ側が別の値を渡しても `"n"`)。Python: `dev/zahyou_core.py` の `solve_online` の設定(同じく先頭。native-solver の `b878079` で直し、`53e485e` で native-rs に取り込んだ。β1 の資産から入っている)。試験は偽の nova が受け取った本文と astroquery の記録(`rs/testdata/gen_net.py`)で。README・マニュアル 2.3・［使い方］タブ・rs/README.md に「公開しない指定を付けて送る。ただし第三者に見られることがある」を足した(0.1 節の注意のとおり、`"n"` でも完全には隠れない場合がある) |
 | β の Release の資産 | **exe 以外も付ける**(v6 の Release に合わせる) | `zahyou.exe`・`zahyou_v7_beta.ipynb` と `zahyou_engine.py`・`zahyou-manual-v4.pdf`・`LICENSE.txt`・`THIRD-PARTY-NOTICES.md`(rs/ のもの)・`SHA256SUMS.txt`。`rs/tools/make_release_assets.py` がそろえて検査する(6 節)。ノートブックはエンジンを名前で探すので、改名しても動く(確かめた) |
@@ -273,7 +273,7 @@ python rs/tools/make_release_assets.py --exe "$(cygpath -w $EXE)" --out "$(cygpa
 - 文字のファイル(.ipynb・.py・.txt・.md)は改行を LF にそろえて書く(作業ツリーが CRLF でも SHA256 が変わらない。`LICENSE.txt` は
   v6 の Release のものと同じ SHA256 になった)。exe と PDF はそのまま写す。
 - 試験: `python -B rs/tools/test_make_release_assets.py`(release の exe があれば `ZAHYOU_RELEASE_EXE` で渡すと版情報・同梱物の表示・
-  ホームのパスが無いことも確かめる。31 本。4 節の置き換えを付けずに建てた exe なら、ホームのパスの試験が落ちる)。
+  ホームのパスが無いことも確かめる。32 本(2026-10-18 に改名の試験を足した)。4 節の置き換えを付けずに建てた exe なら、ホームのパスの試験が落ちる)。
 - 2026-10-16 に、`7.0.0-beta.1`(help_tab.rs を直したあとの release の exe、14,039,040 バイト)で 4 つの検査が通り、`sha256sum -c` で 6 つとも OK。
   公開しない指定を入れたあと(exe 14,041,088 バイト・マニュアル v4 を組み直したもの)も同じく通った(rust-port.md 10.10)。
   ノートブックの資産(`zahyou_v7_beta.ipynb`・`zahyou_engine.py`)の公開しない指定は、Python 版の直し(native-solver の `b878079`)を
@@ -327,7 +327,7 @@ gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false --latest=fa
    gh では `--latest` を明示する(0.1 節。既定でも latest になるはずだが、Docs の説明と API の既定の書き方が食い違っているため)。
 8. 配布ページ(Nextcloud)には β を置かない(v6 の利用者向けのまま)。置くなら 8 節の手順で、v6 と取り違えない名前にする。
 
-## 8. 正式版(7.0.0)を出す(1〜2 か月使って安定を確かめてから)
+## 8. 正式版(7.0.0)を出す(動作に問題が無いことを確かめてから。2026-10-18 の決定。当初は「1〜2 か月使ってから」)
 
 **2026-10-18 の時点**(ユーザーの指示「回数については目安程度で、動作に問題が無いことが確認できれば、v7 をリリースしたい」。`native-rs` で):
 
@@ -337,7 +337,9 @@ gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false --latest=fa
 - 残っていること(この順に):
   1. 4 節で 7.0.0 の exe を建て、試験と exe を確かめる(期待値は 4 節の正式版の形)。README の exe の大きさと起動の時間を、その exe の実測に
      (今の数字は β2 の exe のもの。表の見出しだけ `v7.0.0` にしてある)
-  2. 5 節: `app-help.png` を 7.0.0 の exe で撮り直し(`--only app-help`)、`python dev/make_manual.py` でマニュアル PDF を組み直して commit する
+  2. 5 節: 画面写真を 7.0.0 の exe で撮り直し、`python dev/make_manual.py` でマニュアル PDF を組み直して commit する。
+     2026-10-18 の点検で、［解析］の画像欄に作者のホームのパス(`C:\Users\<名前>\Downloads\…`)が写っている写真があると分かったので、
+     `app-help.png` だけでなく全部を、名前の入らない場所(`C:\Users\Public\…`)に写した基準の画像で撮り直す(`shoot_docs.py --image`)
      (リポジトリの PDF は β2 の本文のまま。組み直すまで 6 節の manual の検査は通らない)
   3. 6 節で資産をそろえる(ノートブックの資産は `zahyou_v7.ipynb`)。なお直下の `zahyou_v7.ipynb` に残している出力の例(セル C の見出し)は
      v6 で走らせたときのまま `zahyou v6` と出ている(`build_nb.py` はセルの中身だけを差し替え、出力の例は残す)。差し替えるなら、
@@ -372,6 +374,14 @@ gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false --latest=fa
    - **`3936e02` も使わない。** v6 の exe を建てた PR #23 の commit そのもの(木は b25a42f と同じ)だが、main には squash で `b25a42f` として入り、
      `3936e02` はどのブランチ・タグからもたどれない。GitHub 側でいつまで引けるか分からない。
    - 書き換えたら、本文のリンクを 13 個とも開いて 200 になることを確かめてから出す。
+   **統合(PR の merge)から Release までは間を置かない。** 統合すると main の README が「Releases の最新(v7)から落とす」になるのに、
+   Release を出すまで latest は v6 のままで、食い違うため。資産・本文・確かめ(5 節まで)は統合の前に全部そろえておく。
+   正式版の Release 本文に書くこと(β版の 7 節の 5 とは逆の内容になる): v7 になって何が変わったか(WSL が要らない・Rust・速さと大きさ)、
+   **v6 からの入れ替え**(v6 の［使い方］の「更新を確認」→「更新する」で入れ替わる・`zahyou.exe.bak` が残るので動いたら消してよい・
+   設定と覚えた座標と星図データはそのまま・WSL の astrometry.net は要らなくなる・v6 への戻し方)、β版の利用者には β版の「更新を確認」で
+   7.0.0 が出ること、ダウンロードの警告(5 枚の図)、画面の写真(raw の URL はタグ `v7.0.0` で書く)、API キーの欄と外へ送るもの
+   (2026-10-18 に実サイトで確かめた、第三者から何が見えて何が隠れるか)、資産の一覧と SHA256SUMS.txt、ノートブックの名前 `zahyou_v7.ipynb`、
+   動作環境(RAM 8 GB 以上・推奨 16 GB、確かめた PC 2 台)、作った道具の版、ライセンス(クレート 213 個、GPL・LGPL・MPL なし)。
 4. タグ `v7.0.0`(main の統合したあとの commit)で **ふつうの Release(Latest)**。ここで v6 の全員と β の利用者に入れ替えが出る(1 節)。
    新しく公開する正式の Release は API の既定で latest になるが、Docs の画面の説明と書き方が食い違っている(0.1 節)ので、**`--latest` を明示する**。
    β と同じく下書きで作って中身を見てから出す(資産は 6 節。ノートブックは `zahyou_v7.ipynb`)。下書きは latest にできないので、
@@ -477,7 +487,7 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
 | `/cargo\registry\src\index.crates.io-…`(依存のパニック位置情報) | 0 | 501 |
 | `/zahyou\target-check\release\build\glutin_*_sys-…\out/…`(OUT_DIR) | 0 | 2 |
 | ワークスペースの相対パス(`app\src\main.rs` など) | 40 | 40 |
-| 大文字小文字を無視した `yoshi` | 505(UTF-16 で 1) | 1(UTF-16 で 1)= MIT の著作権の行と版情報の LegalCopyright の `Yoshitaka` |
+| 大文字小文字を無視した `<名前>` | 505(UTF-16 で 1) | 1(UTF-16 で 1)= MIT の著作権の行と版情報の LegalCopyright の `Yoshitaka` |
 
 - exe: `--engine-check` の version= v7.0.0-beta.1、`--selftest "…Capture_00001 00_10_33.fits" --offline` **25/25**(1.594′・0.916′ 東・1.304′ 北・
   1.4610″/px)。`make_release_assets.py` を通しで走らせ、5 つの検査(version・paths・notices・manual・notebook)が全部 OK、`sha256sum -c` で

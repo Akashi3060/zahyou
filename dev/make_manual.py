@@ -1111,7 +1111,7 @@ def build(out_path):
         "置くだけです。設定はそのまま使えます。"
         "API キーの欄の値は v6 では使わず、v6 で設定を保存すると消えます"
         "（次に v7 を開くと既定のキーに戻ります）。",
-        "<b>β版（v7.0.0-beta.N）を使っていた方</b>は、β版の「更新を確認」で 7.0.0 が出ます。",
+        "<b>β版（v7.0.0-beta.N）を使っていた方</b>は、β版の「更新を確認」で正式版が出ます。",
     ], st, kind="note"))
     add(Paragraph("いま使っている版は、<b>ウィンドウの題</b>で分かります"
                   "（「zahyou v7.0.0 — …」）。", st.body))
@@ -1121,6 +1121,7 @@ def build(out_path):
         "入れ替えたあとは、ノートブックを開き直して"
         "<b>セル A からやり直して</b>ください"
         "（開いたままだと、古いエンジンが読み込まれたまま残ります）。",
+        "v6 のノートブック（zahyou_v6.ipynb）やβ版のノートブック（zahyou_v7_beta.ipynb）から移るときは、<b>zahyou_v7.ipynb</b> を開いてください（古いノートブックは消してかまいません）。",
     ], st))
 
     ext(h2("やめる（消す）", st, "9.2"))
@@ -1271,7 +1272,7 @@ def build(out_path):
          "<b>同梱していません</b>。実行時に原典から取得します。"
          "Tycho-2 / Gaia DR2 由来"],
     ], st, widths=[62 * mm, CONTENT_W - 62 * mm]))
-    add(Paragraph("全文は配布ページの <b>LICENSE</b> と "
+    add(Paragraph("全文は配布ページと GitHub の Releases の <b>LICENSE.txt</b> と "
                   "<b>THIRD-PARTY-NOTICES.md</b> にあります。"
                   "後者は、exe に入る依存（cargo metadata）と各ライブラリの配布物から"
                   "機械的に作っていて、同じものが exe の［使い方］タブでも読めます。", st.small))
