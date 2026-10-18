@@ -26,12 +26,14 @@ main に統合してふつうの Release で出す。** 1〜7 節がβ版、8 �
 | 画像を外へ送ること | **同意を取らずに送ってよい**(今の動きのまま。v6 と同じ) | 方法が「自動」か「オンラインのみ」で、キーがあり、ネットにつながっていると、まず検出した星の位置(と画像の大きさ・手がかり)を、それで解けなければ画像ファイルそのもの(ファイル名も)を nova.astrometry.net へ送る。送らない方法(方法を「オフラインのみ」/ API キーの欄を空)と一緒に、README・マニュアル 2.3・［使い方］タブに書いた |
 | nova へ送るときの公開の扱い(3 回目) | **公開しない指定 `publicly_visible = "n"` を付ける**(Rust 版と Python 版(ノートブックを含む)の両方)。文書には「nova に送ったものは第三者に見られることがある」と書く | Rust: `zahyou_net::nova::PUBLICLY_VISIBLE`・`private_settings`(星の位置のリストと画像の両方の request-json の先頭に付ける。呼ぶ側が別の値を渡しても `"n"`)。Python: `dev/zahyou_core.py` の `solve_online` の設定(同じく先頭。native-solver の `b878079` で直し、`53e485e` で native-rs に取り込んだ。β1 の資産から入っている)。試験は偽の nova が受け取った本文と astroquery の記録(`rs/testdata/gen_net.py`)で。README・マニュアル 2.3・［使い方］タブ・rs/README.md に「公開しない指定を付けて送る。ただし第三者に見られることがある」を足した(0.1 節の注意のとおり、`"n"` でも完全には隠れない場合がある) |
 | β の Release の資産 | **exe 以外も付ける**(v6 の Release に合わせる) | `zahyou.exe`・`zahyou_v7_beta.ipynb` と `zahyou_engine.py`・`zahyou-manual-v4.pdf`・`LICENSE.txt`・`THIRD-PARTY-NOTICES.md`(rs/ のもの)・`SHA256SUMS.txt`。`rs/tools/make_release_assets.py` がそろえて検査する(6 節)。ノートブックはエンジンを名前で探すので、改名しても動く(確かめた) |
+| 超広角の画像(2026-10-18) | **考慮しない**(望遠鏡の用途では当たらない) | 索引 4115〜4119 の大きな quad で、写真側の code を画素の平面のまま作るために取りこぼす件(index-format.md 8.4・14 の 9。合成の試験では短辺 33° 以上で解けない)は直さない。README の「対応画角 4′〜2000′」もそのまま |
+| 動作環境(2026-10-18) | **RAM 8 GB 以上(推奨 16 GB)**。作者がノート PC(Core i7-1360P・RAM 16 GB・SSD 1 TB)で軽快に動くことを確かめた | README の「動作環境」・マニュアル 3 章に書いた。RAM 8 GB の PC は確かめていない(zahyou が使う分から、足りる見込み) |
 
 残っていること:
 
 | | 何を決めるか | 今の状態 |
 |---|---|---|
-| 1 | 本物の nova へキーで送る道の確かめ | 偽の nova でだけ試した(rust-port.md 10.8)。β の間に一度、ユーザーの判断で「オンラインのみ」で解いて確かめる(星の位置と、解けなければ画像が nova へ送られる)。そのとき、送ったものが公開しない扱いになっているか(画像のページが他人から見えないか、「最近送られた画像」の一覧に出るか)も見る(0.1 節の注意は実サイトでは未確認) |
+| 1 | ~~本物の nova へキーで送る道の確かめ~~ | **2026-10-18 に済み**(ユーザーの指示。10 節の「2026-10-18 の追記」)。β2 の exe の `--selftest … --online` で 3 回送り、星の位置だけで 3 回とも解けた(画像は送っていない)。公開しない指定の効き方は実サイトで確かめた |
 
 (以前ここにあった「GitHub の latest とプレリリースの扱いの確かめ」と「nova が API で送った画像を公開するか」は、0.1 節で確かめて
 決着した。nova は 3 回目の決定で公開しない指定を付けることになった。「ノートブック版のログの見出しの版の文字」は 2 節の
@@ -39,7 +41,7 @@ main に統合してふつうの Release で出す。** 1〜7 節がβ版、8 �
 
 ### 0.1 確かめた事実(2026-10-16。claude-research のセッションが公式の文書とソースを読んだ結果)
 
-調べ物は `C:\Users\yoshi\Documents\claude-research\notes\zahyou-v7-release-facts-20261016.md`。**文書とソースを読んだだけ**で、
+調べ物は作者の手元のノート `claude-research\notes\zahyou-v7-release-facts-20261016.md`(リポジトリの外)。**文書とソースを読んだだけ**で、
 Release を作って試したり、nova へ送ったりはしていない。ソースは main / trunk のもので、稼働中のサイトが同じ版かは確かめていない。
 
 **GitHub の Release**(以前は記憶による前提だったもの):
@@ -63,7 +65,7 @@ Release を作って試したり、nova へ送ったりはしていない。ソ�
 | **`publicly_visible` を付けずに送ると公開(`'y'`)になる**。画像でも星の位置のリストでも同じ受付処理。値は `"y"` / `"n"`。`allow_commercial_use`・`allow_modifications` の既定は `'d'`(API キーの持ち主のプロフィールの既定ライセンス → サイトの既定) | [API 文書](https://astrometry.net/doc/net/api.html)・サーバーの [net/api.py](https://github.com/dstndstn/astrometry.net/blob/main/net/api.py)・[net/abstract_models.py](https://github.com/dstndstn/astrometry.net/blob/main/net/abstract_models.py)・[net/models.py](https://github.com/dstndstn/astrometry.net/blob/main/net/models.py) |
 | 公開だと、画像のページ(`/user_images/<id>`)が誰でも見られ、トップの「Recently Submitted Images」・Explore・利用者ごとの一覧・タグや天域の検索に、**API キーの持ち主のアカウント名で**載る | [net/views/image.py](https://github.com/dstndstn/astrometry.net/blob/main/net/views/image.py)・[nova のトップ](https://nova.astrometry.net/) |
 | `publicly_visible` は提出の属性として保存されるだけで、**解く処理の条件には使われない**(`"n"` にしても解き方は変わらない) | net/api.py |
-| **注意(サーバーのコードの読み。実サイトでは未確認)**: `"n"` にすると画像の詳細ページは本人以外に見えなくなるが、「最近」「全件」「利用者ごと」「検索」の一覧は公開の印で絞られておらず、画像ファイル・サムネイルの配信と API の `/api/jobs/<id>/…` も公開の印や持ち主を確かめていない → `"n"` は「完全な非公開」ではなく「詳細ページを隠す」程度の可能性がある。だから利用者には「送ったものは第三者に見られることがある」と書く | net/models.py・net/views/image.py・[一覧のテンプレート](https://github.com/dstndstn/astrometry.net/blob/main/net/templates/user_image/image_set.html) |
+| **注意(サーバーのコードの読み。2026-10-18 に実サイトでおおむね確かめた。10 節)**: `"n"` にすると画像の詳細ページは本人以外に見えなくなるが、「最近」「全件」「利用者ごと」「検索」の一覧は公開の印で絞られておらず、画像ファイル・サムネイルの配信と API の `/api/jobs/<id>/…` も公開の印や持ち主を確かめていない → `"n"` は「完全な非公開」ではなく「詳細ページを隠す」程度の可能性がある。だから利用者には「送ったものは第三者に見られることがある」と書く | net/models.py・net/views/image.py・[一覧のテンプレート](https://github.com/dstndstn/astrometry.net/blob/main/net/templates/user_image/image_set.html) |
 | astroquery の `AstrometryNet` は、渡された設定だけを送り、`publicly_visible` の既定値を自分では付けない(v6 も付けていなかった = サーバーの既定どおり公開として受け付けられていたはず。実サイトでは確かめていない) | [astroquery の文書](https://astroquery.readthedocs.io/en/latest/astrometry_net/astrometry_net.html)・[core.py](https://github.com/astropy/astroquery/blob/main/astroquery/astrometry_net/core.py) |
 
 ## 1. v6 の利用者がどうなるか
@@ -433,9 +435,9 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
 | | β1 の exe(公開したもの) | 置き換えて建てた exe |
 |---|---|---|
 | 大きさ | 14,041,088 バイト | 14,033,408 バイト |
-| `C:\Users\yoshi` | 502 | **0** |
-| `C:/Users/yoshi` | 2 | **0** |
-| `yoshi`(小文字のまま) | 504 | **0** |
+| `C:\Users\<名前>` | 502 | **0** |
+| `C:/Users/<名前>` | 2 | **0** |
+| `<名前>`(作者のユーザー名、小文字のまま) | 504 | **0** |
 | `/cargo\registry\src\index.crates.io-…`(依存のパニック位置情報) | 0 | 501 |
 | `/zahyou\target-check\release\build\glutin_*_sys-…\out/…`(OUT_DIR) | 0 | 2 |
 | ワークスペースの相対パス(`app\src\main.rs` など) | 40 | 40 |
@@ -472,3 +474,31 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
   (c) β1 の exe は「新しい版があります: v7.0.0-beta.2 (2026-10-16 版 / 14 MB)」。(d) Release から落とした β2 の exe(SHA256 一致)は
   「最新版です (v7.0.0-beta.2 / 2026-10-16 版)」。日付は GitHub の公開時刻(UTC。22:23Z)の日付なので、日本時間の 10-17 より 1 日前に見える。
   どれも一時の設定で動かし、利用者の cache.json・gui.json の sha256 は前後で同じ。**(e) 別の PC・想定のノート PC は、β1 と同じくまだ**
+
+### 2026-10-18 の追記(ユーザーの指示: 本物の nova での確かめ・動作環境・β1 の案内・超広角・公開ソースのパス)
+
+- **本物の nova.astrometry.net へ送った**(ユーザーが了承。画像は「基準の実写」を選んだ): 配った β2 の exe(`ae4bc3c9…4a41`)で
+  `--selftest "…Capture_00001 00_10_33.fits" --online` を、ZAHYOU_CACHE・ZAHYOU_SETTINGS・LOCALAPPDATA を一時に向けて 1 回(12:52〜12:53 JST)。
+  自己診断の中で解析を 3 回通すので、提出は 3 件(ジョブ 17123912・17123913・17123914)。3 件とも**星の位置 106 個だけ**で解けた
+  (画像そのものは送っていない。nova の original_filename は `json-xy`)。自己診断は 25/25、1.592′・0.915′ 東・1.304′ 北・1.4606″/px
+  (オフラインの 1.594′・1.4610″/px と 0.3″ 以内)。キーは既定のキー(環境変数は無し)。利用者の cache.json・gui.json の sha256 は前後で同じ
+- **公開しない指定の効き方(実サイト)**: ログインしていない第三者の立場で、調べ物のセッション(claude-research、cookie なしの curl。
+  ログイン・送信・人間確認のボタンは押していない)が確かめた。結果は `claude-research\notes\zahyou-nova-visibility-check-20261018.md`(リポジトリの外)
+  | | 第三者から |
+  |---|---|
+  | トップの Recently Submitted Images・Explore・Images の一覧・利用者の Images タブ | **載らない**(前後の番号は載り、3 件だけ飛ばされる) |
+  | 詳細ページ(`/user_images/<id>`・`/status/<id>`) | 人間確認の画面へ転送(その先は試していない。コード上は本人以外に見せない) |
+  | 検索ページ(`/user_images/search`)・利用者のページ(`/users/<id>`・`/submissions`) | **載る**(番号・サムネイルの URL・時刻・アカウント名・提出数) |
+  | 番号が分かれば: `/api/jobs/<id>/info`・`calibration`、`/wcs_file/`、`/axy_file/`、`/rdls_file/`、`/joblog2/`、`/wwt_image/` | **人間確認なしで取れる**(解いた位置と向き・画素スケール、送った星の座標 106 点と画像の大きさ・位置の手がかり、星を点で描いた絵) |
+
+  → 文書の「公開しない指定を付けて送る。ただし第三者に見られることがある」は正しかった。README と マニュアル 2.3 に、何が見えて何が隠れるかを
+  具体的に書き足した(exe の［使い方］タブの文は前のままで正しいので、次に exe を建てるときに合わせるかを決める)。
+  なお、**作者のアカウントには、指定なしで送った過去の提出(Images タブに 1560 枚。v6 の astroquery 経由など)が公開のまま並んでいる**。
+  隠すには本人がログインして各画像の hide を使う(こちらでは操作していない)
+- **動作環境**: 作者がノート PC(Core i7-1360P・RAM 16 GB・SSD 1 TB)で軽快に動くことを確かめた(ユーザーの報告)。README・マニュアル 3 章を
+  「RAM 8 GB 以上(推奨 16 GB)」「確かめた PC は 2 台」に直した。7 節の 6 (e) のうち、ダウンロードの警告の出方・RAM 8 GB の PC は、まだ
+- **β1 の Release 本文の冒頭に β2 の案内**を足した(`gh release edit v7.0.0-beta.1 --notes-file`。Pre-release のまま、latest は v6 のまま)
+- **超広角は考慮しない**(0 節の「決まったこと」)。**公開ソースの作者のパス**: 試験と生成スクリプトは f2e1fd5 で外し、残っていた docs の 10 か所と
+  `rs/testdata/image_formats.json` の 1 か所(Python のエラー文の中。試験は文の先頭だけを見る)を `C:\Users\<名前>`・`%USERPROFILE%` に伏せた。
+  著作権の表示の `Yoshitaka Fujikawa` は意図したもの。**git の履歴には前の commit のパスが残る**(消すには履歴の書き換えが要り、公開済みのタグも
+  変わるので行わない)

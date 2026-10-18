@@ -2,7 +2,7 @@
 
 2026-10-15 作成、2026-10-16 に第 3 波(解法の組み込み)の結果を 7 節に、同日のユーザーの決定(API キーの欄・描画方式・β 版)を
 9・10 節に書き足した。2026-10-17 の保守(試験の正解データ・試験の一時フォルダー・自己診断の記憶・文書と版の試験)は 11 節
-(11.1 節の残り = 試験と生成スクリプトの既定のパスは 2026-10-18 に決着)。ブランチ `native-rs`(作業フォルダー `C:\Users\yoshi\Documents\GitHub\zahyou-rs`)。
+(11.1 節の残り = 試験と生成スクリプトの既定のパスは 2026-10-18 に決着)。ブランチ `native-rs`(作業フォルダー `%USERPROFILE%\Documents\GitHub\zahyou-rs`)。
 ビルドと試験の手順は [../rs/README.md](../rs/README.md)。
 第 1 段(Python 版の自前エンジン、ブランチ `native-solver`)の設計は [design-native-solver.md](design-native-solver.md)。
 
@@ -68,10 +68,10 @@ rs/
 - 鏡像(parity)は**配列座標での det(CD) の符号**で 1 つに決める。画面の見た目の表示は `flip_y` と組み合わせて出す。
 - 例外は使わず `Result`。壊れたファイルで panic しない(試験で切り詰めたファイル・ヘッダーを壊したファイルを読ませる)。
 - コメントと doc コメントは日本語(既存の Python 版の言い回しに合わせる)。
-- **Python 基準実装との突き合わせ**: `rs/testdata/gen_*.py` が Python 版(`C:\Users\yoshi\Documents\GitHub\zahyou\dev` の
+- **Python 基準実装との突き合わせ**: `rs/testdata/gen_*.py` が Python 版(`%USERPROFILE%\Documents\GitHub\zahyou\dev` の
   solver_*.py・zahyou_core.py)で値を計算して `rs/testdata/*.json` に書く。Rust の試験はそれと比べる。
   大きな画像はリポジトリに入れず、手元にあれば使う(無ければ SKIP と出して通す)。
-- 索引ファイルや手元の画像が要る試験は、無ければ SKIP(`C:\AstrometryData`、`C:\Users\yoshi\Downloads\...`)。
+- 索引ファイルや手元の画像が要る試験は、無ければ SKIP(`C:\AstrometryData`、`%USERPROFILE%\Downloads\...`)。
 - 外部のクレートは許容型のライセンス(MIT/Apache-2.0/BSD/Zlib/ISC など)だけ。GPL・LGPL は入れない。C のライブラリへの FFI(cfitsio など)は入れない。
 
 ## 4. crate 間の API(係どうしの約束)
@@ -382,7 +382,7 @@ Python v7-dev の onefile exe 2.73〜2.92 秒(v6 の exe は 0 節の約 4 秒)�
 - 解法の 1 スレッドの速さは Python の 2.7〜3.8 倍どまり(残りの時間の大半は zahyou-index の stars_in_cone と code_ball。solver 係の実測)。
 - rs/testdata の基準値の一部は古い Python から作られている: `pipeline_run.json`(深い検出が 2×2 だった頃。app の試験は解法の行を
   除いて比べるので通る)、`solver_real.json` の stars_deep(deep 係によれば 6 件が今の Python と違う)。作り直すのは
-  `gen_pipeline.py`(既定で Python 版のリポジトリ `C:\Users\yoshi\Documents\GitHub\zahyou` の dev を読む)と `gen_solver.py`。
+  `gen_pipeline.py`(既定で Python 版のリポジトリ `%USERPROFILE%\Documents\GitHub\zahyou` の dev を読む)と `gen_solver.py`。
 - `rs/testdata/bench_solver.py`(solver-tests 係が作った Python 側の物差し)を残すかは人が決める。
 - オンライン解析(nova への送信)と、画像そのものを外へ送る同意の取り方は確かめていない・作っていない(第 2 波から)。
   → 同意の取り方は 2026-10-16 に決着: 同意を取らずに送ってよい(10.9 節)。本物の nova へ送る道は今も試していない(10.8)。
@@ -949,14 +949,14 @@ commit は `37adbc4`(正解データ)・`0b394e3`(一時フォルダー)・`bd0e
   ほかの値は、Python 版(native-solver)の新しいログの文と星図データの案内の文で変わる(今回は作り直していない)。
 - ~~残り: ほかの生成スクリプト・Rust の試験・`gui/test_*.py` に、作者のホームの絶対パスが既定値としてまだ約 25 か所残る。生成した
   `pipeline_run.json` の `image` も絶対パス~~ → **2026-10-18 に決着**。`gen_pipeline.py` と同じ決まり(環境変数、無ければホームフォルダー)に
-  そろえた。この PC では全部前と同じパスになる。リポジトリに残る `C:\Users\yoshi` は docs の記録と、下の `image_formats.json` の 1 か所だけ:
+  そろえた。この PC では全部前と同じパスになる。リポジトリに残る作者のホームのパス `C:\Users\<名前>` は docs の記録と、下の `image_formats.json` の 1 か所だけ:
   - Python 版のリポジトリ: `$ZAHYOU_PY_REPO`、無ければ `~/Documents/GitHub/zahyou`(`gen_net.py`・`gen_solver.py`・`app/testdata/gen_run_solver.py`、
     Rust の `zahyou-solver/tests/common` の `py_repo_dir` と `pipeline.rs` の `pyref::resolve_image`)。
   - dev フォルダー: 変数名はそのまま(`gen_index.py`・`bench_index.py` は `ZAHYOU_DEV`、`gen_plot.py`・`gen_wcs.py` は `ZAHYOU_PY_DEV`)で、
     既定を「Python 版のリポジトリ(上と同じ決まり)の下の `dev`」にした。
   - 試験の画像: `$ZAHYOU_TEST_IMAGES`(無ければホームフォルダー)の下(`gui/test_buttons.py`・`test_gui.py`・`test_result_tab.py`、
     `ui/gui_selftest.rs` の 2 つの試験は共通の `test_image`)。Rust のホームフォルダーは `USERPROFILE`(無ければ `HOME`)。
-    `zahyou-solver/tests/common` の最後の逃げ道だった `C:\Users\yoshi` も外した。
+    `zahyou-solver/tests/common` の最後の逃げ道だった作者のホームのパスも外した。
   - 試験の Python(`zahyou-net/tests/common` の `python_exe`): `ZAHYOU_PYTHON`、無ければ `~/AppData/Local/Programs/Python/Python313/python.exe`、
     それも無ければ PATH の `python`。`%LOCALAPPDATA%` から組み立てないのは、試験は LOCALAPPDATA を一時へ向けて回す決まりだから。
   - `pipeline_run.json`: 作り直さず、絶対パスの 3 か所だけを書き換えた(`image` → `$ZAHYOU_TEST_IMAGES/Downloads/Capture_00001 00_10_33.fits`、
