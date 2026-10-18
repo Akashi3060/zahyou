@@ -22,7 +22,7 @@ _path = next((os.path.join(d, _ENGINE) for d in _dirs
 if _path is None:
     raise SystemExit(
         f"{_ENGINE} が見つかりません。\n"
-        f"  zahyou_v6.ipynb と {_ENGINE} を、同じフォルダーに置いてください。\n"
+        f"  このノートブックと {_ENGINE} を、同じフォルダーに置いてください。\n"
         f"  探した場所: {[d for d in _dirs if d]}")
 
 try:

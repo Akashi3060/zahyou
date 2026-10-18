@@ -1,0 +1,1971 @@
+{
+ "format": "zahyou-solver-truth-1",
+ "about": "自前の解析エンジン(native-solver)の実写の回帰試験の正解(dev/test_solver_real.py)。画像はリポジトリに入れない。path はリポジトリからの相対パス(dev/tcase は test_robust.py が作る)か、$ZAHYOU_TEST_IMAGES(既定はホームフォルダー)からの相対パス。無ければ SKIP。正解は WSL の astrometry.net 0.98 solve-field(tweak で 2 次の SIP)の解",
+ "conventions": {
+  "pixel": "0 始まり、配列 (行, 列) の向きのまま(load_image_any が返す bundle.data。表示の上下反転 flip_y は考えない)",
+  "center": "配列の中央 ((W−1)/2, (H−1)/2) が写る位置(度、ICRS)",
+  "scale_arcsec": "中心での画素 → 接平面の写像の √|det|(″/px、SIP 込み)",
+  "pa_up_deg": "配列の +y(行が増える向き)の位置角。北から東回り、度。zahyou の wcs_summary の pa と同じ",
+  "parity": "配列座標での det CD の符号(+1 / −1)。zahyou の表示の「正 (鏡像なし)」は +1、solve-field の parity 'neg' も +1(呼び方が逆なので注意)",
+  "mirror": "parity > 0(y を上にして見ると空の鏡像)",
+  "measure": "dev/solver_synth.py の sv_synth_measure で測った値(astropy の all_pix2world を原点 0 で包んで)。記録されていた値との差は reported_vs_truth"
+ },
+ "criteria": {
+  "center_arcsec": 2.0,
+  "center_px": 0.5,
+  "scale_rel": 0.002,
+  "rot_deg": 0.1,
+  "negative_overrun_s": 1.0,
+  "source": "docs/design-native-solver.md 7 節(締め切りの超過)・8 節(試験)"
+ },
+ "truth_choice": "同じ画像の正解が 2 組あるもの(real_orig・3I_00010・phaethon_00001)は、zahyou の引数のまま solve_offline を呼んだ oracle を採り、tests-data(スケールを 0.8〜1.25 倍に絞るなど引数が違う)は alt に入れた。2 組の WCS はカードの値まで同じ(alt.vs_truth が 0)。記録されていた中心が 0.03″ 違ったのは、tests-data の集計が EQUINOX = 2000 のヘッダーを astropy で FK5 と読み、.icrs で ICRS へ変換したため (フレームの差 0.0316″)。索引の星は ICRS で、zahyou の normalize_wcs_header も RADESYS = 'ICRS' にするので、ここでは変換しない値を正解にした(tests-data だけの 4 件の reported_vs_truth に出ている 0.02〜0.03″ も同じ理由)",
+ "truth_tan_note": "truth_tan は solve-field が一致させた星(.corr)に TAN だけを当て直した参考値。正解は 2 次の SIP なので、TAN だけの解は完全でも中心で 0.2〜0.6″(星図は 1.3″)・回転で最大 0.05° ほど正解とずれる(2 次の歪みの平均が TAN の定数項に入るため)。合否は truth で決め、truth_tan は外れたときの切り分けに使う",
+ "sources": {
+  "oracle": "$ZAHYOU_TEST_IMAGES/Documents/claude/zahyou/testdata/oracle/truth.json(2026-10-15 14:30。zahyou_engine.py の solve_offline をそのまま呼び、--match none だけ外した)",
+  "tests-data": "$ZAHYOU_TEST_IMAGES/Documents/claude/zahyou/testdata/tests-data/regression_manifest.json・truth_all.json・truth/<tag>/job.wcs",
+  "where": "どちらもリポジトリに入れない作者のデータ(画像の写しを含む)。作ったときの一時の作業場所から 2026-10-17 に写し、全ファイルの sha256 を照合した(同じフォルダーの SHA256SUMS.txt)。$ZAHYOU_TEST_IMAGES は試験の画像と同じ決まり(無ければホームフォルダー)。docs/rust-port.md 11 節"
+ },
+ "target_offset_baseline": {
+  "image": "real_orig",
+  "target": "UCAC4 660-021020",
+  "ra_deg": 61.91199157844,
+  "dec_deg": 41.98626242835,
+  "target_source": "zahyou の cache.json(Sesame → Gaia DR3 5″ 以内で精密化した値)。CODE_REVIEW_v5.md の RA 61.911992 / Dec 41.986262 と同じ",
+  "sep_arcmin": 1.583,
+  "east_arcmin": 0.918,
+  "north_arcmin": 1.29,
+  "from_truth": {
+   "sep_arcmin": 1.58334,
+   "east_arcmin": 0.91774,
+   "north_arcmin": 1.29024
+  },
+  "source": "gui/selftest.txt・dev/make_manual.py の表示値(小数 3 桁)",
+  "formula": "astropy の spherical_offsets_to と同じ: x = cosδ cosΔα cosδ0 + sinδ sinδ0、y = cosδ sinΔα、z = sinδ cosδ0 − cosδ cosΔα sinδ0、東 = atan2(y, x)、北 = asin(z)、全角 = atan2(√(y²+z²), x)"
+ },
+ "duplicates": {
+  "simB_0.png": "simA_0.png と同じ中身",
+  "simB_1.png": "simA_1.png と同じ中身",
+  "simD_0.png": "simC_0.png と同じ中身",
+  "02013I_00010 の reference・00_55_14 の reference / rigcache": "同じ画像の別条件の試行なので入れていない"
+ },
+ "images": [
+  {
+   "tag": "real_orig",
+   "path": "$ZAHYOU_TEST_IMAGES/Downloads/Capture_00001 00_10_33.fits",
+   "expect_solve": true,
+   "kind": "実写",
+   "width": 968,
+   "height": 548,
+   "flip_y": true,
+   "sha256": "8bb98c0a37e72d67cf00b5c67a69ff896e3504972e17eb0417ea839584615b15",
+   "truth": {
+    "center_ra": 61.891413703661826,
+    "center_dec": 41.964760267345184,
+    "center_xyz": [
+     0.35032211052846796,
+     0.65585843813312,
+     0.6686734090753605
+    ],
+    "scale_arcsec": 1.4614701024985102,
+    "pa_up_deg": 152.8668209085786,
+    "parity": 1,
+    "mirror": true
+   },
+   "truth_source": "oracle",
+   "index": "index-5205-02",
+   "logodds_v6": 116.69473266601562,
+   "nmatch_v6": 17,
+   "quads_tried_v6": 110,
+   "v6": {
+    "n_sources": 17,
+    "solve_offline_s": 3.607,
+    "solved_label": "全天 + スケール全域",
+    "solved_kind": "xylist"
+   },
+   "reported": {
+    "center_ra": 61.891413703661826,
+    "center_dec": 41.964760267345184,
+    "scale_arcsec": 1.461614244726863,
+    "pa_up_deg": 152.86853071715737,
+    "parity": 1
+   },
+   "reported_vs_truth": {
+    "center_arcsec": 0.0,
+    "scale_rel": 9.863e-05,
+    "rot_deg": 0.00171,
+    "parity_same": true
+   },
+   "wcs": {
+    "CTYPE1": "RA---TAN-SIP",
+    "CTYPE2": "DEC--TAN-SIP",
+    "CRVAL1": 61.9054382756,
+    "CRVAL2": 41.9670267704,
+    "CRPIX1": 459.098098755,
+    "CRPIX2": 281.228652954,
+    "CD1_1": -0.000361486860273,
+    "CD1_2": 0.00018512743951,
+    "CD2_1": -0.000184892385759,
+    "CD2_2": -0.000361314701789,
+    "LONPOLE": 180.0,
+    "LATPOLE": 0.0,
+    "A_ORDER": 2,
+    "A_0_2": 2.98507130294e-06,
+    "A_1_1": 5.37118129539e-06,
+    "A_2_0": 1.36586248574e-06,
+    "B_ORDER": 2,
+    "B_0_2": 1.51990499133e-05,
+    "B_1_1": -1.00888286491e-06,
+    "B_2_0": -5.84940310419e-07,
+    "AP_ORDER": 2,
+    "AP_0_0": -3.48139593983e-05,
+    "AP_0_1": 6.2412188987e-06,
+    "AP_0_2": -2.984571256e-06,
+    "AP_1_0": 3.09907558116e-06,
+    "AP_1_1": -5.37209843686e-06,
+    "AP_2_0": -1.36590231872e-06,
+    "BP_ORDER": 2,
+    "BP_0_0": 0.000176574456665,
+    "BP_0_1": 1.99727114191e-05,
+    "BP_0_2": -1.52101612782e-05,
+    "BP_1_0": -1.62416822558e-06,
+    "BP_1_1": 1.0084463586e-06,
+    "BP_2_0": 5.85038820244e-07
+   },
+   "note": "実写の基準画像(SharpCap 8bit、ROWORDER=TOP-DOWN、焼き込み時刻あり)。GUI の selftest・目標までのずれの基準もこの画像",
+   "truth_tan": {
+    "n_corr": 17,
+    "rms_px": 0.733,
+    "center_ra": 61.89133367887675,
+    "center_dec": 41.9646223584386,
+    "scale_arcsec": 1.4617147463948765,
+    "pa_up_deg": 152.91383722728895,
+    "parity": 1,
+    "vs_truth": {
+     "center_arcsec": 0.5407,
+     "scale_rel": 0.0001674,
+     "rot_deg": 0.04702,
+     "parity_same": true
+    }
+   },
+   "alt": {
+    "source": "tests-data",
+    "tag": "capture_001033",
+    "truth": {
+     "center_ra": 61.891413703661826,
+     "center_dec": 41.964760267345184,
+     "center_xyz": [
+      0.35032211052846796,
+      0.65585843813312,
+      0.6686734090753605
+     ],
+     "scale_arcsec": 1.4614701024985102,
+     "pa_up_deg": 152.8668209085786,
+     "parity": 1,
+     "mirror": true
+    },
+    "vs_truth": {
+     "center_arcsec": 0.0,
+     "scale_rel": 0.0,
+     "rot_deg": 0.0,
+     "parity_same": true
+    },
+    "nmatch": 17,
+    "resid_arcsec_rms": 0.8916939958974994
+   },
+   "accept": [
+    "truth"
+   ]
+  },
+  {
+   "tag": "real16_fits",
+   "path": "dev/realcase/real16.fits",
+   "expect_solve": true,
+   "kind": "実写",
+   "width": 968,
+   "height": 548,
+   "flip_y": true,
+   "sha256": "a75ffc259b92a1cb9b3d719504c1a66d6c80345eb6c4c1f9d56d441140ff47ed",
+   "truth": {
+    "center_ra": 61.891413703661826,
+    "center_dec": 41.964760267345184,
+    "center_xyz": [
+     0.35032211052846796,
+     0.65585843813312,
+     0.6686734090753605
+    ],
+    "scale_arcsec": 1.4614701024985102,
+    "pa_up_deg": 152.8668209085786,
+    "parity": 1,
+    "mirror": true
+   },
+   "truth_source": "oracle",
+   "index": "index-5205-02",
+   "logodds_v6": 116.69473266601562,
+   "nmatch_v6": 17,
+   "quads_tried_v6": 110,
+   "v6": {
+    "n_sources": 17,
+    "solve_offline_s": 3.556,
+    "solved_label": "全天 + スケール全域",
+    "solved_kind": "xylist"
+   },
+   "reported": {
+    "center_ra": 61.891413703661826,
+    "center_dec": 41.964760267345184,
+    "scale_arcsec": 1.461614244726863,
+    "pa_up_deg": 152.86853071715737,
+    "parity": 1
+   },
+   "reported_vs_truth": {
+    "center_arcsec": 0.0,
+    "scale_rel": 9.863e-05,
+    "rot_deg": 0.00171,
+    "parity_same": true
+   },
+   "wcs": {
+    "CTYPE1": "RA---TAN-SIP",
+    "CTYPE2": "DEC--TAN-SIP",
+    "CRVAL1": 61.9054382756,
+    "CRVAL2": 41.9670267704,
+    "CRPIX1": 459.098098755,
+    "CRPIX2": 281.228652954,
+    "CD1_1": -0.000361486860273,
+    "CD1_2": 0.00018512743951,
+    "CD2_1": -0.000184892385759,
+    "CD2_2": -0.000361314701789,
+    "LONPOLE": 180.0,
+    "LATPOLE": 0.0,
+    "A_ORDER": 2,
+    "A_0_2": 2.98507130294e-06,
+    "A_1_1": 5.37118129539e-06,
+    "A_2_0": 1.36586248574e-06,
+    "B_ORDER": 2,
+    "B_0_2": 1.51990499133e-05,
+    "B_1_1": -1.00888286491e-06,
+    "B_2_0": -5.84940310419e-07,
+    "AP_ORDER": 2,
+    "AP_0_0": -3.48139593983e-05,
+    "AP_0_1": 6.2412188987e-06,
+    "AP_0_2": -2.984571256e-06,
+    "AP_1_0": 3.09907558116e-06,
+    "AP_1_1": -5.37209843686e-06,
+    "AP_2_0": -1.36590231872e-06,
+    "BP_ORDER": 2,
+    "BP_0_0": 0.000176574456665,
+    "BP_0_1": 1.99727114191e-05,
+    "BP_0_2": -1.52101612782e-05,
+    "BP_1_0": -1.62416822558e-06,
+    "BP_1_1": 1.0084463586e-06,
+    "BP_2_0": 5.85038820244e-07
+   },
+   "note": "real_orig を 16bit にしたもの(元ヘッダー付き)",
+   "truth_tan": {
+    "n_corr": 17,
+    "rms_px": 0.733,
+    "center_ra": 61.89133367887675,
+    "center_dec": 41.9646223584386,
+    "scale_arcsec": 1.4617147463948765,
+    "pa_up_deg": 152.91383722728895,
+    "parity": 1,
+    "vs_truth": {
+     "center_arcsec": 0.5407,
+     "scale_rel": 0.0001674,
+     "rot_deg": 0.04702,
+     "parity_same": true
+    }
+   },
+   "accept": [
+    "truth"
+   ]
+  },
+  {
+   "tag": "real_color_fits",
+   "path": "dev/realcase/real_color.fits",
+   "expect_solve": true,
+   "kind": "実写",
+   "width": 968,
+   "height": 548,
+   "flip_y": false,
+   "sha256": "5eb8c269af3ec0d86dc09fb6814f433de2a0d57e490b8e8baa656cb9f3ccbba4",
+   "truth": {
+    "center_ra": 61.891413703661826,
+    "center_dec": 41.964760267345184,
+    "center_xyz": [
+     0.35032211052846796,
+     0.65585843813312,
+     0.6686734090753605
+    ],
+    "scale_arcsec": 1.4614701024985102,
+    "pa_up_deg": 152.8668209085786,
+    "parity": 1,
+    "mirror": true
+   },
+   "truth_source": "oracle",
+   "index": "index-5205-02",
+   "logodds_v6": 116.69473266601562,
+   "nmatch_v6": 17,
+   "quads_tried_v6": 110,
+   "v6": {
+    "n_sources": 17,
+    "solve_offline_s": 3.419,
+    "solved_label": "全天 + スケール全域",
+    "solved_kind": "xylist"
+   },
+   "reported": {
+    "center_ra": 61.891413703661826,
+    "center_dec": 41.964760267345184,
+    "scale_arcsec": 1.461614244726863,
+    "pa_up_deg": 152.86853071715737,
+    "parity": 1
+   },
+   "reported_vs_truth": {
+    "center_arcsec": 0.0,
+    "scale_rel": 9.863e-05,
+    "rot_deg": 0.00171,
+    "parity_same": true
+   },
+   "wcs": {
+    "CTYPE1": "RA---TAN-SIP",
+    "CTYPE2": "DEC--TAN-SIP",
+    "CRVAL1": 61.9054382756,
+    "CRVAL2": 41.9670267704,
+    "CRPIX1": 459.098098755,
+    "CRPIX2": 281.228652954,
+    "CD1_1": -0.000361486860273,
+    "CD1_2": 0.00018512743951,
+    "CD2_1": -0.000184892385759,
+    "CD2_2": -0.000361314701789,
+    "LONPOLE": 180.0,
+    "LATPOLE": 0.0,
+    "A_ORDER": 2,
+    "A_0_2": 2.98507130294e-06,
+    "A_1_1": 5.37118129539e-06,
+    "A_2_0": 1.36586248574e-06,
+    "B_ORDER": 2,
+    "B_0_2": 1.51990499133e-05,
+    "B_1_1": -1.00888286491e-06,
+    "B_2_0": -5.84940310419e-07,
+    "AP_ORDER": 2,
+    "AP_0_0": -3.48139593983e-05,
+    "AP_0_1": 6.2412188987e-06,
+    "AP_0_2": -2.984571256e-06,
+    "AP_1_0": 3.09907558116e-06,
+    "AP_1_1": -5.37209843686e-06,
+    "AP_2_0": -1.36590231872e-06,
+    "BP_ORDER": 2,
+    "BP_0_0": 0.000176574456665,
+    "BP_0_1": 1.99727114191e-05,
+    "BP_0_2": -1.52101612782e-05,
+    "BP_1_0": -1.62416822558e-06,
+    "BP_1_1": 1.0084463586e-06,
+    "BP_2_0": 5.85038820244e-07
+   },
+   "note": "real_orig を 3 面のカラーにしたもの(ヘッダーなし = flip_y なし)",
+   "truth_tan": {
+    "n_corr": 17,
+    "rms_px": 0.733,
+    "center_ra": 61.89133367887675,
+    "center_dec": 41.9646223584386,
+    "scale_arcsec": 1.4617147463948765,
+    "pa_up_deg": 152.91383722728895,
+    "parity": 1,
+    "vs_truth": {
+     "center_arcsec": 0.5407,
+     "scale_rel": 0.0001674,
+     "rot_deg": 0.04702,
+     "parity_same": true
+    }
+   },
+   "accept": [
+    "truth"
+   ]
+  },
+  {
+   "tag": "real_cube_fits",
+   "path": "dev/realcase/real_cube.fits",
+   "expect_solve": true,
+   "kind": "実写",
+   "width": 968,
+   "height": 548,
+   "flip_y": false,
+   "sha256": "7d311b717c4b1e75e44e3dd1ab8f3484055f552dfb139d0fe5ba8b4eec2c41e0",
+   "truth": {
+    "center_ra": 61.89140625121802,
+    "center_dec": 41.964766309922986,
+    "center_xyz": [
+     0.3503221626105687,
+     0.6558583303640255,
+     0.6686734874929372
+    ],
+    "scale_arcsec": 1.4615168184317668,
+    "pa_up_deg": 152.86989427661095,
+    "parity": 1,
+    "mirror": true
+   },
+   "truth_source": "oracle",
+   "index": "index-5205-02",
+   "logodds_v6": 116.744873046875,
+   "nmatch_v6": 17,
+   "quads_tried_v6": 110,
+   "v6": {
+    "n_sources": 17,
+    "solve_offline_s": 3.527,
+    "solved_label": "全天 + スケール全域",
+    "solved_kind": "xylist"
+   },
+   "reported": {
+    "center_ra": 61.89140625121803,
+    "center_dec": 41.964766309922986,
+    "scale_arcsec": 1.4616743304156956,
+    "pa_up_deg": 152.87254253911226,
+    "parity": 1
+   },
+   "reported_vs_truth": {
+    "center_arcsec": 0.0,
+    "scale_rel": 0.0001078,
+    "rot_deg": 0.00265,
+    "parity_same": true
+   },
+   "wcs": {
+    "CTYPE1": "RA---TAN-SIP",
+    "CTYPE2": "DEC--TAN-SIP",
+    "CRVAL1": 61.9054257225,
+    "CRVAL2": 41.9670216035,
+    "CRPIX1": 459.119457245,
+    "CRPIX2": 281.248558044,
+    "CD1_1": -0.000361504528187,
+    "CD1_2": 0.000185107347088,
+    "CD2_1": -0.000184895153753,
+    "CD2_2": -0.000361343412136,
+    "LONPOLE": 180.0,
+    "LATPOLE": 0.0,
+    "A_ORDER": 2,
+    "A_0_2": 4.62225959367e-06,
+    "A_1_1": 5.35654258634e-06,
+    "A_2_0": 1.10701563985e-06,
+    "B_ORDER": 2,
+    "B_0_2": 1.49315904552e-05,
+    "B_1_1": -1.32991858302e-06,
+    "B_2_0": -3.46868962936e-07,
+    "AP_ORDER": 2,
+    "AP_0_0": -1.56388075946e-05,
+    "AP_0_1": 8.45872643885e-06,
+    "AP_0_2": -4.62311096983e-06,
+    "AP_1_0": 2.93723192253e-06,
+    "AP_1_1": -5.35765912545e-06,
+    "AP_2_0": -1.10701393799e-06,
+    "BP_ORDER": 2,
+    "BP_0_0": 0.00018419908,
+    "BP_0_1": 1.99262183895e-05,
+    "BP_0_2": -1.49426923341e-05,
+    "BP_1_0": -1.91723231143e-06,
+    "BP_1_1": 1.33023188719e-06,
+    "BP_2_0": 3.4694182287e-07
+   },
+   "note": "real_orig を 20 枚のキューブにしたもの(各 σ18 の雑音、ヘッダーなし)",
+   "truth_tan": {
+    "n_corr": 17,
+    "rms_px": 0.723,
+    "center_ra": 61.891321858796836,
+    "center_dec": 41.964623930829056,
+    "scale_arcsec": 1.461750179642735,
+    "pa_up_deg": 152.918693148892,
+    "parity": 1,
+    "vs_truth": {
+     "center_arcsec": 0.5601,
+     "scale_rel": 0.0001597,
+     "rot_deg": 0.0488,
+     "parity_same": true
+    }
+   },
+   "accept": [
+    "truth"
+   ]
+  },
+  {
+   "tag": "real_flip_fits",
+   "path": "dev/realcase/real_flip.fits",
+   "expect_solve": true,
+   "kind": "実写",
+   "width": 968,
+   "height": 548,
+   "flip_y": false,
+   "sha256": "6c00cf2390d00655fffdf5a91ffedcf99458c7e41771be36573cfb3a27e68c77",
+   "truth": {
+    "center_ra": 61.891413700884506,
+    "center_dec": 41.96476027096602,
+    "center_xyz": [
+     0.3503221105403505,
+     0.6558584380788655,
+     0.66867340912235
+    ],
+    "scale_arcsec": 1.4614701505538958,
+    "pa_up_deg": 332.86682256680876,
+    "parity": -1,
+    "mirror": false
+   },
+   "truth_source": "oracle",
+   "index": "index-5205-02",
+   "logodds_v6": 116.69477844238281,
+   "nmatch_v6": 17,
+   "quads_tried_v6": 110,
+   "v6": {
+    "n_sources": 17,
+    "solve_offline_s": 3.563,
+    "solved_label": "全天 + スケール全域",
+    "solved_kind": "xylist"
+   },
+   "reported": {
+    "center_ra": 61.8914137008845,
+    "center_dec": 41.96476027096602,
+    "scale_arcsec": 1.4616142900496487,
+    "pa_up_deg": 332.86511230964567,
+    "parity": -1
+   },
+   "reported_vs_truth": {
+    "center_arcsec": 0.0,
+    "scale_rel": 9.863e-05,
+    "rot_deg": -0.00171,
+    "parity_same": true
+   },
+   "wcs": {
+    "CTYPE1": "RA---TAN-SIP",
+    "CTYPE2": "DEC--TAN-SIP",
+    "CRVAL1": 61.9054382725,
+    "CRVAL2": 41.9670267739,
+    "CRPIX1": 459.098098755,
+    "CRPIX2": 267.771348953,
+    "CD1_1": -0.000361486863787,
+    "CD1_2": -0.000185127444355,
+    "CD2_1": -0.000184892362121,
+    "CD2_2": 0.000361314736178,
+    "LONPOLE": 180.0,
+    "LATPOLE": 0.0,
+    "A_ORDER": 2,
+    "A_0_2": 2.98494620983e-06,
+    "A_1_1": -5.37115184544e-06,
+    "A_2_0": 1.36586976501e-06,
+    "B_ORDER": 2,
+    "B_0_2": -1.51986861229e-05,
+    "B_1_1": -1.00895311043e-06,
+    "B_2_0": 5.8484162407e-07,
+    "AP_ORDER": 2,
+    "AP_0_0": -4.10561933346e-05,
+    "AP_0_1": -6.23910417394e-06,
+    "AP_0_2": -2.98412577527e-06,
+    "AP_1_0": 3.09980737061e-06,
+    "AP_1_1": 5.37184361323e-06,
+    "AP_2_0": -1.36589645512e-06,
+    "BP_ORDER": 2,
+    "BP_0_0": -0.000156578736458,
+    "BP_0_1": 1.99910519416e-05,
+    "BP_0_2": 1.52084188341e-05,
+    "BP_1_0": 1.62356637531e-06,
+    "BP_1_1": 1.00840704135e-06,
+    "BP_2_0": -5.84915686985e-07
+   },
+   "note": "real_orig の上下反転(パリティが逆、+y の位置角が 180° 違う)",
+   "truth_tan": {
+    "n_corr": 17,
+    "rms_px": 0.733,
+    "center_ra": 61.89133367897038,
+    "center_dec": 41.96462235455737,
+    "scale_arcsec": 1.461714785060675,
+    "pa_up_deg": 332.91383850466036,
+    "parity": -1,
+    "vs_truth": {
+     "center_arcsec": 0.5407,
+     "scale_rel": 0.0001674,
+     "rot_deg": 0.04702,
+     "parity_same": true
+    }
+   },
+   "accept": [
+    "truth"
+   ]
+  },
+  {
+   "tag": "real_jpg",
+   "path": "dev/realcase/real.jpg",
+   "expect_solve": true,
+   "kind": "実写",
+   "width": 968,
+   "height": 548,
+   "flip_y": true,
+   "sha256": "5b955e302000503b5ccf1dcd1c7fc3876bea3314c83f8e22a81e981ba104cb82",
+   "truth": {
+    "center_ra": 61.891428541152735,
+    "center_dec": 41.964746128467596,
+    "center_xyz": [
+     0.3503220184280772,
+     0.655858674400382,
+     0.6686732255879935
+    ],
+    "scale_arcsec": 1.461524582743095,
+    "pa_up_deg": 152.85770978549786,
+    "parity": 1,
+    "mirror": true
+   },
+   "truth_source": "oracle",
+   "index": "index-5205-02",
+   "logodds_v6": 116.9066162109375,
+   "nmatch_v6": 17,
+   "quads_tried_v6": 110,
+   "v6": {
+    "n_sources": 17,
+    "solve_offline_s": 3.356,
+    "solved_label": "全天 + スケール全域",
+    "solved_kind": "xylist"
+   },
+   "reported": {
+    "center_ra": 61.891428541152735,
+    "center_dec": 41.964746128467596,
+    "scale_arcsec": 1.4616695161804887,
+    "pa_up_deg": 152.85948911147287,
+    "parity": 1
+   },
+   "reported_vs_truth": {
+    "center_arcsec": 0.0,
+    "scale_rel": 9.917e-05,
+    "rot_deg": 0.00178,
+    "parity_same": true
+   },
+   "wcs": {
+    "CTYPE1": "RA---TAN-SIP",
+    "CTYPE2": "DEC--TAN-SIP",
+    "CRVAL1": 61.9054525865,
+    "CRVAL2": 41.9670055097,
+    "CRPIX1": 459.110229492,
+    "CRPIX2": 281.243808746,
+    "CD1_1": -0.000361518351766,
+    "CD1_2": 0.000185181443177,
+    "CD2_1": -0.000184907349411,
+    "CD2_2": -0.000361282369434,
+    "LONPOLE": 180.0,
+    "LATPOLE": 0.0,
+    "A_ORDER": 2,
+    "A_0_2": 3.10595881205e-06,
+    "A_1_1": 5.27097682488e-06,
+    "A_2_0": 1.42187282853e-06,
+    "B_ORDER": 2,
+    "B_0_2": 1.4839737972e-05,
+    "B_1_1": -1.3533559724e-06,
+    "B_2_0": -7.05630693601e-07,
+    "AP_ORDER": 2,
+    "AP_0_0": -2.99770651609e-05,
+    "AP_0_1": 6.1481054021e-06,
+    "AP_0_2": -3.1056614581e-06,
+    "AP_1_0": 2.89376116821e-06,
+    "AP_1_1": -5.27191788487e-06,
+    "AP_2_0": -1.4219177978e-06,
+    "BP_ORDER": 2,
+    "BP_0_0": 0.000178528343439,
+    "BP_0_1": 1.85386051248e-05,
+    "BP_0_2": -1.48507954369e-05,
+    "BP_1_0": -2.08226244644e-06,
+    "BP_1_1": 1.35295947386e-06,
+    "BP_2_0": 7.05755353198e-07
+   },
+   "note": "real_orig を 8bit RGB の JPEG(q85)にしたもの",
+   "truth_tan": {
+    "n_corr": 17,
+    "rms_px": 0.683,
+    "center_ra": 61.89134025497699,
+    "center_dec": 41.964616109806684,
+    "scale_arcsec": 1.461727370775063,
+    "pa_up_deg": 152.90457639328858,
+    "parity": 1,
+    "vs_truth": {
+     "center_arcsec": 0.5243,
+     "scale_rel": 0.0001388,
+     "rot_deg": 0.04687,
+     "parity_same": true
+    }
+   },
+   "accept": [
+    "truth"
+   ]
+  },
+  {
+   "tag": "real_png",
+   "path": "dev/realcase/real.png",
+   "expect_solve": true,
+   "kind": "実写",
+   "width": 968,
+   "height": 548,
+   "flip_y": true,
+   "sha256": "26c314ce6de6a2f946d7c1240bac5c26913b7f19d73012463eb5d3897384533d",
+   "truth": {
+    "center_ra": 61.89144754187624,
+    "center_dec": 41.964755179951666,
+    "center_xyz": [
+     0.3503217511591769,
+     0.6558586973992,
+     0.6686733430536859
+    ],
+    "scale_arcsec": 1.461555497714774,
+    "pa_up_deg": 152.8602884350191,
+    "parity": 1,
+    "mirror": true
+   },
+   "truth_source": "oracle",
+   "index": "index-5205-02",
+   "logodds_v6": 123.84400177001953,
+   "nmatch_v6": 18,
+   "quads_tried_v6": 110,
+   "v6": {
+    "n_sources": 18,
+    "solve_offline_s": 3.423,
+    "solved_label": "全天 + スケール全域",
+    "solved_kind": "xylist"
+   },
+   "reported": {
+    "center_ra": 61.891447541876246,
+    "center_dec": 41.964755179951666,
+    "scale_arcsec": 1.4617225031464873,
+    "pa_up_deg": 152.86394835880725,
+    "parity": 1
+   },
+   "reported_vs_truth": {
+    "center_arcsec": 0.0,
+    "scale_rel": 0.0001143,
+    "rot_deg": 0.00366,
+    "parity_same": true
+   },
+   "wcs": {
+    "CTYPE1": "RA---TAN-SIP",
+    "CTYPE2": "DEC--TAN-SIP",
+    "CRVAL1": 61.9054771718,
+    "CRVAL2": 41.9670150604,
+    "CRPIX1": 459.09790802,
+    "CRPIX2": 281.24646759,
+    "CD1_1": -0.000361486706981,
+    "CD1_2": 0.000185172039315,
+    "CD2_1": -0.000184892603315,
+    "CD2_2": -0.000361359470219,
+    "LONPOLE": 180.0,
+    "LATPOLE": 0.0,
+    "A_ORDER": 2,
+    "A_0_2": 6.38785571293e-06,
+    "A_1_1": 4.56691877307e-06,
+    "A_2_0": 1.37719016141e-06,
+    "B_ORDER": 2,
+    "B_0_2": 1.67483881232e-05,
+    "B_1_1": -1.62649043131e-06,
+    "B_2_0": -7.80860262488e-07,
+    "AP_ORDER": 2,
+    "AP_0_0": 1.62402335336e-05,
+    "AP_0_1": 1.18120051238e-05,
+    "AP_0_2": -6.39071539279e-06,
+    "AP_1_0": 2.54825913108e-06,
+    "AP_1_1": -4.56814977041e-06,
+    "AP_2_0": -1.37716837755e-06,
+    "BP_ORDER": 2,
+    "BP_0_0": 0.000230118998695,
+    "BP_0_1": 2.36533453997e-05,
+    "BP_0_2": -1.6762525753e-05,
+    "BP_1_0": -2.78915070346e-06,
+    "BP_1_1": 1.62626926498e-06,
+    "BP_2_0": 7.81026561476e-07
+   },
+   "note": "real_orig を 8bit の PNG にしたもの",
+   "truth_tan": {
+    "n_corr": 18,
+    "rms_px": 0.677,
+    "center_ra": 61.89134031504847,
+    "center_dec": 41.96461177589098,
+    "scale_arcsec": 1.4617934816640497,
+    "pa_up_deg": 152.90823213257406,
+    "parity": 1,
+    "vs_truth": {
+     "center_arcsec": 0.5907,
+     "scale_rel": 0.0001628,
+     "rot_deg": 0.04794,
+     "parity_same": true
+    }
+   },
+   "accept": [
+    "truth"
+   ]
+  },
+  {
+   "tag": "sim_a0",
+   "path": "dev/simA_0.png",
+   "expect_solve": true,
+   "kind": "結果図",
+   "width": 952,
+   "height": 584,
+   "flip_y": true,
+   "sha256": "f337302ef66d3ebf050f6b2e430e5cec97f9f384a81d302b97706681c8b9fedb",
+   "truth": {
+    "center_ra": 61.908205079032285,
+    "center_dec": 41.97186868792572,
+    "center_xyz": [
+     0.3500908194928419,
+     0.6558878858621916,
+     0.6687656534886158
+    ],
+    "scale_arcsec": 1.6186077934382386,
+    "pa_up_deg": 152.88432069814607,
+    "parity": 1,
+    "mirror": true
+   },
+   "truth_source": "oracle",
+   "index": "index-5205-02",
+   "logodds_v6": 70.31951141357422,
+   "nmatch_v6": 11,
+   "quads_tried_v6": 212437,
+   "v6": {
+    "n_sources": 23,
+    "solve_offline_s": 29.123,
+    "solved_label": "全天 + スケール全域",
+    "solved_kind": "xylist"
+   },
+   "reported": {
+    "center_ra": 61.908205079032285,
+    "center_dec": 41.97186868792571,
+    "scale_arcsec": 1.6190363054585268,
+    "pa_up_deg": 152.8802770218583,
+    "parity": 1
+   },
+   "reported_vs_truth": {
+    "center_arcsec": 0.0,
+    "scale_rel": 0.0002647,
+    "rot_deg": -0.00404,
+    "parity_same": true
+   },
+   "wcs": {
+    "CTYPE1": "RA---TAN-SIP",
+    "CTYPE2": "DEC--TAN-SIP",
+    "CRVAL1": 61.8796419496,
+    "CRVAL2": 41.9562495912,
+    "CRPIX1": 534.335601807,
+    "CRPIX2": 301.888324738,
+    "CD1_1": -0.000400458470972,
+    "CD1_2": 0.000204631997365,
+    "CD2_1": -0.000205205422921,
+    "CD2_2": -0.000400209826954,
+    "LONPOLE": 180.0,
+    "LATPOLE": 0.0,
+    "A_ORDER": 2,
+    "A_0_2": -7.06451258681e-06,
+    "A_1_1": 1.84405831803e-05,
+    "A_2_0": 2.29468497833e-07,
+    "B_ORDER": 2,
+    "B_0_2": 1.67780743424e-05,
+    "B_1_1": 2.35605787224e-07,
+    "B_2_0": 8.54639062632e-08,
+    "AP_ORDER": 2,
+    "AP_0_0": 0.000982126516955,
+    "AP_0_1": -1.93921428063e-05,
+    "AP_0_2": 7.03775752228e-06,
+    "AP_1_0": 1.96859060822e-05,
+    "AP_1_1": -1.84546380532e-05,
+    "AP_2_0": -2.30002448433e-07,
+    "BP_ORDER": 2,
+    "BP_0_0": 0.000317378891489,
+    "BP_0_1": 3.09806462279e-05,
+    "BP_0_2": -1.67953227338e-05,
+    "BP_1_0": 4.56751567007e-07,
+    "BP_1_1": -2.3663883142e-07,
+    "BP_2_0": -8.55308186571e-08
+   },
+   "note": "v6 の結果図(撮影時の向き)。図の中に縮小して描かれた画像なので中心と縮尺が実写と違う。simB_0.png と同じファイル",
+   "truth_tan": {
+    "n_corr": 11,
+    "rms_px": 0.477,
+    "center_ra": 61.90820361682512,
+    "center_dec": 41.97176251910845,
+    "scale_arcsec": 1.6177845981381784,
+    "pa_up_deg": 152.86137052263908,
+    "parity": 1,
+    "vs_truth": {
+     "center_arcsec": 0.3822,
+     "scale_rel": -0.0005086,
+     "rot_deg": -0.02295,
+     "parity_same": true
+    }
+   },
+   "accept": [
+    "truth"
+   ]
+  },
+  {
+   "tag": "sim_a1",
+   "path": "dev/simA_1.png",
+   "expect_solve": true,
+   "kind": "結果図",
+   "width": 952,
+   "height": 584,
+   "flip_y": true,
+   "sha256": "141ac16d5110d00a6835a3e80592e3d0723f1b43c00fb5af8cf7c1e62af5b3a8",
+   "truth": {
+    "center_ra": 61.908813444461174,
+    "center_dec": 41.9704305530653,
+    "center_xyz": [
+     0.3500917593538886,
+     0.6559064116003882,
+     0.6687469919588432
+    ],
+    "scale_arcsec": 1.6221217393814915,
+    "pa_up_deg": 332.8656163210964,
+    "parity": -1,
+    "mirror": false
+   },
+   "truth_source": "oracle",
+   "index": "index-5205-02",
+   "logodds_v6": 53.29343032836914,
+   "nmatch_v6": 9,
+   "quads_tried_v6": 441912,
+   "v6": {
+    "n_sources": 25,
+    "solve_offline_s": 34.781,
+    "solved_label": "全天 + スケール全域",
+    "solved_kind": "xylist"
+   },
+   "reported": {
+    "center_ra": 61.90881344446117,
+    "center_dec": 41.9704305530653,
+    "scale_arcsec": 1.6222963508476442,
+    "pa_up_deg": 332.87240482726077,
+    "parity": -1
+   },
+   "reported_vs_truth": {
+    "center_arcsec": 0.0,
+    "scale_rel": 0.0001076,
+    "rot_deg": 0.00679,
+    "parity_same": true
+   },
+   "wcs": {
+    "CTYPE1": "RA---TAN-SIP",
+    "CTYPE2": "DEC--TAN-SIP",
+    "CRVAL1": 61.9052653596,
+    "CRVAL2": 41.9669946115,
+    "CRPIX1": 485.188804626,
+    "CRPIX2": 288.381340027,
+    "CD1_1": -0.000401044592569,
+    "CD1_2": -0.000205559486994,
+    "CD2_1": -0.000205345198312,
+    "CD2_2": 0.000401112058212,
+    "LONPOLE": 180.0,
+    "LATPOLE": 0.0,
+    "A_ORDER": 2,
+    "A_0_2": -1.18483746556e-05,
+    "A_1_1": -1.68542103251e-05,
+    "A_2_0": -1.87437929471e-06,
+    "B_ORDER": 2,
+    "B_0_2": -2.63760684941e-05,
+    "B_1_1": -4.48355455356e-06,
+    "B_2_0": -2.76275106581e-06,
+    "AP_ORDER": 2,
+    "AP_0_0": 0.000206767033674,
+    "AP_0_1": 6.40749394731e-05,
+    "AP_0_2": 1.18479245439e-05,
+    "AP_1_0": 3.44734748561e-05,
+    "AP_1_1": 1.68551582678e-05,
+    "AP_2_0": 1.87330749151e-06,
+    "BP_ORDER": 2,
+    "BP_0_0": -5.70704328823e-05,
+    "BP_0_1": 0.000100452806559,
+    "BP_0_2": 2.63855671442e-05,
+    "BP_1_0": 1.83619199923e-05,
+    "BP_1_1": 4.48155346731e-06,
+    "BP_2_0": 2.76275988778e-06
+   },
+   "note": "v6 の結果図(北が上)。simB_1.png と同じファイル。v6 でも quad を 44 万個試した難しい画像",
+   "truth_tan": {
+    "n_corr": 9,
+    "rms_px": 0.346,
+    "center_ra": 61.90899509772996,
+    "center_dec": 41.970333626839064,
+    "scale_arcsec": 1.6204458194210347,
+    "pa_up_deg": 332.8296279478434,
+    "parity": -1,
+    "vs_truth": {
+     "center_arcsec": 0.5985,
+     "scale_rel": -0.001033,
+     "rot_deg": -0.03599,
+     "parity_same": true
+    }
+   },
+   "accept": [
+    "truth",
+    "truth_tan"
+   ],
+   "accept_reason": "TAN だけで当て直すと正解と スケール -0.103% 違う(一致 9 個、TAN の残差 0.35 px)。正解の 2 次の SIP が許容と同じくらいあいまいなので、どちらかに合えば合格"
+  },
+  {
+   "tag": "sim_c0",
+   "path": "dev/simC_0.png",
+   "expect_solve": true,
+   "kind": "結果図",
+   "width": 952,
+   "height": 584,
+   "flip_y": true,
+   "sha256": "89072226851ebcdb5ac24167f0fa5c2b2dc9a1b9da093f564a6823f7fdd8c4f4",
+   "truth": {
+    "center_ra": 61.90820555847374,
+    "center_dec": 41.97186890910184,
+    "center_xyz": [
+     0.35009081278884235,
+     0.6558878865142165,
+     0.6687656563586096
+    ],
+    "scale_arcsec": 1.6186077949778288,
+    "pa_up_deg": 152.88432120032155,
+    "parity": 1,
+    "mirror": true
+   },
+   "truth_source": "oracle",
+   "index": "index-5205-02",
+   "logodds_v6": 72.99932861328125,
+   "nmatch_v6": 11,
+   "quads_tried_v6": 9184,
+   "v6": {
+    "n_sources": 17,
+    "solve_offline_s": 3.283,
+    "solved_label": "全天 + スケール全域",
+    "solved_kind": "xylist"
+   },
+   "reported": {
+    "center_ra": 61.90820555847374,
+    "center_dec": 41.97186890910184,
+    "scale_arcsec": 1.6189345849077212,
+    "pa_up_deg": 152.8802775296383,
+    "parity": 1
+   },
+   "reported_vs_truth": {
+    "center_arcsec": 0.0,
+    "scale_rel": 0.0002019,
+    "rot_deg": -0.00404,
+    "parity_same": true
+   },
+   "wcs": {
+    "CTYPE1": "RA---TAN-SIP",
+    "CTYPE2": "DEC--TAN-SIP",
+    "CRVAL1": 61.9054544951,
+    "CRVAL2": 41.9669665616,
+    "CRPIX1": 485.512771606,
+    "CRPIX2": 300.135562897,
+    "CD1_1": -0.000400500079275,
+    "CD1_2": 0.000204847715717,
+    "CD2_1": -0.000205070023626,
+    "CD2_2": -0.000400063710951,
+    "LONPOLE": 180.0,
+    "LATPOLE": 0.0,
+    "A_ORDER": 2,
+    "A_0_2": -7.0502003421e-06,
+    "A_1_1": 1.84418937617e-05,
+    "A_2_0": 2.32560355401e-07,
+    "B_ORDER": 2,
+    "B_0_2": 1.6779295176e-05,
+    "B_1_1": 2.38789159773e-07,
+    "B_2_0": 8.54687870265e-08,
+    "AP_ORDER": 2,
+    "AP_0_0": 5.2917800085e-05,
+    "AP_0_1": -1.87547532034e-05,
+    "AP_0_2": 7.05291862457e-06,
+    "AP_1_0": 1.97430583148e-05,
+    "AP_1_1": -1.8452148943e-05,
+    "AP_2_0": -2.32821703188e-07,
+    "BP_ORDER": 2,
+    "BP_0_0": 0.000240582167546,
+    "BP_0_1": 3.10660000178e-05,
+    "BP_0_2": -1.67928579138e-05,
+    "BP_1_0": 4.696655799e-07,
+    "BP_1_1": -2.39173886393e-07,
+    "BP_2_0": -8.55163203185e-08
+   },
+   "note": "v6 の結果図(目標なし)。simD_0.png と同じファイル",
+   "truth_tan": {
+    "n_corr": 11,
+    "rms_px": 0.477,
+    "center_ra": 61.90820361682512,
+    "center_dec": 41.97176251910845,
+    "scale_arcsec": 1.6177845981385481,
+    "pa_up_deg": 152.86137052263908,
+    "parity": 1,
+    "vs_truth": {
+     "center_arcsec": 0.383,
+     "scale_rel": -0.0005086,
+     "rot_deg": -0.02295,
+     "parity_same": true
+    }
+   },
+   "accept": [
+    "truth"
+   ]
+  },
+  {
+   "tag": "3I_00010",
+   "path": "$ZAHYOU_TEST_IMAGES/Downloads/02013I_00010 20_47_25.fits",
+   "expect_solve": true,
+   "kind": "実写",
+   "width": 968,
+   "height": 548,
+   "flip_y": true,
+   "sha256": "ae48c237f0102ae4a6c17a31db31b8d178ed64ebe77772a73e59715eb76712f3",
+   "truth": {
+    "center_ra": 116.52935250406533,
+    "center_dec": 18.455249792719616,
+    "center_xyz": [
+     -0.42368523059152463,
+     0.848692013456227,
+     0.3165638824537982
+    ],
+    "scale_arcsec": 1.4676703256374821,
+    "pa_up_deg": 137.7117957846171,
+    "parity": 1,
+    "mirror": true
+   },
+   "truth_source": "oracle",
+   "index": "index-5205-04",
+   "logodds_v6": 52.879478454589844,
+   "nmatch_v6": 9,
+   "quads_tried_v6": 92,
+   "v6": {
+    "n_sources": 8,
+    "solve_offline_s": 2.682,
+    "solved_label": "画像を直接渡す (2x 縮小)",
+    "solved_kind": "image"
+   },
+   "reported": {
+    "center_ra": 116.52935250406534,
+    "center_dec": 18.455249792719613,
+    "scale_arcsec": 1.4647110005104405,
+    "pa_up_deg": 137.7321659582293,
+    "parity": 1
+   },
+   "reported_vs_truth": {
+    "center_arcsec": 0.0,
+    "scale_rel": -0.002016,
+    "rot_deg": 0.02037,
+    "parity_same": true
+   },
+   "wcs": {
+    "CTYPE1": "RA---TAN-SIP",
+    "CTYPE2": "DEC--TAN-SIP",
+    "CRVAL1": 116.561870621,
+    "CRVAL2": 18.5055496257,
+    "CRPIX1": 345.732587814,
+    "CRPIX2": 233.672239304,
+    "CD1_1": -0.000301881190154,
+    "CD1_2": 0.000273188385618,
+    "CD2_1": -0.000273601414483,
+    "CD2_2": -0.000300758432034,
+    "LONPOLE": 180.0,
+    "LATPOLE": 0.0,
+    "A_ORDER": 2,
+    "A_0_2": 3.54526704848e-05,
+    "A_1_1": -2.43767290339e-05,
+    "A_2_0": 1.86637899651e-05,
+    "B_ORDER": 2,
+    "B_0_2": -1.11985185123e-05,
+    "B_1_1": 5.62056290124e-06,
+    "B_2_0": -5.15504299719e-06,
+    "AP_ORDER": 2,
+    "AP_0_0": -0.0165459840936,
+    "AP_0_1": -0.000218336504772,
+    "AP_0_2": -3.52903453659e-05,
+    "AP_1_0": 0.000158587672987,
+    "AP_1_1": 2.40655676403e-05,
+    "AP_2_0": -1.83958249757e-05,
+    "BP_ORDER": 2,
+    "BP_0_0": 0.00442641480414,
+    "BP_0_1": 5.8908944468e-05,
+    "BP_0_2": 1.11560443858e-05,
+    "BP_1_0": -4.25593456757e-05,
+    "BP_1_1": -5.53618852402e-06,
+    "BP_2_0": 5.08292104574e-06
+   },
+   "note": "3I/ATLAS の撮影(星 8 個)。v6 は画像の 2x 縮小(simplexy 76 個)でだけ解けた境界例。利用者の経路では深い検出(2x2)が要る",
+   "truth_tan": {
+    "n_corr": 11,
+    "rms_px": 1.534,
+    "center_ra": 116.52878800313796,
+    "center_dec": 18.454994715149315,
+    "scale_arcsec": 1.4665261137972738,
+    "pa_up_deg": 137.7814969163152,
+    "parity": 1,
+    "vs_truth": {
+     "center_arcsec": 2.1352,
+     "scale_rel": -0.0007796,
+     "rot_deg": 0.0697,
+     "parity_same": true
+    }
+   },
+   "alt": {
+    "source": "tests-data",
+    "tag": "3I_204725",
+    "truth": {
+     "center_ra": 116.52935250406533,
+     "center_dec": 18.455249792719616,
+     "center_xyz": [
+      -0.42368523059152463,
+      0.848692013456227,
+      0.3165638824537982
+     ],
+     "scale_arcsec": 1.4676703256374821,
+     "pa_up_deg": 137.7117957846171,
+     "parity": 1,
+     "mirror": true
+    },
+    "vs_truth": {
+     "center_arcsec": 0.0,
+     "scale_rel": 0.0,
+     "rot_deg": 0.0,
+     "parity_same": true
+    },
+    "nmatch": 9,
+    "resid_arcsec_rms": 1.9542667994690126
+   },
+   "accept": [
+    "truth",
+    "truth_tan"
+   ],
+   "accept_reason": "TAN だけで当て直すと正解と 中心 2.14″・回転 +0.070° 違う(一致 11 個、TAN の残差 1.53 px)。正解の 2 次の SIP が許容と同じくらいあいまいなので、どちらかに合えば合格",
+   "criteria_override": {
+    "center_arcsec": 3.0,
+    "rot_deg": 0.2,
+    "reason": "正解(WSL 版の解)は 2× 縮小の抽出で一致 9 星から当てた 2 次の SIP で、それ自体のばらつきが基準(2″・0.1°)と同じ大きさ。正解の WCS で対応づけた星だけで理想的に TAN を当てても中心は 1.87〜2.06″ ずれ、星 1 個の位置の散らばりは約 1.36 px(2″)。3 分後の同じ機材の画像を独立に解いた回転 PA 137.608° に対し、新しい解 137.626°・正解 137.712° で、新しい解のほうが近い(2026-10-16 の検出の係の調べ)"
+   }
+  },
+  {
+   "tag": "phaethon_00001",
+   "path": "$ZAHYOU_TEST_IMAGES/Downloads/phaethon_00001.fits",
+   "expect_solve": true,
+   "kind": "実写",
+   "width": 536,
+   "height": 368,
+   "flip_y": true,
+   "sha256": "1b09b7dbdeedf36862c67dbf07e5787780d22183f37bd5ca21f24b46c67224b7",
+   "truth": {
+    "center_ra": 61.88328139543492,
+    "center_dec": 42.066865195364024,
+    "center_xyz": [
+     0.3498530661927889,
+     0.654756670553481,
+     0.6699974137571164
+    ],
+    "scale_arcsec": 3.152667186703843,
+    "pa_up_deg": 96.31715324510586,
+    "parity": 1,
+    "mirror": true
+   },
+   "truth_source": "oracle",
+   "index": "index-5206-02",
+   "logodds_v6": 81.83488464355469,
+   "nmatch_v6": 13,
+   "quads_tried_v6": 1747,
+   "v6": {
+    "n_sources": 13,
+    "solve_offline_s": 2.631,
+    "solved_label": "全天 + スケール全域",
+    "solved_kind": "xylist"
+   },
+   "reported": {
+    "center_ra": 61.88328139543491,
+    "center_dec": 42.06686519536403,
+    "scale_arcsec": 3.1515656106060694,
+    "pa_up_deg": 96.31808597255971,
+    "parity": 1
+   },
+   "reported_vs_truth": {
+    "center_arcsec": 0.0,
+    "scale_rel": -0.0003494,
+    "rot_deg": 0.00093,
+    "parity_same": true
+   },
+   "wcs": {
+    "CTYPE1": "RA---TAN-SIP",
+    "CTYPE2": "DEC--TAN-SIP",
+    "CRVAL1": 61.9021351763,
+    "CRVAL2": 42.0836020016,
+    "CRPIX1": 247.716495514,
+    "CRPIX2": 198.250333786,
+    "CD1_1": -9.71115439489e-05,
+    "CD1_2": 0.00087118765459,
+    "CD2_1": -0.000868928658118,
+    "CD2_2": -9.66401046567e-05,
+    "LONPOLE": 180.0,
+    "LATPOLE": 0.0,
+    "A_ORDER": 2,
+    "A_0_2": 1.63221747098e-06,
+    "A_1_1": 2.06911597405e-06,
+    "A_2_0": 1.27467360471e-05,
+    "B_ORDER": 2,
+    "B_0_2": -7.57504467858e-06,
+    "B_1_1": -4.08956625548e-07,
+    "B_2_0": 7.26569915947e-06,
+    "AP_ORDER": 2,
+    "AP_0_0": -0.000297591994624,
+    "AP_0_1": 2.1323812958e-06,
+    "AP_0_2": -1.6306379397e-06,
+    "AP_1_0": 1.55938536038e-05,
+    "AP_1_1": -2.06569862441e-06,
+    "AP_2_0": -1.2727407776e-05,
+    "BP_ORDER": 2,
+    "BP_0_0": -0.000173515400277,
+    "BP_0_1": 2.79122118889e-07,
+    "BP_0_2": 7.570743218e-06,
+    "BP_1_0": 8.47490465919e-06,
+    "BP_1_1": 4.04616731174e-07,
+    "BP_2_0": -7.25337298581e-06
+   },
+   "note": "Apollo-M MAX bin3 の実写(別の機材・別のスケール)",
+   "truth_tan": {
+    "n_corr": 13,
+    "rms_px": 0.396,
+    "center_ra": 61.88328673973943,
+    "center_dec": 42.06671421401464,
+    "scale_arcsec": 3.153037233739368,
+    "pa_up_deg": 96.30577271666472,
+    "parity": 1,
+    "vs_truth": {
+     "center_arcsec": 0.5437,
+     "scale_rel": 0.0001174,
+     "rot_deg": -0.01138,
+     "parity_same": true
+    }
+   },
+   "alt": {
+    "source": "tests-data",
+    "tag": "phaethon_00001",
+    "truth": {
+     "center_ra": 61.88328139543492,
+     "center_dec": 42.066865195364024,
+     "center_xyz": [
+      0.3498530661927889,
+      0.654756670553481,
+      0.6699974137571164
+     ],
+     "scale_arcsec": 3.152667186703843,
+     "pa_up_deg": 96.31715324510586,
+     "parity": 1,
+     "mirror": true
+    },
+    "vs_truth": {
+     "center_arcsec": 0.0,
+     "scale_rel": 0.0,
+     "rot_deg": 0.0,
+     "parity_same": true
+    },
+    "nmatch": 13,
+    "resid_arcsec_rms": 1.082876692884632
+   },
+   "accept": [
+    "truth"
+   ]
+  },
+  {
+   "tag": "imx432_16bit",
+   "path": "$ZAHYOU_TEST_IMAGES/Documents/claude/nextcloud-fitsviewer/samples/sharpcap-16bit.fits",
+   "expect_solve": true,
+   "kind": "実写",
+   "width": 1608,
+   "height": 1104,
+   "flip_y": true,
+   "sha256": "72c0b5b82d4066517efb0ab2b593c4db92673ddaf9f6847e65379ff550e759bf",
+   "truth": {
+    "center_ra": 4.275986649424888,
+    "center_dec": 38.698102494511176,
+    "center_xyz": [
+     0.7782787047685276,
+     0.05819104999288494,
+     0.6252168099184064
+    ],
+    "scale_arcsec": 2.3188316022080806,
+    "pa_up_deg": 49.13590808638284,
+    "parity": 1,
+    "mirror": true
+   },
+   "truth_source": "tests-data",
+   "index": "index-4108",
+   "logodds_v6": 217.6337890625,
+   "nmatch_v6": 28,
+   "v6": {
+    "n_sources": 38,
+    "solve_field_s": 2.2,
+    "solved_kind": "xylist"
+   },
+   "reported": {
+    "center_ra": 4.275975721370449,
+    "center_dec": 38.6981003859248,
+    "scale_arcsec": 2.318787307195902,
+    "pa_up_deg": 49.13536665037517,
+    "parity": 1
+   },
+   "reported_vs_truth": {
+    "center_arcsec": 0.0316,
+    "scale_rel": -1.91e-05,
+    "rot_deg": -0.00054,
+    "parity_same": true
+   },
+   "wcs": {
+    "CTYPE1": "RA---TAN-SIP",
+    "CTYPE2": "DEC--TAN-SIP",
+    "CRVAL1": 4.20179632523,
+    "CRVAL2": 38.799770108,
+    "CRPIX1": 626.36491394,
+    "CRPIX2": 587.760162354,
+    "CD1_1": 0.000421331853305,
+    "CD1_2": 0.000486649622039,
+    "CD2_1": -0.000487091170616,
+    "CD2_2": 0.000422069876202,
+    "LONPOLE": 180.0,
+    "LATPOLE": 0.0,
+    "A_ORDER": 2,
+    "A_0_2": -9.4450108306e-07,
+    "A_1_1": 2.02287420529e-06,
+    "A_2_0": 4.52449540613e-07,
+    "B_ORDER": 2,
+    "B_0_2": 1.58216468922e-06,
+    "B_1_1": 3.76764459314e-07,
+    "B_2_0": 4.77757350132e-07,
+    "AP_ORDER": 2,
+    "AP_0_0": -0.000218307701844,
+    "AP_0_1": -3.48609131268e-07,
+    "AP_0_2": 9.4604553276e-07,
+    "AP_1_0": 1.08612574826e-06,
+    "AP_1_1": -2.02235718477e-06,
+    "AP_2_0": -4.51808893369e-07,
+    "BP_ORDER": 2,
+    "BP_0_0": -1.48004785554e-05,
+    "BP_0_1": 1.65753677955e-06,
+    "BP_0_2": -1.58236845642e-06,
+    "BP_1_0": 4.18897352601e-07,
+    "BP_1_1": -3.75547208417e-07,
+    "BP_2_0": -4.77564247864e-07
+   },
+   "note": "IMX432 の 16bit 実写(SharpCap、ROWORDER=TOP-DOWN)。4108 で解ける広めの視野。正解は tests-data(solve-field に zahyou の検出をそのまま渡したもの)",
+   "truth_tan": {
+    "n_corr": 28,
+    "rms_px": 0.695,
+    "center_ra": 4.276109186347479,
+    "center_dec": 38.698229032292396,
+    "scale_arcsec": 2.319148288150889,
+    "pa_up_deg": 49.1530536599729,
+    "parity": 1,
+    "vs_truth": {
+     "center_arcsec": 0.571,
+     "scale_rel": 0.0001366,
+     "rot_deg": 0.01715,
+     "parity_same": true
+    }
+   },
+   "accept": [
+    "truth"
+   ]
+  },
+  {
+   "tag": "siril_rgb_stack",
+   "path": "$ZAHYOU_TEST_IMAGES/Documents/claude/nextcloud-fitsviewer/samples/siril-rgb-float.fit",
+   "expect_solve": true,
+   "kind": "実写",
+   "width": 1608,
+   "height": 1104,
+   "flip_y": false,
+   "sha256": "046071343599031aba3ccd9dca79354f271a49d834b1411e6c5dd7f37cba19ef",
+   "truth": {
+    "center_ra": 3.8409086283728104,
+    "center_dec": 38.36206021831352,
+    "center_xyz": [
+     0.7823434122466013,
+     0.0525242686449672,
+     0.6206287026215076
+    ],
+    "scale_arcsec": 2.3159216299379954,
+    "pa_up_deg": 229.16594464561106,
+    "parity": -1,
+    "mirror": false
+   },
+   "truth_source": "tests-data",
+   "index": "index-4108",
+   "logodds_v6": 207.30828857421875,
+   "nmatch_v6": 26,
+   "v6": {
+    "n_sources": 400,
+    "solve_field_s": 2.3,
+    "solved_kind": "xylist"
+   },
+   "reported": {
+    "center_ra": 3.840897767759131,
+    "center_dec": 38.3620580664986,
+    "scale_arcsec": 2.31606297770283,
+    "pa_up_deg": 229.16606507907008,
+    "parity": -1
+   },
+   "reported_vs_truth": {
+    "center_arcsec": 0.0316,
+    "scale_rel": 6.103e-05,
+    "rot_deg": 0.00012,
+    "parity_same": true
+   },
+   "wcs": {
+    "CTYPE1": "RA---TAN-SIP",
+    "CTYPE2": "DEC--TAN-SIP",
+    "CRVAL1": 3.57122001681,
+    "CRVAL2": 38.4267140788,
+    "CRPIX1": 513.427408218,
+    "CRPIX2": 734.956985474,
+    "CD1_1": 0.000422230087171,
+    "CD1_2": -0.000485476930566,
+    "CD2_1": -0.000485615448729,
+    "CD2_2": -0.000421914874542,
+    "LONPOLE": 180.0,
+    "LATPOLE": 0.0,
+    "A_ORDER": 2,
+    "A_0_2": -2.10197852329e-07,
+    "A_1_1": 2.36168703302e-07,
+    "A_2_0": -2.49138784185e-07,
+    "B_ORDER": 2,
+    "B_0_2": -5.76149990918e-07,
+    "B_1_1": -4.18284729141e-07,
+    "B_2_0": -1.27507459662e-07,
+    "AP_ORDER": 2,
+    "AP_0_0": -1.35972780372e-05,
+    "AP_0_1": 7.12942783051e-09,
+    "AP_0_2": 2.10150328852e-07,
+    "AP_1_0": 6.58238323949e-09,
+    "AP_1_1": -2.36370901639e-07,
+    "AP_2_0": 2.49261328075e-07,
+    "BP_ORDER": 2,
+    "BP_0_0": 6.04990698125e-06,
+    "BP_0_1": 1.96530142699e-07,
+    "BP_0_2": 5.75934112584e-07,
+    "BP_1_0": 1.08558135542e-07,
+    "BP_1_1": 4.18249255774e-07,
+    "BP_2_0": 1.27542416988e-07
+   },
+   "note": "Siril でスタックした RGB の float(ROWORDER=BOTTOM-UP)。配列座標で det CD < 0 の唯一の実写。正解は tests-data(solve-field に zahyou の検出をそのまま渡したもの)",
+   "truth_tan": {
+    "n_corr": 26,
+    "rms_px": 0.552,
+    "center_ra": 3.840921660067559,
+    "center_dec": 38.36212500664806,
+    "scale_arcsec": 2.3160699358867443,
+    "pa_up_deg": 229.16998942354903,
+    "parity": -1,
+    "vs_truth": {
+     "center_arcsec": 0.2361,
+     "scale_rel": 6.404e-05,
+     "rot_deg": 0.00404,
+     "parity_same": true
+    }
+   },
+   "accept": [
+    "truth"
+   ]
+  },
+  {
+   "tag": "c2025a6_00001",
+   "path": "$ZAHYOU_TEST_IMAGES/Downloads/C2025A6/C2025A6_00001 04_23_42.fits",
+   "expect_solve": true,
+   "kind": "実写",
+   "width": 2704,
+   "height": 1536,
+   "flip_y": true,
+   "sha256": "c846b1b3b97f10889d48f4f97910559e39e4f3e8f506f35b76ddb9166c0394a5",
+   "truth": {
+    "center_ra": 156.6418324308382,
+    "center_dec": 41.93356986497205,
+    "center_xyz": [
+     -0.6829516699368539,
+     0.294947757656556,
+     0.6682685364311507
+    ],
+    "scale_arcsec": 0.7472598612227372,
+    "pa_up_deg": 87.45172387065642,
+    "parity": 1,
+    "mirror": true
+   },
+   "truth_source": "tests-data",
+   "index": "index-5206-06",
+   "logodds_v6": 195.20672607421875,
+   "nmatch_v6": 22,
+   "v6": {
+    "n_sources": 57,
+    "solve_field_s": 3.2,
+    "solved_kind": "xylist"
+   },
+   "reported": {
+    "center_ra": 156.64182972811568,
+    "center_dec": 41.93357437722476,
+    "scale_arcsec": 0.7473748393509143,
+    "pa_up_deg": 87.45236668044029,
+    "parity": 1
+   },
+   "reported_vs_truth": {
+    "center_arcsec": 0.0178,
+    "scale_rel": 0.0001539,
+    "rot_deg": 0.00064,
+    "parity_same": true
+   },
+   "wcs": {
+    "CTYPE1": "RA---TAN-SIP",
+    "CTYPE2": "DEC--TAN-SIP",
+    "CRVAL1": 156.63399903,
+    "CRVAL2": 42.0538492384,
+    "CRPIX1": 772.413726807,
+    "CRPIX2": 766.465381622,
+    "CD1_1": 9.24490881245e-06,
+    "CD1_2": 0.000207366728607,
+    "CD2_1": -0.000207428282232,
+    "CD2_2": 9.27491482475e-06,
+    "LONPOLE": 180.0,
+    "LATPOLE": 0.0,
+    "A_ORDER": 2,
+    "A_0_2": 1.12175882544e-06,
+    "A_1_1": 2.16287071309e-07,
+    "A_2_0": -3.75891915026e-07,
+    "B_ORDER": 2,
+    "B_0_2": 1.57701892485e-07,
+    "B_1_1": 2.3128783764e-07,
+    "B_2_0": 6.27564960344e-07,
+    "AP_ORDER": 2,
+    "AP_0_0": -0.000174318952961,
+    "AP_0_1": 6.07960870309e-07,
+    "AP_0_2": -1.12189502674e-06,
+    "AP_1_0": 1.41311712359e-08,
+    "AP_1_1": -2.14879478817e-07,
+    "AP_2_0": 3.76621499852e-07,
+    "BP_ORDER": 2,
+    "BP_0_0": -3.3526060845e-05,
+    "BP_0_1": 2.51012674116e-07,
+    "BP_0_2": -1.56790248964e-07,
+    "BP_1_0": 2.74913382367e-07,
+    "BP_1_1": -2.30778874249e-07,
+    "BP_2_0": -6.28132910143e-07
+   },
+   "note": "ASI664MC の C/2025 A6 の撮影(彗星入り、カラー 3 面、2704×1536)。正解は tests-data(solve-field に zahyou の検出をそのまま渡したもの)",
+   "truth_tan": {
+    "n_corr": 22,
+    "rms_px": 0.588,
+    "center_ra": 156.64189789714524,
+    "center_dec": 41.933557093884744,
+    "scale_arcsec": 0.7473344365714628,
+    "pa_up_deg": 87.44250116712506,
+    "parity": 1,
+    "vs_truth": {
+     "center_arcsec": 0.1813,
+     "scale_rel": 9.98e-05,
+     "rot_deg": -0.00922,
+     "parity_same": true
+    }
+   },
+   "accept": [
+    "truth"
+   ]
+  },
+  {
+   "tag": "starchart_phaethon",
+   "path": "$ZAHYOU_TEST_IMAGES/Downloads/20261031 3200 Phaethon StarChart 40arcmin.png",
+   "expect_solve": true,
+   "kind": "星図",
+   "width": 2015,
+   "height": 1001,
+   "flip_y": true,
+   "sha256": "cf9ce96698e4a538306798af8c273024ede18643cb26e3f6a7d9b90bcbde8cb4",
+   "truth": {
+    "center_ra": 319.3311289907144,
+    "center_dec": 38.031203203335295,
+    "center_xyz": [
+     0.5974427025714402,
+     -0.5133173205425368,
+     0.6160905335867161
+    ],
+    "scale_arcsec": 1.1810553943753808,
+    "pa_up_deg": 179.922269502842,
+    "parity": 1,
+    "mirror": true
+   },
+   "truth_source": "tests-data",
+   "index": "index-5205-14",
+   "logodds_v6": 156.43154907226562,
+   "nmatch_v6": 31,
+   "v6": {
+    "n_sources": 400,
+    "solve_field_s": 4.0,
+    "solved_kind": "xylist"
+   },
+   "reported": {
+    "center_ra": 319.3311206386563,
+    "center_dec": 38.03119768366721,
+    "scale_arcsec": 1.1820162907221232,
+    "pa_up_deg": 179.93110895341528,
+    "parity": 1
+   },
+   "reported_vs_truth": {
+    "center_arcsec": 0.0309,
+    "scale_rel": 0.0008136,
+    "rot_deg": 0.00884,
+    "parity_same": true
+   },
+   "wcs": {
+    "CTYPE1": "RA---TAN-SIP",
+    "CTYPE2": "DEC--TAN-SIP",
+    "CRVAL1": 319.389552321,
+    "CRVAL2": 37.9971069539,
+    "CRPIX1": 867.598007202,
+    "CRPIX2": 604.869132996,
+    "CD1_1": -0.000327895900536,
+    "CD1_2": -7.38838692427e-07,
+    "CD2_1": -6.95840832813e-08,
+    "CD2_2": -0.000328778978983,
+    "LONPOLE": 180.0,
+    "LATPOLE": 0.0,
+    "A_ORDER": 2,
+    "A_0_2": 1.5406616532e-05,
+    "A_1_1": 1.58240855491e-06,
+    "A_2_0": 1.7226608865e-06,
+    "B_ORDER": 2,
+    "B_0_2": 1.15623271629e-05,
+    "B_1_1": 3.31033759671e-06,
+    "B_2_0": 6.72145108621e-07,
+    "AP_ORDER": 2,
+    "AP_0_0": 0.00446872846251,
+    "AP_0_1": 6.60447064516e-05,
+    "AP_0_2": -1.55008603366e-05,
+    "AP_1_0": 1.89950084526e-05,
+    "AP_1_1": -1.6093593264e-06,
+    "AP_2_0": -1.72317792354e-06,
+    "BP_ORDER": 2,
+    "BP_0_0": 0.00413063294895,
+    "BP_0_1": 5.70272484349e-05,
+    "BP_0_2": -1.16420420481e-05,
+    "BP_1_0": 1.47861048757e-05,
+    "BP_1_1": -3.32994110771e-06,
+    "BP_2_0": -6.7373544771e-07
+   },
+   "note": "Occult が描いた星図(白地に黒い星、PNG)。残差が大きい(rms 2.85″・最大 9.6″)。正解は tests-data(solve-field に zahyou の検出をそのまま渡したもの)",
+   "truth_tan": {
+    "n_corr": 34,
+    "rms_px": 2.409,
+    "center_ra": 319.3307483177731,
+    "center_dec": 38.030993561455105,
+    "scale_arcsec": 1.18042414437715,
+    "pa_up_deg": 179.89620947235716,
+    "parity": 1,
+    "vs_truth": {
+     "center_arcsec": 1.3171,
+     "scale_rel": -0.0005345,
+     "rot_deg": -0.02606,
+     "parity_same": true
+    }
+   },
+   "accept": [
+    "truth",
+    "truth_tan"
+   ],
+   "accept_reason": "TAN だけで当て直すと正解と 中心 1.32″ 違う(一致 34 個、TAN の残差 2.41 px)。正解の 2 次の SIP が許容と同じくらいあいまいなので、どちらかに合えば合格"
+  },
+  {
+   "tag": "capture_005514",
+   "path": "$ZAHYOU_TEST_IMAGES/Downloads/Capture_00001 00_55_14.fits",
+   "expect_solve": false,
+   "kind": "実写(ピンぼけ)",
+   "width": 968,
+   "height": 548,
+   "flip_y": true,
+   "sha256": "7693fd56f1d709aaf0652d7060e66b40e08430b5054fee735d4f60adb11cabc9",
+   "truth": null,
+   "truth_source": "oracle",
+   "v6": {
+    "n_sources": 24,
+    "solve_offline_s": 265.913
+   },
+   "note": "ピンぼけの明るい星のドーナツ像(スパイダーの影つき)。星野ではない。v6(WSL)も解けなかった"
+  },
+  {
+   "tag": "tcase_basic16",
+   "path": "dev/tcase/basic16.fits",
+   "expect_solve": false,
+   "kind": "乱数の星野",
+   "width": 900,
+   "height": 600,
+   "flip_y": false,
+   "sha256": "d31d69bd6c61c169f33804f2e623e4553a357268f743b78e90e85d0471f27ec3",
+   "truth": null,
+   "truth_source": "oracle",
+   "v6": {
+    "n_sources": 45,
+    "solve_offline_s": 337.711
+   },
+   "note": "一様乱数で星を置いた合成画像(dev/test_robust.py が作る)。v6(WSL)も解けなかった"
+  },
+  {
+   "tag": "tcase_bayer",
+   "path": "dev/tcase/bayer.fits",
+   "expect_solve": false,
+   "kind": "乱数の星野",
+   "width": 900,
+   "height": 600,
+   "flip_y": false,
+   "sha256": "665759a65a5549dee480d8ced06f028baa6e9bb70f43ff955e4715c29096491a",
+   "truth": null,
+   "truth_source": "oracle",
+   "v6": {
+    "n_sources": 43,
+    "solve_offline_s": 320.063
+   },
+   "note": "同(ベイヤー)。v6(WSL)も解けなかった"
+  },
+  {
+   "tag": "tcase_color",
+   "path": "dev/tcase/color.fits",
+   "expect_solve": false,
+   "kind": "乱数の星野",
+   "width": 900,
+   "height": 600,
+   "flip_y": false,
+   "sha256": "58a43f0ec8d646092f7cc41da10f833628d9daef603de721c137ee7ce99a9ad2",
+   "truth": null,
+   "truth_source": "oracle",
+   "v6": {
+    "n_sources": 43,
+    "solve_offline_s": 325.892
+   },
+   "note": "同(カラー)。v6(WSL)も解けなかった"
+  },
+  {
+   "tag": "tcase_defocus",
+   "path": "dev/tcase/defocus.fits",
+   "expect_solve": false,
+   "kind": "乱数の星野",
+   "width": 900,
+   "height": 600,
+   "flip_y": false,
+   "sha256": "fc6ca15a4e3929915b8f017658048ab39cc366e802389df2630888cbc85452a0",
+   "truth": null,
+   "truth_source": "oracle",
+   "v6": {
+    "n_sources": 42,
+    "solve_offline_s": 335.761
+   },
+   "note": "同(ピンぼけ)。v6(WSL)も解けなかった"
+  },
+  {
+   "tag": "tcase_dense",
+   "path": "dev/tcase/dense.fits",
+   "expect_solve": false,
+   "kind": "乱数の星野",
+   "width": 900,
+   "height": 600,
+   "flip_y": false,
+   "sha256": "a93848939c3fd5943f344fb98d48dcb7f926bb873d62c87ac8accef25e464db1",
+   "truth": null,
+   "truth_source": "oracle",
+   "v6": {
+    "n_sources": 400,
+    "solve_offline_s": 319.993
+   },
+   "note": "同(星 400 個)。v6(WSL)も解けなかった"
+  },
+  {
+   "tag": "tcase_few",
+   "path": "dev/tcase/few.fits",
+   "expect_solve": false,
+   "kind": "乱数の星野",
+   "width": 900,
+   "height": 600,
+   "flip_y": false,
+   "sha256": "e268b9b6a940842ff97833127c074d6549373f8361d1403d3445bb62acb6268e",
+   "truth": null,
+   "truth_source": "oracle",
+   "v6": {
+    "n_sources": 6,
+    "solve_offline_s": 44.038
+   },
+   "note": "同(星 6 個)。v6(WSL)も解けなかった"
+  },
+  {
+   "tag": "tcase_grad",
+   "path": "dev/tcase/grad.fits",
+   "expect_solve": false,
+   "kind": "乱数の星野",
+   "width": 900,
+   "height": 600,
+   "flip_y": false,
+   "sha256": "3d946fb3bbe9bcc326c5fbc440d3332ced36a8e0eaebe570a4d4c50c471ac7c7",
+   "truth": null,
+   "truth_source": "oracle",
+   "v6": {
+    "n_sources": 31,
+    "solve_offline_s": 170.305
+   },
+   "note": "同(カブリ)。v6(WSL)も解けなかった"
+  },
+  {
+   "tag": "tcase_tall",
+   "path": "dev/tcase/tall.fits",
+   "expect_solve": false,
+   "kind": "乱数の星野",
+   "width": 400,
+   "height": 1200,
+   "flip_y": false,
+   "sha256": "35c86b20a892f0c7e8ba7faeb499f65df844ec3205abe7af8aafd8aa130cfb1c",
+   "truth": null,
+   "truth_source": "oracle",
+   "v6": {
+    "n_sources": 57,
+    "solve_offline_s": 334.904
+   },
+   "note": "同(縦長 400×1200)。v6(WSL)も解けなかった"
+  },
+  {
+   "tag": "tcase_trail",
+   "path": "dev/tcase/trail.fits",
+   "expect_solve": false,
+   "kind": "乱数の星野",
+   "width": 900,
+   "height": 600,
+   "flip_y": false,
+   "sha256": "8d0e543d65ef3c2c3eb96e4a76bec0d9cbeea533f4ace696a695e0dc7ced3c43",
+   "truth": null,
+   "truth_source": "oracle",
+   "v6": {
+    "n_sources": 45,
+    "solve_offline_s": 305.736
+   },
+   "note": "同(流れた星)。v6(WSL)も解けなかった"
+  },
+  {
+   "tag": "tcase_vig",
+   "path": "dev/tcase/vig.fits",
+   "expect_solve": false,
+   "kind": "乱数の星野",
+   "width": 900,
+   "height": 600,
+   "flip_y": false,
+   "sha256": "8065d7e71b57c084e3b397f1b030b0fa12da2f9472a5321e70091c5b33ec4e0e",
+   "truth": null,
+   "truth_source": "oracle",
+   "v6": {
+    "n_sources": 41,
+    "solve_offline_s": 293.7
+   },
+   "note": "同(周辺減光)。v6(WSL)も解けなかった"
+  },
+  {
+   "tag": "cap_20260201",
+   "path": "$ZAHYOU_TEST_IMAGES/Downloads/2026-02-01/Capture/18_35_41/Capture_00001 18_35_41.fits",
+   "expect_solve": false,
+   "kind": "実写(光条)",
+   "width": 968,
+   "height": 548,
+   "flip_y": true,
+   "sha256": "d146d10284bbc77d7a8a8f2d13296b93fb01ff0fbf34fd4bdfa58919e0e85fec",
+   "truth": null,
+   "truth_source": "tests-data",
+   "v6": {
+    "n_sources": 16,
+    "solve_field_tries": [
+     "xylist/scale 3.9s",
+     "xylist/blind 56.8s",
+     "image/scale 158.0s"
+    ]
+   },
+   "note": "明るい星 1 つと光条。v6(WSL)は 3 通りとも解けなかった"
+  }
+ ]
+}

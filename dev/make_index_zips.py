@@ -6,7 +6,7 @@ C:\\AstrometryData の index ファイルを、画角の段ごとに zip へま�
 
 利用者が「自分の画角に必要な段だけ」落とせるように、scale ごとに分ける。
 zip の中身は AstrometryData/index-....fits なので、
-C:\\ 直下に展開すればマニュアル 2.3 の配置になる。
+C:\\ 直下に展開すればマニュアル 4.4 の配置になる(v4。v3 では 2.3)。
 """
 from __future__ import annotations
 
@@ -34,6 +34,30 @@ astrometry.net 星図データ (index files)
 出典: https://portal.nersc.gov/project/cosmo/temp/dstn/index-5200/LITE/
       5200 シリーズ LITE (Tycho-2 + Gaia DR2)
 
+データの条件とクレジット
+------------------------
+この zip を人に渡すときは、この README を外さずに一緒に渡してください。
+中身は、astrometry.net (https://astrometry.net/ 、Lang et al. 2010, AJ 139, 1782) が
+作って公開している上記の索引ファイルを、改変せずにそのまま詰め直したものです
+(回線の細い場所でまとめて取れるようにしただけで、各ファイルは出典と同一)。
+星のデータは Gaia DR2 と Tycho-2 から作られており、元の星表の条件がそのままかかります。
+
+  ・Gaia のデータは CC BY-NC 3.0 IGO です。
+      https://creativecommons.org/licenses/by-nc/3.0/igo/
+    商用利用には ESA の許可が要ります。クレジット: ESA/Gaia/DPAC
+  ・Høg, E., et al. (2000), "The Tycho-2 Catalogue of the 2.5 million brightest
+    stars", A&A 355, L27
+  ・Gaia Collaboration, Prusti, T., et al. (2016), "The Gaia mission", A&A 595, A1
+  ・Gaia Collaboration, Brown, A. G. A., et al. (2018), "Gaia Data Release 2.
+    Summary of the contents and survey properties", A&A 616, A1
+
+  This work has made use of data from the European Space Agency (ESA) mission
+  Gaia (https://www.cosmos.esa.int/gaia), processed by the Gaia Data Processing
+  and Analysis Consortium (DPAC,
+  https://www.cosmos.esa.int/web/gaia/dpac/consortium). Funding for the DPAC
+  has been provided by national institutions, in particular the institutions
+  participating in the Gaia Multilateral Agreement.
+
 展開のしかた
 ------------
 C:\\ 直下に展開してください。次のようになれば正しい配置です。
@@ -42,12 +66,13 @@ C:\\ 直下に展開してください。次のようになれば正しい配置
     ...
     C:\\AstrometryData\\index-{scale}-47.fits
 
-WSL 側の /etc/astrometry.cfg に
+zahyou v7 から(試作版 v7-dev を含む)は、置くだけで読みます。WSL も設定ファイルも要りません。
+
+v6 (WSL を使う版) で使う場合は、WSL 側の /etc/astrometry.cfg に
     add_path /mnt/c/AstrometryData
     autoindex
 が書かれていれば、追加のファイルは自動で認識されます。
-
-なお /mnt/c からの読み出しは遅いので、WSL の中へ移すと数倍速くなります。
+なお v6 では /mnt/c からの読み出しが遅いので、WSL の中へ移すと数倍速くなります。
     cp -r /mnt/c/AstrometryData ~/AstrometryData
     sudo sed -i "s#/mnt/c/AstrometryData#$HOME/AstrometryData#" /etc/astrometry.cfg
 

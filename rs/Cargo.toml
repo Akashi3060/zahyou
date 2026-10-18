@@ -1,0 +1,54 @@
+# zahyou の Rust 版(第 2 段)。設計: ../docs/design-native-solver.md と docs/rust-port.md
+[workspace]
+resolver = "3"
+members = [
+    "crates/zahyou-index",
+    "crates/zahyou-wcs",
+    "crates/zahyou-image",
+    "crates/zahyou-net",
+    "crates/zahyou-plot",
+    "crates/zahyou-solver",
+    "app",
+]
+exclude = ["proto"]
+
+[workspace.package]
+version = "7.0.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+authors = ["Yoshitaka Fujikawa / AstroKIT, Kyushu Institute of Technology"]
+publish = false
+
+[workspace.dependencies]
+zahyou-index = { path = "crates/zahyou-index" }
+zahyou-wcs = { path = "crates/zahyou-wcs" }
+zahyou-image = { path = "crates/zahyou-image" }
+zahyou-net = { path = "crates/zahyou-net" }
+zahyou-plot = { path = "crates/zahyou-plot" }
+zahyou-solver = { path = "crates/zahyou-solver" }
+memmap2 = "0.9"
+bytemuck = "1"
+rayon = "1.10"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
+flate2 = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "3", features = ["json"] }
+sha2 = "0.10"
+tiny-skia = "0.11"
+ab_glyph = "0.2"
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "glow", "wgpu", "accesskit"] }
+wgpu = { version = "27", default-features = false, features = ["dx12", "wgsl", "std"] }
+rfd = "0.15"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "unwind"
+
+# 試験でも計算は速く(索引の総当たりの照合などが重い)
+[profile.test]
+opt-level = 2

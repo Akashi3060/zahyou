@@ -1,0 +1,23 @@
+[package]
+name = "zahyou-solver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+zahyou-wcs = { workspace = true }
+zahyou-index = { workspace = true }
+zahyou-image = { workspace = true }
+# 索引のファイルごとの照合と仮説の検証を並列に(MIT / Apache-2.0)
+rayon = { workspace = true }
+# trace(途中の値の JSON。Python の sv_solve の trace と同じ形)(MIT / Apache-2.0)
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# 試験と速さの物差しで Python 基準実装の値(rs/testdata/solver_*.json・dev/solver_truth.json)を読む。
+# float_roundtrip で実数をビットまで同じに戻す。sha2 は画像と星のリストの照合(どれも MIT / Apache-2.0)
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+sha2 = { workspace = true }

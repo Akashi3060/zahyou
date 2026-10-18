@@ -1,0 +1,38 @@
+[package]
+name = "zahyou"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+description = "天体画像から目標への向きを求める"
+build = "build.rs"
+
+[[bin]]
+name = "zahyou"
+path = "src/main.rs"
+
+[dependencies]
+zahyou-wcs = { workspace = true }
+zahyou-index = { workspace = true }
+zahyou-image = { workspace = true }
+zahyou-net = { workspace = true }
+zahyou-plot = { workspace = true }
+zahyou-solver = { workspace = true }
+# 画面。eframe 0.33(Rust 1.94 では 0.36 が使えない)。wgpu は DX12 だけを有効にする(ワークスペースの設定)
+eframe = { workspace = true }
+wgpu = { workspace = true }
+# ファイルの選択・保存のダイアログと、確認のメッセージボックス(Windows の標準のもの)
+rfd = { version = "0.15", default-features = false }
+serde = { workspace = true }
+serde_json = { workspace = true, features = ["preserve_order"] }
+# 画面の自分の撮影(--shot)を PNG に書く
+image = { workspace = true }
+# フォントの面の名前を読む(.ttc から「Yu Gothic UI」を選ぶ)
+ttf-parser = "0.25"
+rayon = { workspace = true }
+
+[build-dependencies]
+# 版情報とマニフェスト(PerMonitorV2・ComCtl32 v6)を exe に埋め込む。MIT
+winresource = "0.1"

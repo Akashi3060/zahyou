@@ -14,7 +14,7 @@ import astropy.units as u
 
 def normalize_wcs_header(header, shape):
     """
-    solve-field が返す .wcs は画像データを持たないので、そのまま WCS() に渡すと
+    解析が返す WCS ヘッダーは画像データを持たないので、そのまま WCS() に渡すと
     「軸数が合わない」と警告が出る。画像に合わせて整えたコピーを返す。
     """
     h = header.copy()
@@ -25,8 +25,8 @@ def normalize_wcs_header(header, shape):
     # 観測日時由来のキーワードが中途半端に残っていると FITSFixedWarning が出る
     for key in ("MJD-OBS", "DATE-OBS", "MJD-AVG", "MJD-END"):
         h.pop(key, None)
-    # astrometry.net は EQUINOX しか書かないので astropy は FK5 と解釈するが、
-    # インデックスの元カタログ (Tycho-2 / Gaia) は ICRS。明示しておく。
+    # astrometry.net (オンライン解析) は EQUINOX しか書かないので astropy は FK5 と
+    # 解釈するが、インデックスの元カタログ (Tycho-2 / Gaia) は ICRS。明示しておく。
     h.pop("EQUINOX", None)
     h.pop("RADECSYS", None)
     h["RADESYS"] = "ICRS"
@@ -41,23 +41,41 @@ def as_icrs(coord):
         return coord
 
 
-def wcs_summary(wcs, shape):
-    """解けた WCS の要点をまとめる。"""
+def wcs_summary(wcs, shape, flip_y=None):
+    """
+    解けた WCS の要点をまとめる。
+
+    flip_y は「表示で上下を反転するか」(SolveInput.flip_y。図 1 も同じ向きで描く)。
+    渡すと、位置角とパリティを**画面の見た目**で出す:
+      画面の上   … flip_y なら配列の -y 方向 (行 0 が画面の上に来る画像)
+      パリティ   … 画面 (x 右・y 上) で「北が上なら東が左」= 空を見上げたままの
+                    向きを「正 (鏡像なし)」とする。画面での det(CD) < 0 がそれ
+    None (既定) のときは以前 (v6) の動き (配列の +y を上、det(CD) > 0 を「正」) のまま。
+    この動きは、flip_y=True の画像 (PNG・JPEG・上から下へ並んだ FITS) では位置角が 180° ずれ
+    (パリティは正しい)、下から上へ並んだ FITS (flip_y=False) では位置角は正しくパリティが逆に出ていた。
+    v6 の記録の位置角を直すなら、直すのは flip_y=True の画像のほう (180° を足し引きする)。
+    """
     ny, nx = shape
     scales = proj_plane_pixel_scales(wcs.celestial) * 3600.0
     scale = float(np.mean(scales))
-    center = as_icrs(wcs.pixel_to_world((nx - 1) / 2.0, (ny - 1) / 2.0))
-    # 画面上向き (+y) が空のどちらを向いているか = 位置角
-    up = as_icrs(wcs.pixel_to_world((nx - 1) / 2.0, (ny - 1) / 2.0 + 10))
+    cx, cy = (nx - 1) / 2.0, (ny - 1) / 2.0
+    center = as_icrs(wcs.pixel_to_world(cx, cy))
+    # 画面の上向きが空のどちらを向いているか = 位置角
+    up = as_icrs(wcs.pixel_to_world(cx, cy + (-10 if flip_y else 10)))
     pa = center.position_angle(up).to(u.deg).value
-    cd = wcs.pixel_scale_matrix
-    parity = "正 (鏡像なし)" if np.linalg.det(cd) > 0 else "負 (鏡像)"
+    det = float(np.linalg.det(wcs.pixel_scale_matrix))
+    if flip_y is None:
+        mirrored = not det > 0
+    else:
+        mirrored = (-det if flip_y else det) > 0
+    parity = "負 (鏡像)" if mirrored else "正 (鏡像なし)"
     return dict(center=center, scale=scale, pa=pa, parity=parity,
                 fov_x=nx * scale / 60.0, fov_y=ny * scale / 60.0)
 
 
-def print_solution(wcs, shape):
-    s = wcs_summary(wcs, shape)
+def print_solution(wcs, shape, flip_y=None):
+    """解析結果を出す。flip_y は wcs_summary と同じ (渡すと画面の見た目で出す)。"""
+    s = wcs_summary(wcs, shape, flip_y=flip_y)
     _log("\n" + "=" * 62)
     _log("  解析結果")
     _log("=" * 62)
