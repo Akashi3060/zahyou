@@ -1,7 +1,7 @@
 """dev/*.py を組み立てて zahyou.ipynb (markdown + 3 セル) と zahyou_engine.py を作る。
 
   python dev/build_nb.py            dev/zahyou.ipynb と dev/zahyou_engine.py (試験用。git には入れない) を作り、
-                                    リポジトリ直下の zahyou_engine.py と zahyou_v6.ipynb も書き換える
+                                    リポジトリ直下の zahyou_engine.py と zahyou_v7.ipynb も書き換える
                                     (直下のノートブックはセルの中身だけを id ごとに差し替え、出力の例は残す。
                                     改行は今のファイルに合わせる)
   python dev/build_nb.py 出力.ipynb  指定したノートブックと、その隣の zahyou_engine.py だけを新しく書く
@@ -15,7 +15,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
-ROOT_NB = os.path.join(REPO, "zahyou_v6.ipynb")
+ROOT_NB = os.path.join(REPO, "zahyou_v7.ipynb")
 ROOT_ENGINE = os.path.join(REPO, "zahyou_engine.py")
 
 # 自前の解析エンジン。この順につなぐ (後ろのものが前のものの名前を使う)。
@@ -199,7 +199,7 @@ def engine_imports(module_imports, head):
 ENGINE_HEAD = '''# ==============================================================================
 #  zahyou 解析エンジン
 #
-#  zahyou_v6.ipynb のセル A と GUI 版 (zahyou.exe) から読み込まれます。単体では実行しません。
+#  zahyou_v7.ipynb のセル A から読み込まれます。単体では実行しません。
 #  中身を読む必要はありません (直したいときだけ dev/ の元のファイルを触ってください)。
 #  オフライン解析は自前のエンジン (dev/solver_*.py) で行い、WSL は使いません。
 # ==============================================================================
@@ -369,7 +369,7 @@ def build():
     print(f"wrote {engine_path}  ({len(engine.splitlines())} 行)")
 
     if not explicit:
-        # リポジトリ直下 (GUI・exe・ノートブックが使うもの) も書き換える
+        # リポジトリ直下 (配るノートブックとエンジン) も書き換える
         write_text(ROOT_ENGINE, engine)
         print(f"wrote {ROOT_ENGINE}")
         if os.path.exists(ROOT_NB):

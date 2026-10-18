@@ -295,7 +295,18 @@ class AssembleTest(unittest.TestCase):
         self.assertEqual(list(p.files), ["zahyou.exe", "zahyou_v7_beta.ipynb", "zahyou_engine.py",
                                          "zahyou-manual-v4.pdf", "LICENSE.txt", "THIRD-PARTY-NOTICES.md"])
         self.assertEqual(p.files["THIRD-PARTY-NOTICES.md"], mra.RS_DIR / "THIRD-PARTY-NOTICES.md")
-        self.assertEqual(p.files["zahyou_v7_beta.ipynb"], mra.REPO_DIR / "zahyou_v6.ipynb")
+        self.assertEqual(p.files["zahyou_v7_beta.ipynb"], mra.REPO_DIR / "zahyou_v7.ipynb")
+        # 正式版は zahyou_v7.ipynb の名前で配る(元はどちらもリポジトリ直下の zahyou_v7.ipynb)
+        p = mra.plan_assets(Path("zahyou.exe"), "7.0.0", "v4")
+        self.assertEqual(list(p.files), ["zahyou.exe", "zahyou_v7.ipynb", "zahyou_engine.py",
+                                         "zahyou-manual-v4.pdf", "LICENSE.txt", "THIRD-PARTY-NOTICES.md"])
+        self.assertEqual(p.files["zahyou_v7.ipynb"], mra.REPO_NOTEBOOK)
+
+    def test_repo_notebook_exists(self):
+        # dev/build_nb.py が書き換える直下のノートブック(ROOT_NB)と同じ名前で、実際にある
+        self.assertTrue(mra.REPO_NOTEBOOK.is_file(), mra.REPO_NOTEBOOK)
+        build_nb = (mra.DEV_DIR / "build_nb.py").read_text(encoding="utf-8")
+        self.assertIn(f"ROOT_NB = os.path.join(REPO, \"{mra.REPO_NOTEBOOK.name}\")", build_nb)
 
     def test_main_refuses_bad_out(self):
         exe = self.dir / "zahyou.exe"

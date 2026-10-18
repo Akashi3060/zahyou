@@ -238,7 +238,7 @@ python dev/make_manual.py                                     # 天体画像解�
 - **ページ数を書く箇所が複数ある**(Release 本文と配布ページの txt に書くなら、PDF を組んでから数える)。2026-10-16 の下書きは 33 ページ。
 - `make_manual.py` は作成日時などを固定して組む(ReportLab の invariant)ので、同じ make_manual.py とフォントからは同じバイトの PDF になる。
   6 節の道具は組み直して、リポジトリの PDF と突き合わせる。make_manual.py を直したら、PDF も組み直して一緒に commit する。
-- ノートブック版を直したら `python dev/build_nb.py`(直下の `zahyou_engine.py` と `zahyou_v6.ipynb` のセルの中身を作り直す)。
+- ノートブック版を直したら `python dev/build_nb.py`(直下の `zahyou_engine.py` と `zahyou_v7.ipynb` のセルの中身を作り直す)。
 - 撮影に使う画像 `Capture_00001 00_10_33.fits` と、星図データ(既定の `C:\AstrometryData`)は作者の PC にあるもの。
 
 ## 6. 資産をそろえて SHA256 を作る(`rs/tools/make_release_assets.py`)
@@ -254,7 +254,7 @@ python rs/tools/make_release_assets.py --exe "$(cygpath -w $EXE)" --out "$(cygpa
 | 資産の名前 | 元 | 中身の検査 |
 |---|---|---|
 | `zahyou.exe` | 4 節の `$EXE`(**名前は必ず `zahyou.exe`**。更新の確認はこの名前で探す) | 版情報(FileVersion・ProductVersion・数の版・プレリリースの印)と `--engine-check` の version= が `rs/Cargo.toml` の版と同じ。**建てた人のホームのパス(USERPROFILE)が 0 か所**(paths。区切り `\` `/`・MSYS の `/c/…`・大文字小文字・UTF-8 と UTF-16 のどれでも数える。4.1 節) |
-| `zahyou_v7_beta.ipynb` | リポジトリ直下の `zahyou_v6.ipynb`(v6 と紛れないよう版の名前で。正式版なら `zahyou_v7.ipynb`) | セルの並びと中身が `dev/build_nb.py` の出力と同じ(出力の例はリポジトリのものを残す) |
+| `zahyou_v7.ipynb`(β版なら `zahyou_v7_beta.ipynb`) | リポジトリ直下の `zahyou_v7.ipynb`(2026-10-18 に `zahyou_v6.ipynb` から改名した。配る名前は版から決まる。β版の名前は v6 と紛れないよう) | セルの並びと中身が `dev/build_nb.py` の出力と同じ(出力の例はリポジトリのものを残す) |
 | `zahyou_engine.py` | リポジトリ直下 | `dev/build_nb.py` の出力と同じ・`NB_VERSION` が `"v"` + `rs/Cargo.toml` の版 |
 | `zahyou-manual-v4.pdf` | `天体画像解析プログラム「zahyou」導入・運用マニュアルv4.pdf` | `dev/make_manual.py` で組み直したものとバイト単位で同じ |
 | `LICENSE.txt` | `LICENSE` | — |
@@ -306,7 +306,7 @@ gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false --latest=fa
    v6 からの変更(WSL 不要・Rust・速さと大きさ。数字は README の「実測値」と同じもの)、API キーの欄と、外へ送るもの(まず星の位置、
    解けなければ画像ファイルそのもの。送る前に聞かない。**公開しない指定 `publicly_visible = n` を付けて送るが、nova に送ったものは
    第三者に見られることがある**)と送らない方法(方法を「オフラインのみ」/ API キーの欄を空)、
-   付けた資産の一覧(6 節)と SHA256SUMS.txt の中身、ノートブックの名前(`zahyou_v7_beta.ipynb`。中身はリポジトリの `zahyou_v6.ipynb`)、
+   付けた資産の一覧(6 節)と SHA256SUMS.txt の中身、ノートブックの名前(`zahyou_v7_beta.ipynb`。中身はリポジトリの `zahyou_v7.ipynb`)、
    作った道具の版(rustc・gcc)、動作環境(想定は Windows 11・RAM 8 GB 以上のノート PC、確かめた PC は 1 台だけ)、
    描き方の手動の選び方(`--glow`・`--gpu`)、問い合わせのときに欲しいもの(ログの「描画: …」の行、遅いときは `--bench-ui` の記録)、
    ライセンス(Rust のクレート 213 個、GPL・LGPL・MPL なし)。

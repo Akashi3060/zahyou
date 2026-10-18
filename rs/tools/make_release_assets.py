@@ -6,8 +6,8 @@
 そろえるもの(v6 の Release に合わせる。名前は版から決まる):
 
     zahyou.exe                Rust 版の release ビルド(--exe。名前は必ず zahyou.exe = 更新の確認がこの名前で探す)
-    zahyou_v7_beta.ipynb      ノートブック版(リポジトリ直下の zahyou_v6.ipynb。v6 と紛れないよう版の名前で。
-                              正式版なら zahyou_v7.ipynb)。セル A はエンジンを「同じフォルダーの zahyou_engine.py」で探すので、
+    zahyou_v7.ipynb           ノートブック版(リポジトリ直下の zahyou_v7.ipynb。名前は版から決める。β版なら zahyou_v7_beta.ipynb
+                              = v6 と紛れないよう版の名前で)。セル A はエンジンを「同じフォルダーの zahyou_engine.py」で探すので、
                               ノートブックの名前を変えても動く
     zahyou_engine.py          ノートブック版の解析エンジン(リポジトリ直下のもの)
     zahyou-manual-v4.pdf      導入・運用マニュアル(リポジトリ直下の「…マニュアルv4.pdf」。v4 は dev/make_manual.py の VERSION)
@@ -27,7 +27,7 @@
     manual    dev/make_manual.py を一時フォルダーで組み直したものが、リポジトリの PDF とバイト単位で同じ
               (make_manual.py は作成日時などを固定して組むので、同じ中身なら同じバイトになる)
     notebook  dev/build_nb.py を一時フォルダーへ走らせた出力と比べて、直下の zahyou_engine.py が同じで、
-              zahyou_v6.ipynb のセルの並びと中身が同じ(出力の例はリポジトリのものを残して配る)
+              zahyou_v7.ipynb のセルの並びと中身が同じ(出力の例はリポジトリのものを残して配る)
 
 `--skip <検査>` で検査を飛ばせる(試しのとき用。飛ばした検査は最後に「確かめていない」と出る)。
 出力先は、空か無いフォルダーで、リポジトリの外に限る(直下に .gitignore が無いので、誤って commit しないように)。
@@ -57,6 +57,7 @@ from pathlib import Path
 RS_DIR = Path(__file__).resolve().parents[1]
 REPO_DIR = RS_DIR.parent
 DEV_DIR = REPO_DIR / "dev"
+REPO_NOTEBOOK = REPO_DIR / "zahyou_v7.ipynb"  # 配るノートブックの元(dev/build_nb.py の ROOT_NB)
 MSYS_BIN = Path(r"C:\msys64\ucrt64\bin")
 
 CHECKS = ("version", "paths", "notices", "manual", "notebook")
@@ -346,7 +347,7 @@ def check_notebook(work: Path, version: str) -> list[str]:
     if r.returncode != 0 or not out_nb.exists():
         return ["build_nb.py が動きません: " + " / ".join((r.stdout + r.stderr).strip().splitlines()[-3:])]
     return (compare_engines(work / "zahyou_engine.py", REPO_DIR / "zahyou_engine.py")
-            + compare_notebooks(out_nb, REPO_DIR / "zahyou_v6.ipynb")
+            + compare_notebooks(out_nb, REPO_NOTEBOOK)
             + check_notebook_version(REPO_DIR / "zahyou_engine.py", version))
 
 
@@ -369,7 +370,7 @@ def is_text_asset(name: str) -> bool:
 def plan_assets(exe: Path, version: str, manual_ver: str) -> Plan:
     p = Plan()
     p.files["zahyou.exe"] = exe
-    p.files[notebook_asset_name(version)] = REPO_DIR / "zahyou_v6.ipynb"
+    p.files[notebook_asset_name(version)] = REPO_NOTEBOOK
     p.files["zahyou_engine.py"] = REPO_DIR / "zahyou_engine.py"
     p.files[f"zahyou-manual-{manual_ver}.pdf"] = manual_repo_path(manual_ver)
     p.files["LICENSE.txt"] = REPO_DIR / "LICENSE"

@@ -1,11 +1,11 @@
-# dev/ — zahyou_v6.ipynb の材料とテスト
+# dev/ — zahyou_v7.ipynb の材料とテスト
 
-`zahyou_v6.ipynb` はここのファイルから **生成** している。ノートブックを直接編集すると
+`zahyou_v7.ipynb` はここのファイルから **生成** している。ノートブックを直接編集すると
 次の生成で上書きされるので、直すときはこちらを直すこと。
 
 `build_nb.py` は **2 つの成果物**を書き出す（引数なしで走らせると、リポジトリ直下の 2 つを書き換える）。
 
-* `zahyou_v6.ipynb` … markdown + 3 つの短いセル（合計 90 行ほど）。直下のものは**セルの中身だけを id ごとに
+* `zahyou_v7.ipynb` … markdown + 3 つの短いセル（合計 90 行ほど）。直下のものは**セルの中身だけを id ごとに
   差し替え**、出力の例は残す
 * `zahyou_engine.py` … 解析の中身（オフライン解析の自前のエンジンを含む）。セル A がこれを読み込む。
   `test_solver_real.py --engine` も直下のこれを使う（exe は Rust で書き直したもので、これを読まない）
@@ -62,7 +62,7 @@ exe と同じ版。版を上げるときの直し方は [../docs/release-v7.md](
 ## 試験
 
 ```
-python build_nb.py               # 直下の zahyou_engine.py・zahyou_v6.ipynb (セルの中身だけ) と、
+python build_nb.py               # 直下の zahyou_engine.py・zahyou_v7.ipynb (セルの中身だけ) と、
 #                                    試験用の dev/zahyou.ipynb・dev/zahyou_engine.py を書く
 python test_solver_wcs.py        # solver_wcs:   TAN の往復・当てはめ・FITS ヘッダー
 python test_solver_index.py      # solver_index: 索引の読み込み・kd-tree の探索・ファイルの検査
@@ -205,4 +205,4 @@ v6 と試作版の Python の exe（PyInstaller）用の表示（リポジトリ
 
 ---
 
-必要なければ `dev/` ごと消してよい（`zahyou_v6.ipynb` と `zahyou_engine.py` だけで動く）。
+必要なければ `dev/` ごと消してよい（`zahyou_v7.ipynb` と `zahyou_engine.py` だけで動く）。

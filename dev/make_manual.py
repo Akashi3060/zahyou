@@ -720,7 +720,7 @@ def build(out_path):
 
     ext(h2("ノートブックと必要なライブラリ", st, "4.3"))
     ext(steps([
-        "<b>zahyou_v7_beta.ipynb</b>（β版の Release での名前。中身はリポジトリの zahyou_v6.ipynb と同じ）と "
+        "<b>zahyou_v7_beta.ipynb</b>（β版の Release での名前。中身はリポジトリの zahyou_v7.ipynb と同じ）と "
         "<b>zahyou_engine.py</b> の 2 つを、"
         "分かりやすい場所（デスクトップに作った zahyou フォルダーなど）に"
         "<b>そろえて</b>置きます。片方だけでは動きません。",

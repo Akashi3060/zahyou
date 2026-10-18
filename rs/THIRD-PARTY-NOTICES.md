@@ -10,7 +10,7 @@
 下の LICENSE —— MIT ライセンス —— が及ぶのは **zahyou 自身のソースコードだけ**です。
 
     rs/app/ / rs/crates/ / rs/tools/ / rs/testdata/(Rust 版)
-    zahyou_engine.py / zahyou_v6.ipynb / dev/ / docs/(Python 版)
+    zahyou_engine.py / zahyou_v7.ipynb / dev/ / docs/(Python 版)
 
 オフライン解析のエンジン(`zahyou-solver`・`zahyou-index`・`zahyou-wcs`)も zahyou 自身のコードです。
 `zahyou.exe` に入っている第三者のソフトウェア(この文書の後半)、星図データ

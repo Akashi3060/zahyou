@@ -439,7 +439,7 @@ exe（Rust）とノートブック版（Python）は別々に書いたプログ�
 | `zahyou_engine.py` | 解析の中身（開く必要はありません） |
 
 **[β版の Release（v7.0.0-beta.2）](https://github.com/Akashi3060/zahyou/releases/tag/v7.0.0-beta.2)から 2 つとも落としてください。**
-`zahyou_v7_beta.ipynb` は、リポジトリ直下の `zahyou_v6.ipynb` と同じ中身です（v6 のノートブックと紛れないよう、
+`zahyou_v7_beta.ipynb` は、リポジトリ直下の `zahyou_v7.ipynb` と同じ中身です（v6 のノートブックと紛れないよう、
 名前を変えて配っています。ノートブックはエンジンを `zahyou_engine.py` という名前で探すので、名前を変えても動きます）。
 Releases の最新と[配布ページ](https://cloud.akashi-kosaku.uk/s/M2sNsnA2K4oJ4Co)にあるのは v6 のノートブックで、
 オフライン解析に WSL と astrometry.net が要る古い版です（下の手順 5 は v7 のノートブックの説明です）。
@@ -711,13 +711,13 @@ zahyou のためだけに入れて、ほかに使っていないのなら `wsl -
 - [`docs/index-format.md`](docs/index-format.md) — 星図データ（索引ファイル）の形式。実物を読んで調べたもの
 - [`rs/`](rs/) — exe のソース（cargo のワークスペース）。ビルドと試験の手順は [rs/README.md](rs/README.md)
 - [`CODE_REVIEW_v5.md`](CODE_REVIEW_v5.md) — v5 で何が壊れていたか、v6 で何を直したか
-- [`dev/`](dev/) — `zahyou_v6.ipynb` と `zahyou_engine.py` の生成元（解析エンジン `solver_*.py` を含む）、
+- [`dev/`](dev/) — `zahyou_v7.ipynb` と `zahyou_engine.py` の生成元（解析エンジン `solver_*.py` を含む）、
   検証用スクリプト、星図データの取得スクリプト、マニュアルの組版
 
 ```
 cd rs && cargo build --release -p zahyou   # exe を建てる (MSYS2 UCRT64 の Rust。rs/README.md)
 cd rs && cargo test --workspace            # exe の試験
-python dev/build_nb.py             # 直下の zahyou_engine.py と zahyou_v6.ipynb (セルの中身だけ) を作り直す
+python dev/build_nb.py             # 直下の zahyou_engine.py と zahyou_v7.ipynb (セルの中身だけ) を作り直す
 python dev/test_robust.py          # いろいろな画像で星が検出できるか
 python dev/test_solver_synth.py    # 星図データから作った正解つきの星野を、自前のエンジンで解く
 python dev/test_solver_real.py     # 実写を解いて、v6 で求めた正解と比べる (下の注)
