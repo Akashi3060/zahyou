@@ -379,23 +379,24 @@ gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false --latest=fa
    正式版の Release 本文に書くこと(β版の 7 節の 5 とは逆の内容になる): v7 になって何が変わったか(WSL が要らない・Rust・速さと大きさ)、
    **v6 からの入れ替え**(v6 の［使い方］の「更新を確認」→「更新する」で入れ替わる・`zahyou.exe.bak` が残るので動いたら消してよい・
    設定と覚えた座標と星図データはそのまま・WSL の astrometry.net は要らなくなる・v6 への戻し方)、β版の利用者には β版の「更新を確認」で
-   7.0.0 が出ること、ダウンロードの警告(5 枚の図)、画面の写真(raw の URL はタグ `v7.0.0` で書く)、API キーの欄と外へ送るもの
+   7.0.0 が出ること、ダウンロードの警告(5 枚の図)、画面の写真(raw の URL はタグ `v7` で書く)、API キーの欄と外へ送るもの
    (2026-10-18 に実サイトで確かめた、第三者から何が見えて何が隠れるか)、資産の一覧と SHA256SUMS.txt、ノートブックの名前 `zahyou_v7.ipynb`、
    動作環境(RAM 8 GB 以上・推奨 16 GB、確かめた PC 2 台)、作った道具の版、ライセンス(クレート 213 個、GPL・LGPL・MPL なし)。
-4. タグ `v7.0.0`(main の統合したあとの commit)で **ふつうの Release(Latest)**。ここで v6 の全員と β の利用者に入れ替えが出る(1 節)。
+4. タグ **`v7`**(main の統合したあとの commit。v5・v6 と同じ付け方。exe の版は `7.0.0` のまま。2026-10-19 のユーザーの指示で
+   `v7.0.0` から付け替えた)で **ふつうの Release(Latest)**。ここで v6 の全員と β の利用者に入れ替えが出る(1 節)。
    新しく公開する正式の Release は API の既定で latest になるが、Docs の画面の説明と書き方が食い違っている(0.1 節)ので、**`--latest` を明示する**。
    β と同じく下書きで作って中身を見てから出す(資産は 6 節。ノートブックは `zahyou_v7.ipynb`)。下書きは latest にできないので、
    `--latest` は出すとき(`gh release edit`)に付ける:
 
 ```bash
-gh release create v7.0.0 --repo Akashi3060/zahyou --target main --draft \
+gh release create v7 --repo Akashi3060/zahyou --verify-tag --draft \
   --title "zahyou v7.0.0" --notes-file release-notes-v7.0.0.md \
   "$DIST/zahyou.exe" "$DIST/zahyou_v7.ipynb" "$DIST/zahyou_engine.py" "$DIST/zahyou-manual-v4.pdf" \
   "$DIST/LICENSE.txt" "$DIST/THIRD-PARTY-NOTICES.md" "$DIST/SHA256SUMS.txt"
-gh release view v7.0.0 --repo Akashi3060/zahyou --json isPrerelease,isDraft,assets \
+gh release view v7 --repo Akashi3060/zahyou --json isPrerelease,isDraft,assets \
   --jq '"prerelease=\(.isPrerelease) draft=\(.isDraft)", (.assets[]|[.name,.size,.digest]|@tsv)'   # prerelease=false
-gh release edit v7.0.0 --repo Akashi3060/zahyou --draft=false --latest                       # 出す(ここで v6 の全員に入れ替えが出る)
-gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                                # v7.0.0
+gh release edit v7 --repo Akashi3060/zahyou --draft=false --latest                           # 出す(ここで v6 の全員に入れ替えが出る)
+gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                                # v7
 ```
 
 5. 出したあと: `releases/latest` が `v7.0.0`、資産 `zahyou.exe` の digest が 6 節の SHA256、v6 の exe(一時の LOCALAPPDATA)の
@@ -548,3 +549,37 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
   `rs/testdata/image_formats.json` の 1 か所(Python のエラー文の中。試験は文の先頭だけを見る)を `C:\Users\<名前>`・`%USERPROFILE%` に伏せた。
   著作権の表示の `Yoshitaka Fujikawa` は意図したもの。**git の履歴には前の commit のパスが残る**(消すには履歴の書き換えが要り、公開済みのタグも
   変わるので行わない)
+
+### v7.0.0(タグ `v7`。2026-10-19 08:38 JST に正式版として公開。ユーザーの指示「動作に問題が無いことが確認できれば、v7 をリリースしたい」)
+
+- 判断の材料(2026-10-18): 使用回数は会話記録・PC の上の跡・GitHub・nova から数えた。実際の利用は、作者の 10/17 の予備観測の画像 9 枚を
+  β2 のエンジンで解いたもの(9 枚とも解けた)と、ノート PC での試用。配った exe(β1・β2)の起動は確かめを含めて 27 回、すべて成功、自己診断は毎回 25/25。
+  β1 の公開後に、異常終了・誤った答え・本番の試験の失敗は 0 件(見つかったのは作者のパスの混入〔β2 で直した〕、自己診断が利用者の cache.json に
+  書く癖〔bd0ecca で直し 7.0.0 に入った〕など、解析の答えに関わらないものだけ)。nova の非公開の提出は 10-14 以後 Claude の確かめの 3 件だけで、
+  10/17 の現場の解析は v6 だったとみられる
+- 準備(native-rs): v6 用の古いものを消した(gui/・dev/make_notices.py・dev/upload_share.py・直下の THIRD-PARTY-NOTICES.md・zahyou.ipynb・
+  マニュアル v3)、ノートブックを zahyou_v7.ipynb に改名、版を 7.0.0 に、README・マニュアル・［使い方］タブを正式版の形に(dfeaa69・c865d0b・
+  ede638c・b2ad026・7f1cfbb)。画面写真 13 枚を 7.0.0 の exe で撮り直した(基準の画像は作者の名前の入らない C:\Users\Public\Documents\zahyou-shot に
+  写して開いた。［解析］の画像欄に作者のホームのパスが写っていたため)。マニュアル v4 を組み直した(33 ページ)。7739799
+- exe: 4 節のとおり CARGO_ENCODED_RUSTFLAGS(置き換え 2 つ)を付けて target-release で建てた(2 分 11 秒)。14,040,576 バイト `5ab3dec6…bae4`、
+  作者のホームのパス 0 か所、版情報 7.0.0・v7.0.0・プレリリースの印なし。`--selftest --offline` 25/25、`--engine-check` の version= v7.0.0。
+  `--first-frame` DX12 376〜387 ms・OpenGL 438〜456 ms(同じ日に交互に測った β2 の exe も同じ値。β2 の公開の日の 350 ms・190〜239 ms との差は PC の状態)
+- 試験(同じフラグ・target-release): `cargo test --workspace -- --include-ignored` **284 本通過・失敗 0**(16 分 42 秒)、clippy 指摘 0、
+  check_licenses・`gen_notices --check`・test_tools OK、`test_make_release_assets.py` 32 本(この exe を渡して)、`dev/test_online_settings.py` 14/14
+- 資産(6 節の 5 つの検査が全部 OK、`sha256sum -c` OK、GitHub の digest も全部一致): `zahyou.exe` `5ab3dec6…bae4`、`zahyou_v7.ipynb` `ab742a79…f784`、
+  `zahyou_engine.py` `3c0a2b20…3993`、`zahyou-manual-v4.pdf` `d71eb1d0…76cd`、`LICENSE.txt` `4efc7bab…a3f8`(v6 と同じ)、`THIRD-PARTY-NOTICES.md` `2105f522…aa62`
+- 順番: native-rs を push → **v6 の Release 本文のリンク 13 個を b25a42f に固定**(13 個とも 200 を確かめてから。8 節の 3)→ PR #24 を merge commit で
+  統合(main = `b70f73a`、木は native-rs の 7739799 と同じ。CI は無い)→ タグ `v7.0.0` で下書き → 本文のリンク 15 個が 200 → `--latest` で公開
+  (2026-10-18 23:38 UTC)→ ユーザーの指示でタグを **`v7`** に付け替えた(同じ commit に `v7` を付けて push → `gh release edit v7.0.0 --tag v7`
+  で Release を移し、本文の `…/v7.0.0/…` を `…/v7/…` に → どの Release も使わなくなった `v7.0.0` のタグを消した)
+- 出したあと(5 節): latest は `v7`。Release から落とした exe の SHA256 は SHA256SUMS.txt と一致。更新の確認(一時の設定で): 7.0.0 は
+  「最新版です (v7 / 2026-10-18 版)」、β1・β2・v6 は「新しい版があります: v7」。**v6 の exe の写しで `--update-apply`** を一時のフォルダーで動かし、
+  zahyou.exe が 7.0.0(`5ab3dec6…`)に入れ替わり、v6 の exe が zahyou.exe.bak(`5f771f33…`)として残ることを確かめた。利用者の cache.json・gui.json は前後で同じ
+- **配布ページ(Nextcloud)を v7 に差し替えた**(ユーザーの決定どおり)。TrueNAS の root(一時 cronjob)で: zahyou.exe・zahyou_engine.py・
+  THIRD-PARTY-NOTICES.md・はじめにお読みください.txt(v7 用に書き直し、BOM 付き UTF-8・CRLF)は `cat >` で中身だけ入れ替え(inode・所有者
+  AstroKIT:YoFu・ACL は前のまま)、zahyou_v7.ipynb・マニュアル v4 を足した(所有者と ACL は既存のファイルと同じ)、zahyou_v6.ipynb・マニュアル v3・
+  マニュアル v2・スクリーンショット フォルダーを消した(tank/TrueNAS のスナップショットに残る)。LICENSE.txt は同じ中身なので触れていない。
+  公開 URL(public.php/webdav)の一覧と、落とした 6 つの SHA256 が Release の資産と一致することを確かめた
+- 公開のあとに、［使い方］の写真(app-help.png)を撮り直してマニュアルを組み直した(このブランチ。公開の前に撮ったものは「最新版です (v7.0.0)。
+  公開されている最新版 v6 より新しい版を使っています」と出ていた)。**Release の資産のマニュアルは公開の前に撮った写真のまま**(タグ `v7` の木と同じ)。
+  配布ページのマニュアルも Release の資産と同じもの
