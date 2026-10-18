@@ -8,10 +8,9 @@
 * `zahyou_v6.ipynb` … markdown + 3 つの短いセル（合計 90 行ほど）。直下のものは**セルの中身だけを id ごとに
   差し替え**、出力の例は残す
 * `zahyou_engine.py` … 解析の中身（オフライン解析の自前のエンジンを含む）。セル A がこれを読み込む。
-  GUI・exe・`test_solver_real.py --engine` も直下のこれを使う
+  `test_solver_real.py --engine` も直下のこれを使う（exe は Rust で書き直したもので、これを読まない）
 
 あわせて試験用に `dev/zahyou.ipynb` と `dev/zahyou_engine.py` も書く（git には入れない。`test_notebook_run.py` が使う）。
-直下に残っている `zahyou.ipynb` は WSL 時代の別物で、生成物ではない。
 
 **なぜ分けたか**: 1500 行をノートブックに貼ると、画像を選ぶ場所と結果が出る場所が
 遠く離れてスクロールが大変になる。cell metadata の `jupyter.source_hidden` で
@@ -45,7 +44,7 @@ exe と同じ版。版を上げるときの直し方は [../docs/release-v7.md](
 
     solver_wcs → solver_index → solver_core → zahyou_core → zahyou_plot → nb_ui → nb_main
 
-の順につないで `zahyou_engine.py` を作る（ノートブック版と GUI 版が同じ 1 ファイルを使う形は変えない）。
+の順につないで `zahyou_engine.py` を作る（ノートブック版はこの 1 ファイルだけを読み込む）。
 `solver_synth.py` は試験用なので入れない。
 
 1 つの名前空間につなぐので、`solver_*.py` は次を守る。
@@ -88,7 +87,8 @@ python test_notebook_run.py      # 本物のカーネルでセル A/B を実行�
 | `test_solver_real.py` | v6 の WSL 版で解いた正解（`solver_truth.json`）と同じ画像を解く（画像が手元にあるときだけ。パスはリポジトリからの相対か `$ZAHYOU_TEST_IMAGES/` から。陽性の画像が 1 枚も走らなければ終了コード 2） | 中心 2″、スケール 0.2%、回転 0.1°、鏡像一致。ピンぼけ・光条・乱数の星野は解けず、締め切りの超過 1 秒以内 |
 | `test_robust.py` | 読み込み・前処理・検出（図の星と、解析エンジンに渡す深い検出の星） | 38 ケース（うち 3 つは手元に実写があるときだけ走る。置き場所は `ZAHYOU_TEST_IMAGES`（既定はホームフォルダー）の下の `Downloads`） |
 
-画面の試験（`gui/test_*.py`）は [../gui/README.md](../gui/README.md) にある。
+画面の試験は Rust 版のもの（[../rs/README.md](../rs/README.md)）。v6 と試作版（`v7-dev`）の Python の画面（`gui/`）と
+その試験は 7.0.0 の準備で消した（タグ `v7.0.0-beta.2` の木に残っている。`git show v7.0.0-beta.2:gui/README.md`）。
 
 ### 別の言語へ移すときの備え
 
@@ -145,8 +145,8 @@ python fetch_index.py --check 5202 5203 5204  # 検証だけ
 
 ### エンジンからの読み方
 
-置き場所のフォルダー（既定 `C:\AstrometryData`。ノートブック版はセル C の `INDEX_DIR`、
-GUI は［準備］タブの欄）の `index-*.fits` を `SvIndexCatalog` が走査し、
+置き場所のフォルダー（既定 `C:\AstrometryData`。ノートブック版はセル C の `INDEX_DIR`）の
+`index-*.fits` を `SvIndexCatalog` が走査し、
 ヘッダーを検査する（`sv_validate_index_file`: 大きさ・`INDEXID` と名前・`HEALPIX` とタイル番号）。
 表は使うときに mmap し、整数のまま kd-tree をたどる（全天を探すときも全部を実数に展開しない）。
 設定ファイルは要らない。v6 の WSL の `/etc/astrometry.cfg`（`add_path`）はもう使わない。
@@ -161,7 +161,7 @@ python make_index_zips.py 5204 5203 5202 --out C:\AstrometryData\dist
 なので、`C:\` 直下に展開すればマニュアル 4.4 の配置になる（v4。v3 では 2.3）。
 段ごとの README と `SHA256SUMS.txt` も一緒に出力する。
 中身の星のデータには元の星表（Tycho-2 / Gaia DR2）の条件がかかる
-（[../THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)）。zip の中の README には、その条件
+（[../rs/THIRD-PARTY-NOTICES.md](../rs/THIRD-PARTY-NOTICES.md) の「星図データ」）。zip の中の README には、その条件
 （Gaia は CC BY-NC 3.0 IGO・商用は ESA の許可）・クレジット ESA/Gaia/DPAC・Gaia の定型の謝辞・論文を入れてある。
 **README を直したら zip を作り直して、配布ページの zip も差し替える**（人の作業）。
 
@@ -172,7 +172,8 @@ python make_manual.py                 # ../天体画像解析プログラム「z
 ```
 
 マニュアル v4 は v7（デスクトップ版は Rust の exe、いまはβ版）の本文。v6（WSL を使う版）の v3 の PDF は
-リポジトリ直下に残してある（配布ページが v6 のまま。[../docs/release-v7.md](../docs/release-v7.md) の 8 節）。
+7.0.0 の準備でリポジトリから消した（タグ `v7.0.0-beta.2` の木に残っている。配布ページも v4 に差し替える。
+[../docs/release-v7.md](../docs/release-v7.md) の 8 節）。
 作成日時などを固定して組む（ReportLab の `invariant`）ので、同じ `make_manual.py` とフォントからは同じバイトの PDF になる。
 `make_manual.py` を直したら PDF も組み直して一緒に commit する（`rs/tools/make_release_assets.py` の manual の検査が、
 組み直したものとリポジトリの PDF をバイト単位で比べる）。表紙と 9.1 に版の文字があるので、版を上げたら直す
@@ -191,17 +192,10 @@ python make_manual.py                 # ../天体画像解析プログラム「z
 
 ## 同梱物の表示
 
-```
-python make_notices.py                # ../THIRD-PARTY-NOTICES.md を書き出す
-python make_notices.py --check        # 中身が古くなっていないか見るだけ
-```
-
-これは Python の画面を固めた exe（`gui/`、PyInstaller。v6 と試作版）とリポジトリ直下の `THIRD-PARTY-NOTICES.md` 用。
-配っている v7 の exe（Rust）の表示は `rs/THIRD-PARTY-NOTICES.md` で、`rs/tools/gen_notices.py` が作る（release-v7.md の 3 節）。
-
-ライブラリの表は、建てた exe の TOC（`gui/build/onefile/zahyou/Analysis-00.toc`）から作る。
-表の前後の文（出典・星図データの条件・Gaia の謝辞）は `make_notices.py` の `HEAD` / `TAIL` に書いてあるので、
-NOTICES を直すときはそちらを直してから書き出すこと。
+配っている exe（Rust）の表示は `rs/THIRD-PARTY-NOTICES.md` で、`rs/tools/gen_notices.py` が作る（release-v7.md の 3 節）。
+星図データの条件・Gaia の謝辞・出典の文も `gen_notices.py` の `HEAD` などに書いてある。
+v6 と試作版の Python の exe（PyInstaller）用の表示（リポジトリ直下の `THIRD-PARTY-NOTICES.md`）と、それを作る `make_notices.py` は
+7.0.0 の準備で消した（タグ `v7.0.0-beta.2` の木に残っている）。
 
 ---
 

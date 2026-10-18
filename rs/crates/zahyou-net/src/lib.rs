@@ -6,7 +6,8 @@
 //! - オンライン解析: nova.astrometry.net の API([`nova`])
 //!
 //! Python 版の基準実装は gui/zahyou_update.py・gui/zahyou_env.py・dev/zahyou_core.py
-//! (internet_available / solve_online / resolve_target_name / _cache_*)。
+//! (internet_available / solve_online / resolve_target_name / _cache_*)。gui/ は 7.0.0 の準備でリポジトリから消した
+//! (タグ v7.0.0-beta.2 の木にある。照合値の作り直しは rs/README.md)。
 //! どの関数もブロッキング。呼ぶ側(app)がワーカーのスレッドで動かし、`stop` で中止を伝える。
 #![forbid(unsafe_code)]
 

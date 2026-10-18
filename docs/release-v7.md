@@ -4,7 +4,7 @@
 (画像は同意を取らずに送ってよい・β の Release にも exe 以外を付ける)、3 回目の決定(nova へは公開しない指定を付けて送る)と、
 GitHub の Release の扱いを公式の説明で確かめた結果(0.1 節)に合わせて書き直した(下書き)。
 v6 までの手順(`gui/build_exe.ps1` = PyInstaller、`dev/make_notices.py`)を、cargo の release ビルドの exe・
-`rs/THIRD-PARTY-NOTICES.md`・SHA256 の作り直しに置き換えたもの。
+`rs/THIRD-PARTY-NOTICES.md`・SHA256 の作り直しに置き換えたもの(v6 の 2 つの道具は、7.0.0 の準備でリポジトリから消した。9 節)。
 ビルドと試験の細かい説明は [../rs/README.md](../rs/README.md)、決定と実測は [rust-port.md](rust-port.md) の 9・10 節
 (β版の出し方の元は 10.7 節)。
 
@@ -125,7 +125,8 @@ python -B tools/test_tools.py
 ```
 
 - 依存を足したら、必ず `check_licenses.py` を通す(v6 では `crc32c`(LGPL)が連鎖で入っていた)。
-- 配る `THIRD-PARTY-NOTICES.md` は **`rs/THIRD-PARTY-NOTICES.md`**(リポジトリ直下のものは試作の Python の exe 用)。
+- 配る `THIRD-PARTY-NOTICES.md` は **`rs/THIRD-PARTY-NOTICES.md`**(リポジトリ直下にあった試作の Python の exe 用のものは、
+  7.0.0 の準備で消した。`gen_notices.py` は以前それと星図データの条件の文を突き合わせていたが、それもやめた)。
 
 ## 4. exe を建てて確かめる
 
@@ -331,7 +332,8 @@ gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false --latest=fa
    (`raw.githubusercontent.com/Akashi3060/zahyou/main/docs/img/` の画面写真 3 枚(`app-analyze`・`app-numbers`・`app-prepare`)と
    ダウンロードの警告の図 6 枚、`github.com/Akashi3060/zahyou/blob/main/` の `LICENSE`・`THIRD-PARTY-NOTICES.md`・`gui/README.md`)。
    残りの 1 個は既定のブランチの README の見出し `github.com/Akashi3060/zahyou#動作環境`。main を v7 にすると、v6 の Release ページに
-   v7 の画面(WSL の行の無い［準備］タブ)と v7 の文書が出る。固定した本文で `gh release edit v6 --notes-file …`。**main への統合の前に**行う。
+   v7 の画面(WSL の行の無い［準備］タブ)と v7 の文書が出る。さらに 7.0.0 の準備で直下の `THIRD-PARTY-NOTICES.md` と `gui/` を消したので、
+   固定しないとこの 2 つのリンクは 404 になる。固定した本文で `gh release edit v6 --notes-file …`。**main への統合の前に**行う。
    - **固定先は `b25a42f74236b2d05bf984993a8b4b44eaf4ee00`**(今の main の先頭。「更新したあと新しい exe が起動しない問題を直した (#23)」、
      2026-09-18)。v6 の配っている exe を建てた木と同じ木(木のハッシュ `84dacb9d…`)で、リンク先の 12 個が全部ある(2026-10-17 に
      `git cat-file -e b25a42f:<パス>` で確かめた)。URL の `main` を 40 桁の SHA に置き換える
@@ -371,7 +373,8 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
 
 ### 配布ページ(Nextcloud)を差し替える(正式版のとき。ユーザーの了承のあとで)
 
-公開共有(token `M2sNsnA2K4oJ4Co`)は**閲覧のみ**で、`dev/upload_share.py` の PUT は 403。`R:`(YoFu)からも書けない。
+公開共有(token `M2sNsnA2K4oJ4Co`)は**閲覧のみ**で、WebDAV の PUT は 403(v6 のころの `dev/upload_share.py` で確かめた。この道具は
+7.0.0 の準備で消した)。`R:`(YoFu)からも書けない。
 実体は `/mnt/tank/TrueNAS/AstroKIT/掩蔽観測班/外部共有フォルダー/天体画像解析プログラム「zahyou」`(所有者 AstroKIT)。
 
 - **今あるファイルの中身を替える**(`zahyou.exe`・`THIRD-PARTY-NOTICES.md`・`LICENSE.txt`・`zahyou_engine.py`・`zahyou_v6.ipynb`・
@@ -394,8 +397,13 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
 - メモリの `zahyou-release-pipeline` を Rust の手順(この文書)に合わせて書き直す(今は PyInstaller の `build_exe.ps1 -Clean -Test` と
   `dev/make_notices.py` が書いてある)。
 - β の期間が過ぎて v6 を配らなくなったら、`Solve::stored_label` を `label()` に戻してよい(rust-port.md 10.5 節)。
-- `gui/build_exe.ps1`・`gui/zahyou.spec`・`dev/make_notices.py`(PyInstaller の exe 用)を残すか(v6 と試作版の記録として残すなら、
-  README の「中身に興味がある方へ」の説明はそのまま)。
+- ~~`gui/build_exe.ps1`・`gui/zahyou.spec`・`dev/make_notices.py`(PyInstaller の exe 用)を残すか(v6 と試作版の記録として残すなら、
+  README の「中身に興味がある方へ」の説明はそのまま)。~~ → **済み(2026-10-18、ユーザーの決定で消した)**。消したのは `gui/` の全部
+  (Python の試作の画面・v6 の更新係 `zahyou_update.py`・`zahyou_env.py`・PyInstaller の `build_exe.ps1`・`zahyou.spec`・画面の試験
+  `test_*.py`・`README.md`・`.gitignore`)、`dev/make_notices.py`、`dev/upload_share.py`、直下の `THIRD-PARTY-NOTICES.md`(Python の exe 用)、
+  直下の `zahyou.ipynb`(2025-11 の v5 のノートブック)、直下のマニュアル v3 の PDF。どれもタグ `v7.0.0-beta.2` の木に残っている
+  (`git show v7.0.0-beta.2:gui/zahyou_update.py` など)。照合値を作る `rs/testdata/gen_net.py` は `gui/` の Python 版を読むので、
+  作り直すときはそのタグの木を `ZAHYOU_PY_REPO` に指す(rs/README.md)。
 
 ## 10. 出した記録
 

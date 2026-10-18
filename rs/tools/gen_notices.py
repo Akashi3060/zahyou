@@ -35,7 +35,6 @@ sys.dont_write_bytecode = True
 import cargo_deps as cd  # noqa: E402
 
 OUT = cd.RS_DIR / "THIRD-PARTY-NOTICES.md"
-PY_NOTICES = cd.REPO_DIR / "THIRD-PARTY-NOTICES.md"  # Python 版の表示(星図データの条件を突き合わせる)
 
 # ライセンスファイルとみなす名前(大文字小文字は問わない)
 LICENSE_NAME = re.compile(r"^(licen[cs]e|copying|notice|copyright|unlicense)", re.I)
@@ -516,7 +515,7 @@ HEAD = """\
 下の LICENSE —— MIT ライセンス —— が及ぶのは **zahyou 自身のソースコードだけ**です。
 
     rs/app/ / rs/crates/ / rs/tools/ / rs/testdata/(Rust 版)
-    zahyou_engine.py / zahyou.ipynb / zahyou_v6.ipynb / gui/ / dev/ / docs/(Python 版)
+    zahyou_engine.py / zahyou_v6.ipynb / dev/ / docs/(Python 版)
 
 オフライン解析のエンジン(`zahyou-solver`・`zahyou-index`・`zahyou-wcs`)も zahyou 自身のコードです。
 `zahyou.exe` に入っている第三者のソフトウェア(この文書の後半)、星図データ
@@ -580,7 +579,9 @@ index ファイルをそのまま詰め直したものです。** 中身は上�
 **これらの書体は exe に入っていません**(下の「画面の既定の書体」は別のものです)。
 """
 
-# Python 版の表示と同じでなければならない文(--check で突き合わせる)
+# 解き方の出典・星表の論文・定型の謝辞。以前は Python の exe 用の表示(リポジトリ直下の THIRD-PARTY-NOTICES.md)と
+# --check で突き合わせていたが、そちらは 7.0.0 の準備で消した。同じ趣旨の文は README・マニュアル(dev/make_manual.py)・
+# 星図データの zip の README(dev/make_index_zips.py)にもあるので、直すときはそろえる
 LANG_REF = """\
 - Lang, D., Hogg, D. W., Mierle, K., Blanton, M., & Roweis, S. (2010),
   "Astrometry.net: Blind astrometric calibration of arbitrary astronomical
@@ -602,7 +603,6 @@ GAIA_ACK = """\
 SIMBAD_ACK = """\
 > This research has made use of the SIMBAD database and the VizieR catalogue
 > access tool, operated at CDS, Strasbourg, France."""
-SHARED = [LANG_REF, CATALOG_REFS, GAIA_ACK, SIMBAD_ACK]
 
 
 def render(col: Collected, tc: Toolchain) -> str:
@@ -786,15 +786,6 @@ def render(col: Collected, tc: Toolchain) -> str:
     return re.sub(r"\n{3,}", "\n\n", text)
 
 
-def shared_check() -> list[str]:
-    """星図データの条件・謝辞・論文が Python 版の表示と同じか"""
-    t = read_text(PY_NOTICES)
-    if t is None:
-        return [f"{PY_NOTICES} がありません(星図データの条件を突き合わせられない)"]
-    nt = _norm(t)
-    return [f"Python 版の表示に次の文がありません(どちらかを直す):\n{s}" for s in SHARED if _norm(s) not in nt]
-
-
 def build(args) -> tuple[str, Collected]:
     meta = cd.load_metadata(args.metadata, args.cargo)
     deps = cd.classify(meta)
@@ -816,9 +807,6 @@ def main(argv=None) -> int:
     text, col = build(args)
     for m in col.warnings:
         print("!! " + m, file=sys.stderr)
-    shared = shared_check()
-    for m in shared:
-        print("!! " + m, file=sys.stderr)
     out = Path(args.out)
     if args.check:
         try:
@@ -836,11 +824,11 @@ def main(argv=None) -> int:
                     print(f"   …(ほか {len(diff) - 40} 行)")
             return 1
         print(f"OK {out} は最新です(クレート {len(col.deps.runtime)} 個・本文 {len(col.groups)} 種)")
-        return 1 if (col.warnings or shared) else 0
+        return 1 if col.warnings else 0
     out.write_bytes(text.encode("utf-8"))
     print(f"書き出しました: {out}({len(text.encode('utf-8')):,} バイト。クレート {len(col.deps.runtime)} 個・"
           f"本文 {len(col.groups)} 種)")
-    return 1 if (col.warnings or shared) else 0
+    return 1 if col.warnings else 0
 
 
 if __name__ == "__main__":

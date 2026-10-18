@@ -115,6 +115,11 @@ $PY -B app/testdata/gen_run_solver.py         # run() を本物の解法で 20 �
 `gen_net.py` は nova へ送る要求を Python 版の `solve_online` から記録するので、Python 版が `publicly_visible='n'`(公開しない)を
 送っていなければ値を作らずに止まる(Rust 版は必ず付けるので。Python 版のリポジトリは環境変数 ZAHYOU_PY_REPO で変えられる)。
 
+`gen_net.py` は `dev/` のほかに、v6 と試作版の Python の画面 `gui/`(`zahyou_env.py`・`zahyou_update.py`)も基準として読む。
+`gui/` は 7.0.0 の準備でリポジトリから消したので、作り直すときは `gui/` が残っているタグ `v7.0.0-beta.2` の木を出して指す
+(`git worktree add <置き場所> v7.0.0-beta.2` → `ZAHYOU_PY_REPO=<置き場所>`)。ソースの注釈にある「Python 版の `gui/…`」も、
+その木のファイルのこと(`git show v7.0.0-beta.2:gui/zahyou_gui.py`)。
+
 ## 速さの物差し
 
 ```bash

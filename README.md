@@ -711,7 +711,6 @@ zahyou のためだけに入れて、ほかに使っていないのなら `wsl -
 - [`docs/index-format.md`](docs/index-format.md) — 星図データ（索引ファイル）の形式。実物を読んで調べたもの
 - [`rs/`](rs/) — exe のソース（cargo のワークスペース）。ビルドと試験の手順は [rs/README.md](rs/README.md)
 - [`CODE_REVIEW_v5.md`](CODE_REVIEW_v5.md) — v5 で何が壊れていたか、v6 で何を直したか
-- [`gui/`](gui/) — v6 と試作版（v7-dev）の Python の画面と、それを exe に固めるスクリプト
 - [`dev/`](dev/) — `zahyou_v6.ipynb` と `zahyou_engine.py` の生成元（解析エンジン `solver_*.py` を含む）、
   検証用スクリプト、星図データの取得スクリプト、マニュアルの組版
 
@@ -758,7 +757,6 @@ zahyou 自身のソースコードは **MIT ライセンス**です（[LICENSE](
 | 星図データ（index ファイル） | **exe には同梱していません**。exe は［準備］タブが原典（nersc / data.astrometry.net）から落とします。ノートブック版向けに配布ページに置いた zip は、作者が原典をそのまま詰め直したものです。Tycho-2 / Gaia DR2 由来で、元の星表の条件がそのままかかります（Gaia のデータは CC BY-NC 3.0 IGO。商用利用には ESA の許可が要り、クレジットは ESA/Gaia/DPAC） |
 
 ノートブック版が使う Python のライブラリ（pip で入れるもの）は、それぞれのライセンスに従います。
-試作版（v7-dev）の Python の exe の同梱物は [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) にあります。
 
 ## 出典
 

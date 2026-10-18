@@ -11,6 +11,13 @@ zahyou-net の照合用の値を Python 版(基準実装)から作る。
   astroquery / astropy  nova・VizieR・Sesame へ送る要求そのもの(通信は差し替えて、外へは出さない)
 
 Python 版のリポジトリは環境変数 ZAHYOU_PY_REPO で変えられる(既定 ~/Documents/GitHub/zahyou)。
+gui/(v6 と試作版の Python の画面)は 7.0.0 の準備でリポジトリから消した。作り直すときは、gui/ が残っている
+タグ v7.0.0-beta.2 の木を別の場所に出して ZAHYOU_PY_REPO に指す:
+
+    git worktree add <置き場所> v7.0.0-beta.2
+    ZAHYOU_PY_REPO=<置き場所> python gen_net.py
+
+(dev/zahyou_core.py もその木のものを読む。solve_online の送り方は 7.0.0 の準備では変えていない)
 """
 from __future__ import annotations
 
@@ -27,6 +34,9 @@ import urllib.error
 import urllib.parse
 
 REPO = os.environ.get("ZAHYOU_PY_REPO") or os.path.join(os.path.expanduser("~"), "Documents", "GitHub", "zahyou")
+if not os.path.isfile(os.path.join(REPO, "gui", "zahyou_env.py")):
+    sys.exit(f"{REPO} に gui/zahyou_env.py がありません。gui/ は 7.0.0 の準備で消したので、"
+             "git worktree add <置き場所> v7.0.0-beta.2 で出した木を ZAHYOU_PY_REPO に指してください")
 sys.path.insert(0, os.path.join(REPO, "gui"))
 sys.path.insert(0, os.path.join(REPO, "dev"))
 
