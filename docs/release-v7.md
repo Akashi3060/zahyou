@@ -2,7 +2,8 @@
 
 2026-10-16 作成、同日に 2026-10-16 の決定(API キーの欄・DirectX 12 を既定・v7 は当面β版)と、2 回目の決定
 (画像は同意を取らずに送ってよい・β の Release にも exe 以外を付ける)、3 回目の決定(nova へは公開しない指定を付けて送る)と、
-GitHub の Release の扱いを公式の説明で確かめた結果(0.1 節)に合わせて書き直した(下書き)。
+GitHub の Release の扱いを公式の説明で確かめた結果(0.1 節)に合わせて書き直した。2026-10-18 に、正式版 7.0.0 の準備
+(8 節の 1・2 と 9 節。版上げ・README とマニュアルの本文・ノートブックの改名・v6 用の古いものの削除)に合わせて直した。
 v6 までの手順(`gui/build_exe.ps1` = PyInstaller、`dev/make_notices.py`)を、cargo の release ビルドの exe・
 `rs/THIRD-PARTY-NOTICES.md`・SHA256 の作り直しに置き換えたもの(v6 の 2 つの道具は、7.0.0 の準備でリポジトリから消した。9 節)。
 ビルドと試験の細かい説明は [../rs/README.md](../rs/README.md)、決定と実測は [rust-port.md](rust-port.md) の 9・10 節
@@ -11,6 +12,8 @@ v6 までの手順(`gui/build_exe.ps1` = PyInstaller、`dev/make_notices.py`)を
 **v7 は当面β版(7.0.0-beta.N)を GitHub のプレリリースで出す。1〜2 か月使って安定を確かめてから、正式版 7.0.0 を
 main に統合してふつうの Release で出す。** 1〜7 節がβ版、8 節が正式版。push・タグ・Release・配布ページの更新は、
 どれもユーザーの了承のあとで行う。
+**2026-10-18 にユーザーが「回数については目安程度で、動作に問題が無いことが確認できれば、v7 をリリースしたい」とした。**
+`native-rs` の版は 7.0.0 に上げ、README・マニュアルを正式版の形にした(8 節の 1・2)。残りは 8 節の冒頭(「2026-10-18 の時点」)。
 
 ---
 
@@ -95,7 +98,7 @@ Release を作って試したり、nova へ送ったりはしていない。ソ�
 | 2 | `rs/Cargo.lock`(ワークスペースの 7 つの crate の版) | `cargo check --workspace` などで cargo が書き換える(手で直さない)。4 節の `--locked` より前に済ませる | 4 節の `cargo build --locked` が止まる |
 | 3 | `dev/nb_main.py` の `NB_VERSION`(ノートブック版のログの見出し) | `"v"` + 同じ版 → `python dev/build_nb.py`(直下の `zahyou_engine.py` を作り直す) | 試験 `version_in_docs_matches_cargo` と 6 節の notebook の検査 |
 | 4 | `dev/make_manual.py` の 3 か所(冒頭の説明・表紙の表の「版」の行・9.1 の「ウィンドウの題」) | 手で | 試験 `version_in_docs_matches_cargo` |
-| 5 | `README.md` の 8 行(冒頭の HTML コメント・「いまの v7 はβ版」・Releases へのリンク 3 つ(「まずはこちら」とノートブックは文字と URL の両方、SHA256 の段落は URL だけ)・app-help.png の注記・「起動と大きさ」の表の見出し・「ウィンドウの題」) | 手で。`grep -n "beta\.[0-9]" README.md` で全部出る。exe の大きさと起動の時間は 4 節で建てた exe の実測に | 試験 `version_in_docs_matches_cargo`(数字は分からない) |
+| 5 | `README.md`。正式版の形(2026-10-18 から)では 2 か所(「起動と大きさ」の表の見出し・入れ替えの節の「ウィンドウの題」)。β版の形のときは 8 行だった(冒頭の HTML コメント・「いまの v7 はβ版」・Releases へのリンク 3 つ・app-help.png の注記・この 2 か所) | 手で。`grep -n "v7\.0\.[0-9]" README.md` で出る(β版の形なら `grep -n "beta\.[0-9]" README.md`)。exe の大きさと起動の時間は 4 節で建てた exe の実測に | 試験 `version_in_docs_matches_cargo`(β の版の文字だけ。正式版どうしの版上げ(7.0.0 → 7.0.1 など)の直し忘れと数字は分からない) |
 | 6 | `docs/img/app-help.png`(［使い方］の「いまの版」が写る) | 4 節で建てた exe で `python rs/tools/shoot_docs.py --exe … --only app-help`(5 節) | 試験では分からない。撮ったものを目で見る |
 | 7 | マニュアル PDF(`…マニュアルv4.pdf`。4 の文字と 6 の写真を貼っている) | 4 と 6 のあとで `python dev/make_manual.py`(5 節) | 6 節の manual の検査(組み直したものとバイト単位で比べる) |
 
@@ -180,7 +183,10 @@ IMG="$USERPROFILE\\Downloads\\Capture_00001 00_10_33.fits"
 
 - 期待値: `--selftest --offline` が **25/25**(空の cache.json で 1.594′・0.916′ 東・1.304′ 北・1.4610″/px。10.6 節)。
   exe のプロパティでファイル バージョン `7.0.0-beta.N`。`--update-check` は、まだ出していない版なら「最新版です (v7.0.0-beta.N)」。
-- 手でも 1 回起動して、［解析］で基準の画像を解き、［準備］の表が「オフライン解析できます」、題・［使い方］に `v7.0.0-beta.N (β版)`、
+  正式版(`7.0.0`)なら、ファイル バージョン `7.0.0`(プレリリースの印なし)、`--update-check` は Release の前なら
+  「最新版です (v7.0.0)。公開されている最新版 v6 より新しい版を使っています。」(latest が今より古い版なら誘わない)。
+- 手でも 1 回起動して、［解析］で基準の画像を解き、［準備］の表が「オフライン解析できます」、題・［使い方］に `v7.0.0-beta.N (β版)`
+  (正式版なら `v7.0.0`。「(β版)」は付かない)、
   ログの 2 行目に「描画: DirectX 12 / …」が出ることを見る(上の 3 つの環境変数を設定したシェルから起動する)。
   **このとき方法が「自動」でネットがあると、既定のキーで nova へ星の位置を送る**。送りたくなければ、一時の gui.json に
   `{"api_key": ""}` か `{"solve": "オフラインのみ"}` を書いてから起動する。
@@ -244,7 +250,7 @@ python dev/make_manual.py                                     # 天体画像解�
 ## 6. 資産をそろえて SHA256 を作る(`rs/tools/make_release_assets.py`)
 
 ```bash
-DIST=$USERPROFILE/zahyou-dist-v7.0.0-beta.N        # リポジトリの外。空か無いフォルダー
+DIST=$USERPROFILE/zahyou-dist-v7.0.0               # リポジトリの外。空か無いフォルダー(β版なら zahyou-dist-v7.0.0-beta.N)
 python rs/tools/make_release_assets.py --exe "$(cygpath -w $EXE)" --out "$(cygpath -w $DIST)"
 (cd "$DIST" && sha256sum -c SHA256SUMS.txt)
 ```
@@ -323,11 +329,30 @@ gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false --latest=fa
 
 ## 8. 正式版(7.0.0)を出す(1〜2 か月使って安定を確かめてから)
 
+**2026-10-18 の時点**(ユーザーの指示「回数については目安程度で、動作に問題が無いことが確認できれば、v7 をリリースしたい」。`native-rs` で):
+
+- 済み: 版を `7.0.0` に(2 節の表の 1〜5)、README・マニュアルの本文(`dev/make_manual.py`)を正式版の形に(下の 2)、
+  ノートブックを `zahyou_v6.ipynb` から `zahyou_v7.ipynb` に改名、v6 用の古いものを消した(9 節)、`rs/THIRD-PARTY-NOTICES.md` を作り直した
+  (MIT の範囲の一覧の 1 行。exe に埋め込まれる)。
+- 残っていること(この順に):
+  1. 4 節で 7.0.0 の exe を建て、試験と exe を確かめる(期待値は 4 節の正式版の形)。README の exe の大きさと起動の時間を、その exe の実測に
+     (今の数字は β2 の exe のもの。表の見出しだけ `v7.0.0` にしてある)
+  2. 5 節: `app-help.png` を 7.0.0 の exe で撮り直し(`--only app-help`)、`python dev/make_manual.py` でマニュアル PDF を組み直して commit する
+     (リポジトリの PDF は β2 の本文のまま。組み直すまで 6 節の manual の検査は通らない)
+  3. 6 節で資産をそろえる(ノートブックの資産は `zahyou_v7.ipynb`)。なお直下の `zahyou_v7.ipynb` に残している出力の例(セル C の見出し)は
+     v6 で走らせたときのまま `zahyou v6` と出ている(`build_nb.py` はセルの中身だけを差し替え、出力の例は残す)。差し替えるなら、
+     ネットを切るか `SOLVE_MODE = 'OFFLINE'` で走らせ直して保存する(任意)
+  4. 下の 3(v6 の Release 本文のリンクの固定。main への統合の前)→ 1 の統合(PR)→ 4 の Release → 5 の確かめ → 配布ページの差し替え(下)
+
 1. `native-rs` を main に統合する(PR。`native-rs` は Python 版の `native-solver` を取り込んでいる)。`rs/Cargo.toml` の版を `7.0.0` にし、
    2〜6 節をやり直す(版を上げると「(β版)」は自然に消える。ノートブックの資産名は `zahyou_v7.ipynb` になる)。
+   → 版を `7.0.0` にしたのは 2026-10-18(済み)。統合と 4〜6 節は残り(上)。
 2. README を正式版の形にする: β版のタグへのリンク(`releases/tag/v7.0.0-beta.N`)を `releases/latest` に戻し、「いまの v7 はβ版です」と
    「v6 とβ版」の段落、ノートブックの入手先の β の注記を書き換える(README 冒頭の HTML コメントに書いてある)。マニュアルの表紙の「版」の行と
    2.1・9.1・付録 B も同じ。2 節の試験 `version_in_docs_matches_cargo` が、β の版の文字の残りを場所つきで出す。
+   → **済み(2026-10-18)**。「いまの v7 はβ版です」は「v6 を使っている方へ」の案内に、「v6 とβ版」は「v6 から入れ替える」
+   (v6 の「更新する」で入れ替わる・`zahyou.exe.bak` が残る・設定と星図データはそのまま・WSL は要らない・β版の利用者には 7.0.0 が出る)に、
+   ノートブックの資産名と入手先(Releases の最新と配布ページ)を v7 に。マニュアルも同じ(表紙・2.1・4.3・4.5・9.1・付録 B)。
 3. **v6 の Release 本文のリンクを、v6 の exe を建てた木に固定する。** v6 の本文のリンクは 13 個で、うち 12 個が `main` を指す
    (`raw.githubusercontent.com/Akashi3060/zahyou/main/docs/img/` の画面写真 3 枚(`app-analyze`・`app-numbers`・`app-prepare`)と
    ダウンロードの警告の図 6 枚、`github.com/Akashi3060/zahyou/blob/main/` の `LICENSE`・`THIRD-PARTY-NOTICES.md`・`gui/README.md`)。
@@ -377,15 +402,18 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
 7.0.0 の準備で消した)。`R:`(YoFu)からも書けない。
 実体は `/mnt/tank/TrueNAS/AstroKIT/掩蔽観測班/外部共有フォルダー/天体画像解析プログラム「zahyou」`(所有者 AstroKIT)。
 
-- **今あるファイルの中身を替える**(`zahyou.exe`・`THIRD-PARTY-NOTICES.md`・`LICENSE.txt`・`zahyou_engine.py`・`zahyou_v6.ipynb`・
+**差し替えたあとの配布ページに置くもの**(2026-10-18 のユーザーの決定): `zahyou.exe`・`zahyou_v7.ipynb`・`zahyou_engine.py`・
+マニュアル v4(`…マニュアルv4.pdf`)・`LICENSE.txt`・`THIRD-PARTY-NOTICES.md`(`rs/` のもの)・`はじめにお読みください.txt`・星図データの zip
+(と、その `SHA256SUMS.txt`)。v6 の `zahyou_v6.ipynb` と `…マニュアルv3.pdf` は置かない(消すのも了承のあとで)。
+
+- **今あるファイルの中身を替える**(`zahyou.exe`・`THIRD-PARTY-NOTICES.md`・`LICENSE.txt`・`zahyou_engine.py`・
   `はじめにお読みください.txt`): TrueNAS の root(一時 cronjob)で **`cat 新しいもの > 今のもの`**。inode が変わらないので、所有者・ACL・
   公開共有の設定はそのまま。作業ファイルは書ける `R:\AstroKIT\` に置き、終わったら root で消す(root が書いたものは `chown YoFu:YoFu` しないと
   Windows から消せない)。手順の型は CLAUDE.md の TrueNAS の節と、メモリの zahyou-release-pipeline。
-- 配布ページのファイルの名前は Release の資産と違う(配布ページは `zahyou_v6.ipynb`・`…マニュアルv3.pdf`、資産は `zahyou_v7.ipynb`・
-  `zahyou-manual-v4.pdf`)。v6 の名前の中身を v7 のものに替えるか、v7 の名前のファイルを足すか(下)を決める。`SHA256SUMS.txt` は
-  配布ページでは星図データの zip 用なので、Release の `SHA256SUMS.txt` で上書きしない。
-- **新しい名前のファイル**(`…マニュアルv4.pdf`)は `cat >` では作れない(新しい inode になる)。作ったあと所有者と ACL を今あるファイル
-  (例 `…マニュアルv3.pdf`)と同じにしたか、`stat` と ACL の表示で見比べる。v3 の PDF を残すか消すかも決める。
+- 配布ページの名前は Release の資産と一部違う(マニュアルは配布ページでは `…マニュアルv4.pdf`、資産は `zahyou-manual-v4.pdf`。中身は同じ)。
+  `SHA256SUMS.txt` は配布ページでは星図データの zip 用なので、Release の `SHA256SUMS.txt` で上書きしない。
+- **新しい名前のファイル**(`zahyou_v7.ipynb`・`…マニュアルv4.pdf`)は `cat >` では作れない(新しい inode になる)。作ったあと所有者と ACL を
+  今あるファイル(例 `…マニュアルv3.pdf`)と同じにしたか、`stat` と ACL の表示で見比べる。そのあとで `zahyou_v6.ipynb` と `…マニュアルv3.pdf` を消す。
 - `はじめにお読みください.txt` は v6 の記述が多い。直すところ: 大きさ(102 MB)・起動(4 秒)・誤検知の理由(Python をまとめているため)・
   SHA256・［準備］タブ(WSL・解析エンジン・設定ファイル)・入れ替え(`zahyou.exe.bak`、「WSL は作り直さなくて構いません」、題 `zahyou v6`)・
   消すもの(102 MB、WSL の中の解析エンジン)・動作環境の表(WSL2)・マニュアルの名前とページ数(v3・33 ページ)・ライセンス(astrometry.net を
