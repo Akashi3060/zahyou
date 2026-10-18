@@ -1,7 +1,7 @@
 """
 天体画像解析プログラム「zahyou」導入・運用マニュアル v4 を PDF で作る。
-(v4 = zahyou v7(いまはβ版 7.0.0-beta.2)。デスクトップ版は Rust の exe、オフライン解析は zahyou の中のエンジン。
- 2026-10 の下書き。2026-10-16 の決定(API キーの欄・DirectX 12 を既定・β版)を入れた)
+(v4 = zahyou v7(正式版 7.0.0)。デスクトップ版は Rust の exe、オフライン解析は zahyou の中のエンジン。
+ 2026-10-16 の決定(API キーの欄・DirectX 12 を既定)を入れ、2026-10-18 に β版の本文から正式版の本文に書き直した)
 
   python make_manual.py [出力先.pdf]
 
@@ -206,8 +206,7 @@ def build(out_path):
          "（0.5 〜 4 メガ画素の実写。v6 の WSL 版は約 4 秒）"],
         ["exe", "約 13 MB・窓が出るまで 1 秒ほど（v6 は 102 MB・約 4 秒）"],
         ["対応する画角", "4′ 〜 2000′（焦点距離およそ 4800 mm まで。v6 と同じ）"],
-        ["版", "いまは<b>β版</b>（v7.0.0-beta.2）。GitHub の Releases の「Pre-release」から落とします。"
-         "v6 の「更新を確認」には出てきません"],
+        ["版", "v7.0.0。v6 の［使い方］タブの「更新を確認」→「更新する」で入れ替わります（9.1）"],
     ], st, widths=[42 * mm, CONTENT_W - 42 * mm]))
     add(Spacer(1, 16 * mm))
     add(Paragraph(f"{VERSION}　{DATE}", ms.ParagraphStyle(
@@ -291,7 +290,6 @@ def build(out_path):
     ext(h2("落として起動する", st, "2.1"))
     ext(steps([
         "GitHub の Releases（付録 B）から <b>zahyou.exe</b> をダウンロードします。"
-        "<b>β版の間は、「Pre-release」の印が付いた v7.0.0-beta.N</b> から落とします。"
         "置き場所はどこでも構いません（デスクトップでも、USB メモリでも）。",
         "<b>ダウンロードの途中で、Windows が何度か止めます。</b>"
         "通し方は次の 2.2 に 1 つずつ書いてあります。",
@@ -720,11 +718,11 @@ def build(out_path):
 
     ext(h2("ノートブックと必要なライブラリ", st, "4.3"))
     ext(steps([
-        "<b>zahyou_v7_beta.ipynb</b>（β版の Release での名前。中身はリポジトリの zahyou_v7.ipynb と同じ）と "
-        "<b>zahyou_engine.py</b> の 2 つを、"
+        "<b>zahyou_v7.ipynb</b> と <b>zahyou_engine.py</b> の 2 つ"
+        "（GitHub の Releases か配布ページにあります。付録 B）を、"
         "分かりやすい場所（デスクトップに作った zahyou フォルダーなど）に"
         "<b>そろえて</b>置きます。片方だけでは動きません。",
-        "<b>zahyou_v7_beta.ipynb</b> を右クリック →「プログラムから開く」→ VS Code を選びます。",
+        "<b>zahyou_v7.ipynb</b> を右クリック →「プログラムから開く」→ VS Code を選びます。",
         "画面右上の「カーネルの選択」を押し、<b>Python 環境</b> →"
         "先ほど入れた Python を選びます。",
         "いちばん上の <b>セル A</b> の中の <b>!pip install</b> で始まる行の "
@@ -776,7 +774,7 @@ def build(out_path):
                   "同じフォルダーをそのまま使えます。", st.small))
 
     ext(h2("動作確認", st, "4.5"))
-    add(Paragraph("VS Code で zahyou_v7_beta.ipynb を開き、セル A → セル B → セル C の順に"
+    add(Paragraph("VS Code で zahyou_v7.ipynb を開き、セル A → セル B → セル C の順に"
                   "実行します。手元のテスト画像で結果の図が 2 枚出れば導入完了です。",
                   st.body))
     add(Paragraph("オフライン解析だけを試したいときは、セル C の "
@@ -1088,8 +1086,6 @@ def build(out_path):
                   "<b>次に起動したときに消えます</b>"
                   "（v6 までは zahyou.exe.bak として残していました）。"
                   "前の版に戻したいときは、GitHub の Releases から落として上書きしてください。", st.body))
-    add(Paragraph("<b>β版の間、「更新を確認」は GitHub の Releases から次のβ版と v7 の正式版を探します。</b>",
-                  st.body))
     add(Paragraph("起動したときにも自動で確認します（新しい版があるときだけ知らせます）。"
                   "確認をやめたいときは、同じところのチェックを外してください。",
                   st.small))
@@ -1106,21 +1102,21 @@ def build(out_path):
                   "（設定ファイルには v6 と同じ書き方で書くので、v6 に戻しても方法は変わりません）。"
                   "v6 で WSL に入れた astrometry.net はもう使いません（消し方は 9.2）。",
                   st.body))
-    ext(callout("v6 とβ版", [
-        "<b>v6 の「更新を確認」には、β版は出てきません。</b>β版を試すときは、GitHub の Releases で"
-        "「Pre-release」の印が付いた v7.0.0-beta.N から zahyou.exe を落として、v6 の zahyou.exe に"
-        "上書きします（v6 の exe を別の場所に写しておくと、すぐ戻せます）。",
-        "<b>v6 に戻すとき</b>は、v6 の zahyou.exe を上書きするだけです。設定はそのまま使えます。"
+    ext(callout("v6 から入れ替える", [
+        "<b>v6 の［使い方］タブの「更新を確認」→「更新する」で、v7 に入れ替わります。</b>",
+        "v6 の exe は zahyou.exe.bak（約 102 MB）として横に残ります。"
+        "v7 はこれを消さないので、v7 が動いたら消してかまいません。",
+        "設定・覚えた座標・星図データは、そのまま使えます（WSL の astrometry.net が要らなくなることは上に書いたとおりです）。",
+        "<b>v6 に戻すとき</b>は、v6 の zahyou.exe（zahyou.exe.bak を zahyou.exe に名前を戻したもの）を"
+        "置くだけです。設定はそのまま使えます。"
         "API キーの欄の値は v6 では使わず、v6 で設定を保存すると消えます"
         "（次に v7 を開くと既定のキーに戻ります）。",
-        "<b>v7 の正式版が出ると、v6 の「更新する」でも v7 に入れ替わります。</b>"
-        "そのとき v6 の exe が zahyou.exe.bak（約 102 MB）として横に残ります"
-        "（v7 はこれを消しません）。v7 が動いたら消してかまいません。",
+        "<b>β版（v7.0.0-beta.N）を使っていた方</b>は、β版の「更新を確認」で 7.0.0 が出ます。",
     ], st, kind="note"))
     add(Paragraph("いま使っている版は、<b>ウィンドウの題</b>で分かります"
-                  "（「zahyou v7.0.0-beta.2 (β版) — …」）。", st.body))
+                  "（「zahyou v7.0.0 — …」）。", st.body))
     ext(callout("ノートブック版は 2 つとも入れ替えてください", [
-        "<b>zahyou_v7_beta.ipynb</b> と <b>zahyou_engine.py</b> は組で動きます。"
+        "<b>zahyou_v7.ipynb</b> と <b>zahyou_engine.py</b> は組で動きます。"
         "片方だけ新しくすると、設定の名前が食い違って動かなくなることがあります。",
         "入れ替えたあとは、ノートブックを開き直して"
         "<b>セル A からやり直して</b>ください"
@@ -1228,13 +1224,13 @@ def build(out_path):
     ext(h1("参考リンクと出典", st, "付録 B"))
     add(Paragraph("配布ページ", st.h3))
     ext(bullets([
-        "GitHub の Releases（β版は「Pre-release」の印が付いた v7.0.0-beta.N）："
-        "https://github.com/Akashi3060/zahyou/releases<br/>"
-        "付けているもの: zahyou.exe（デスクトップ版）・zahyou_v7_beta.ipynb と zahyou_engine.py"
+        "GitHub の Releases（最新版）："
+        "https://github.com/Akashi3060/zahyou/releases/latest<br/>"
+        "付けているもの: zahyou.exe（デスクトップ版）・zahyou_v7.ipynb と zahyou_engine.py"
         "（ノートブック版）・zahyou-manual-v4.pdf（このマニュアル）・LICENSE.txt・"
         "THIRD-PARTY-NOTICES.md（exe に入っているライブラリの一覧）・SHA256SUMS.txt（全部の SHA256）",
-        "ソース：https://github.com/Akashi3060/zahyou（β版は native-rs ブランチ）",
-        "星図データの zip（ノートブック版向け）："
+        "ソース：https://github.com/Akashi3060/zahyou",
+        "配布ページ（zahyou.exe・ノートブック版・このマニュアルと、ノートブック版向けの星図データの zip）："
         "https://cloud.akashi-kosaku.uk/s/M2sNsnA2K4oJ4Co",
     ], st))
     add(Paragraph("星図データの原典", st.h3))

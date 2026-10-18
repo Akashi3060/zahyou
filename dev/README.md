@@ -171,7 +171,7 @@ python make_index_zips.py 5204 5203 5202 --out C:\AstrometryData\dist
 python make_manual.py                 # ../天体画像解析プログラム「zahyou」導入・運用マニュアルv4.pdf
 ```
 
-マニュアル v4 は v7（デスクトップ版は Rust の exe、いまはβ版）の本文。v6（WSL を使う版）の v3 の PDF は
+マニュアル v4 は v7（デスクトップ版は Rust の exe）の本文。v6（WSL を使う版）の v3 の PDF は
 7.0.0 の準備でリポジトリから消した（タグ `v7.0.0-beta.2` の木に残っている。配布ページも v4 に差し替える。
 [../docs/release-v7.md](../docs/release-v7.md) の 8 節）。
 作成日時などを固定して組む（ReportLab の `invariant`）ので、同じ `make_manual.py` とフォントからは同じバイトの PDF になる。
