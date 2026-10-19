@@ -630,8 +630,9 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
   画像ファイルの中身とファイル名をそのまま `api/upload` で送る(`zahyou-net/src/nova.rs` の `solve_online_inner`)。時間切れ・中止では送らない
 - **v7 のノートブック版**(`zahyou_engine.py` の `solve_online`)は、v6 と同じく `solve_from_image` を `force_image_upload` なしで呼ぶ。案内どおり
   (photutils なし)なら画像ファイルを送るが、photutils の入った環境では v6 の exe と同じく数え直した位置を送り、FITS 以外はそこで失敗する
-  (そのときログの「画像そのものを送ります」は事実と違う)。`dev/test_online_settings.py` の 5 はこの経路を試している。ノートブックの文
-  (`dev/nb_settings.py` の「送ることがあります」)は外れていないので直していない。exe と同じ動きにそろえるかは決めていない
+  (そのときログの「画像そのものを送ります」は事実と違う)。`dev/test_online_settings.py` の 5 はこの経路を試していた。ノートブックの文
+  (`dev/nb_settings.py` の「送ることがあります」)は外れていないので直していない。~~exe と同じ動きにそろえるかは決めていない~~
+  → **同じ日に exe とそろえた**(下の「2026-10-19 の直し」)
 
 直したもの: README の「nova.astrometry.net へ送るもの」とマニュアル 2.3(v6 との違いを 1 段落にし、星が 0 個のときの一文を足した)、
 `rs/README.md`、`rust-port.md` 10.2 節の 1 行、この手順書の 0 節の表。［使い方］タブ(`help_tab.rs`)は v6 に触れていないので直していない
@@ -656,3 +657,35 @@ Release v7 の資産のマニュアルと SHA256SUMS.txt、配布ページのマ
   `はじめにお読みください.txt` は exe の SHA256 とマニュアルのページ数(33 ページ)だけを書いていて、どちらも変わらないので触れていない
   (nova の段落も「v6 と同じ」とは書いていない)
 - そのため、資産のマニュアルはタグ `v7`(b70f73a)の木のものではなく、main の `1891069` のもの(違いは［使い方］の写真と 2.3 の nova の段落)
+
+### 2026-10-19 の直し(ノートブック版も画像ファイルを送るようにした)
+
+上の訂正で分かった v7 のノートブック版の食い違いを、exe と同じ動きにそろえた。直し方はユーザーが 4 つの案から選んだ(案 B)。
+
+- 直したもの: `dev/zahyou_core.py` の `solve_online` で、作った `AstrometryNet()` のインスタンスにだけ `ast._no_source_detector = True` を立てる。
+  astroquery 0.4.10 の `solve_from_image` は `force_image_upload or self._no_source_detector` のとき画像を `api/upload` で上げるので、
+  photutils の有無によらず画像ファイルそのもの(ファイル名も)を送る = exe(`nova.rs` の `solve_online_inner`)と同じ。非推奨の警告は出ない。
+  クラスの既定は変えない(ほかの `AstrometryNet` には効かない)。`publicly_visible = "n"` はそのまま
+- 選ばなかった案(偽の nova で確かめた。手元は astroquery 0.4.10・photutils 2.3.0・astropy 7.1.0・Python 3.13):
+  - A `force_image_upload=True`: 画像は送るが、0.4.8 から非推奨で呼ぶたびに AstropyDeprecationWarning が出る。予告どおり引数が消えると `**settings` に落ち、
+    `_validate_settings` が `ValueError: Setting force_image_upload is not allowed` を出して画像の段が必ず失敗する。案内の pip 行は astroquery の版を固定していない
+  - C 自前で `api/upload`(ログイン → multipart → 結果待ち → WCS): astroquery の `solve_from_image` に頼らなくなるが、40〜60 行増え、試験も組み直しになる
+  - D ログの文だけ直す: photutils の入った環境で JPEG・PNG・TIFF の 2 段目が失敗するのが残る
+- 案 B の弱み: astroquery の内部の属性に頼る。予告どおり photutils の経路が消えれば、旗が読まれなくなるだけで画像は送られる。photutils の経路を残したまま
+  属性の名前だけが変わると、直す前の動き(数え直した位置を送る・FITS 以外は失敗)に戻る。試験の `patched_nova` がクラスの `_no_source_detector` を読むので、
+  名前が消えれば `dev/test_online_settings.py` が AttributeError で落ちて気づける
+- 試験(`dev/test_online_settings.py`。偽の nova で、ネットには出ない): 5 を「photutils ありでも画像を送る」に変えた(FITS と JPEG の 2 通り。送ったファイル名・
+  photutils の非推奨の警告が出ないこと・クラスの既定が変わらないこと)。4(星の位置 → 画像)は photutils なし・ありの 2 通りに、6(API キーはログインのときだけ)は
+  自前の呼び出しで「2 回受け付けてもログインは 1 回」に。**直す前のコード(main の `1891069`)では新しい 3 本(4 の photutils あり、5 の FITS・JPEG)が落ちる**
+  (JPEG は `IORegistryError` で何も送らない)。直したあとは 18/18(正本と、組み立てた直下の `zahyou_engine.py`)
+- `python dev/build_nb.py` で組み直した。変わったのは `zahyou_engine.py` だけで、`zahyou_v7.ipynb` のセルは同じ(「中身を差し替えたセル: なし」)。
+  README・マニュアル 2.3 は exe の動きで書いてあり、v7 のノートブック版の 2 段目には触れていないので直していない(マニュアルも組み直していない)。
+  ノートブックの文(`nb_settings.py` の「それで解けなければ画像そのものを送ることがあります」)はそのまま正しい。本物の nova へ送る試験はしていない。
+  `test_notebook_run.py` は手元に nbclient が無いので走らせていない(エンジンの読み込みは `test_online_settings.py` が直下のものを exec して確かめている)
+- 6 節の `make_release_assets.py` を公開した v7.0.0 の exe(`5ab3dec6…bae4`)で走らせ、5 つの検査が全部 OK、`sha256sum -c` OK。
+  Release v7 の資産と違うのは **`zahyou_engine.py`(`3c0a2b20…3993`、257,532 バイト → `e50459f5…7598`、258,633 バイト)と `SHA256SUMS.txt` だけ**。
+  `zahyou_v7.ipynb`(`ab742a79…f784`)・exe・マニュアル(`4efcd99c…ec10`。上の 14:4x の差し替えのあとの値)・`LICENSE.txt`・`THIRD-PARTY-NOTICES.md` は同じ。
+  `test_make_release_assets.py` 32 本 OK(この exe を渡して)
+  - 新しい worktree では manual の検査が落ちた。`dev/fonts`(.gitignore)の Noto Sans JP を Windows の可変フォントから作り直すと、作るたびに違うバイトになり、
+    組んだ PDF も変わるため。PR #28 の worktree(`zahyou-nova-doc`)の `dev/fonts` を写すと通った(HackGen は毎回同じバイト)
+- **Release v7 の資産の `zahyou_engine.py` と配布ページの `zahyou_engine.py` は前のまま**(差し替えるかはユーザーの了承を得てから。版は 7.0.0 のまま)

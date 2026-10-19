@@ -8,7 +8,9 @@ request-json を取り出して中身を確かめる。返事も偽物 (ログ�
   - 星の位置を送るとき (solve_from_source_list) も、画像を送るとき (solve_from_image) も
     publicly_visible = "n" (公開しない) が request-json に入っている
   - 星の位置で解けずに画像へ切り替えたときも、2 回とも "n"
-  - photutils があるとき、solve_from_image は画像を送らず astroquery が自分で星を数えて位置を送る。そこも "n"
+  - photutils が入っていても、画像の段では画像ファイルそのものを送る (exe と同じ。FITS でも JPEG でも)。
+    astroquery 0.4.10 は photutils があると画像を上げずに星を数え直して位置を送り、FITS 以外はそこで例外になる。
+    それを止める旗 (_no_source_detector) は solve_online の AstrometryNet にだけ立ち、クラスの既定は変えない
   - 送るのは星の位置・画像の大きさ・手がかり・公開の指定・セッションだけ (知らない項目が増えたら失敗)
   - API キーはログインのときだけ送り、解析の受付には入らない
   - 対照: astroquery に何も指定しないと publicly_visible は送られない (= サーバーの既定の「公開」になる)
@@ -179,6 +181,23 @@ def make_star_fits(path, ny=160, nx=200, n=25, seed=7):
     return path
 
 
+def make_star_jpeg(path, fits_path):
+    """同じ星野の JPEG (CCDData.read では読めない形式。photutils の経路に入ると例外になる)。"""
+    from PIL import Image
+    img = fits.getdata(fits_path).astype(np.float64)
+    img = (img - img.min()) / (img.max() - img.min()) * 255.0
+    Image.fromarray(img.astype(np.uint8)).save(path, quality=95)
+    return path
+
+
+def _solve_catching(solve_online, path, sources=None):
+    """solve_online を呼び、例外は (None, 説明) にして返す (試験を止めずに FAIL として記録するため)。"""
+    try:
+        return solve_online(path, FAKE_KEY, sources=sources, shape=SHAPE, timeout=30), ""
+    except Exception as e:
+        return None, f"例外 {type(e).__name__}: {str(e)[:80]}"
+
+
 SOURCES = [{"x": 12.25, "y": 30.5}, {"x": 150.0, "y": 44.75}, {"x": 77.5, "y": 120.0},
            {"x": 190.0, "y": 10.0}, {"x": 5.0, "y": 155.5}]
 SHAPE = (160, 200)
@@ -212,7 +231,7 @@ def _check_submission(tag, sub, expect_kind, extra=None):
 
 # ------------------------------------------------------------------ 試験 ---
 
-def run_cases(label, solve_online, img_path):
+def run_cases(label, solve_online, img_path, jpg_path):
     # 1. 星の位置を送る (いつもの経路)
     nova = FakeNova(["success"])
     with patched_nova(nova):
@@ -240,7 +259,7 @@ def run_cases(label, solve_online, img_path):
                                      "scale_units": "arcsecperpix", "scale_type": "ul"})
     record(f"[{label}] 手がかり付きでも publicly_visible='n'", ok and bool(hdr), msg)
 
-    # 3. 画像そのものを送る (photutils が無いときの astroquery の経路)
+    # 3. 画像そのものを送る (photutils が無い環境)
     nova = FakeNova(["success"])
     with patched_nova(nova, no_source_detector=True):
         hdr = solve_online(img_path, FAKE_KEY, sources=None, shape=SHAPE, timeout=30)
@@ -250,32 +269,53 @@ def run_cases(label, solve_online, img_path):
         ok, msg = _check_submission(label, subs[0], "画像")
     record(f"[{label}] 画像を送る (photutils なし) → publicly_visible='n'", ok and bool(hdr), msg)
 
-    # 4. 星の位置で解けず、画像へ切り替える → 2 回とも "n"
+    # 4. 星の位置で解けず、画像へ切り替える → 2 回とも "n"。photutils があっても 2 回目は画像
+    for nsd, env in ((True, "photutils なし"), (False, "photutils あり")):
+        nova = FakeNova(["failure", "success"])
+        with patched_nova(nova, no_source_detector=nsd):
+            hdr, err = _solve_catching(solve_online, img_path, sources=SOURCES)
+        subs = nova.submissions()
+        ok = len(subs) == 2 and not err
+        msgs = [f"受付 {len(subs)} 件"] + ([err] if err else [])
+        for s, kind in zip(subs, ("星の位置", "画像")):
+            o, m = _check_submission(label, s, kind)
+            ok, msgs = ok and o, msgs + [m]
+        record(f"[{label}] 星の位置 → 画像へ切り替え ({env})、2 回とも 'n'", ok and bool(hdr), " | ".join(msgs))
+
+    # 5. photutils があっても画像ファイルそのものを送る (exe と同じ)。FITS でも JPEG でも。
+    #    astroquery 0.4.10 の photutils の経路 (星を数え直して位置を送る。FITS 以外は CCDData.read が例外) に入らない
+    for path in (img_path, jpg_path):
+        name = os.path.basename(path)
+        nova = FakeNova(["success"])
+        with warnings.catch_warnings(record=True) as caught, patched_nova(nova, no_source_detector=False):
+            warnings.simplefilter("always")
+            hdr, err = _solve_catching(solve_online, path)
+            class_flag = anc.AstrometryNetClass._no_source_detector
+        photutils_warned = [w for w in caught if "photutils" in str(w.message)]
+        subs = nova.submissions()
+        ok = len(subs) == 1 and not err and not photutils_warned and class_flag is False
+        msgs = [f"受付 {len(subs)} 件"] + ([err] if err else [])
+        if photutils_warned:
+            msgs.append("photutils の経路に入った (非推奨の警告が出た)")
+        if class_flag is not False:
+            msgs.append(f"クラスの既定が {class_flag!r} に変わった")
+        if subs:
+            o, m = _check_submission(label, subs[0], "画像")
+            if subs[0][3] != name:
+                o, m = False, f"送ったファイル名 {subs[0][3]!r} ({name!r} のはず) / {m}"
+            ok, msgs = ok and o, msgs + [m]
+        record(f"[{label}] photutils ありでも画像を送る ({os.path.splitext(name)[1]}) → publicly_visible='n'",
+               ok and bool(hdr), " | ".join(msgs))
+
+    # 6. API キーはログインのときだけ (星の位置 → 画像と 2 回受け付けても、ログインは 1 回)
     nova = FakeNova(["failure", "success"])
-    with patched_nova(nova, no_source_detector=True):
-        hdr = solve_online(img_path, FAKE_KEY, sources=SOURCES, shape=SHAPE, timeout=30)
-    subs = nova.submissions()
-    ok = len(subs) == 2
-    msgs = [f"受付 {len(subs)} 件"]
-    for s, kind in zip(subs, ("星の位置", "画像")):
-        o, m = _check_submission(label, s, kind)
-        ok, msgs = ok and o, msgs + [m]
-    record(f"[{label}] 星の位置 → 画像へ切り替え、2 回とも 'n'", ok and bool(hdr), " | ".join(msgs))
-
-    # 5. photutils があるとき: solve_from_image は画像を送らず、astroquery が数えた星の位置を送る
-    nova = FakeNova(["success"])
     with patched_nova(nova, no_source_detector=False):
-        hdr = solve_online(img_path, FAKE_KEY, sources=None, shape=SHAPE, timeout=30)
-    subs = nova.submissions()
-    ok, msg = len(subs) == 1, f"受付 {len(subs)} 件"
-    if subs:
-        ok, msg = _check_submission(label, subs[0], "星の位置")
-    record(f"[{label}] photutils の経路 (画像は送らない) → publicly_visible='n'", ok and bool(hdr), msg)
-
-    # 6. API キーはログインのときだけ
+        hdr, err = _solve_catching(solve_online, img_path, sources=SOURCES)
     logins = nova.logins()
-    ok = len(logins) == 1 and (logins[0][2] or {}).get("apikey") == FAKE_KEY
-    record(f"[{label}] API キーはログインのときだけ送る", ok, f"ログイン {len(logins)} 回")
+    ok = (len(logins) == 1 and (logins[0][2] or {}).get("apikey") == FAKE_KEY
+          and len(nova.submissions()) == 2 and not err)
+    record(f"[{label}] API キーはログインのときだけ送る", ok and bool(hdr),
+           f"ログイン {len(logins)} 回・受付 {len(nova.submissions())} 件" + (f" | {err}" if err else ""))
 
 
 def case_control():
@@ -305,14 +345,15 @@ def load_built_engine(path):
 def main():
     core_only = "--core-only" in sys.argv
     img = make_star_fits(os.path.join(_TMP, "stars.fits"))
+    jpg = make_star_jpeg(os.path.join(_TMP, "stars.jpg"), img)
     try:
         import zahyou_core as zc
-        run_cases("dev/zahyou_core.py", zc.solve_online, img)
+        run_cases("dev/zahyou_core.py", zc.solve_online, img, jpg)
         if not core_only:
             path = os.path.join(REPO, "zahyou_engine.py")
             try:
                 ns = load_built_engine(path)
-                run_cases("直下の zahyou_engine.py", ns["solve_online"], img)
+                run_cases("直下の zahyou_engine.py", ns["solve_online"], img, jpg)
             except Exception as e:
                 record("[直下の zahyou_engine.py] 読み込み", False, f"{type(e).__name__}: {e}")
         case_control()
