@@ -639,7 +639,24 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
 (星が 0 個のときの一文は無い。次に exe を建てるときに合わせるか決める)。マニュアル v4 を組み直した(33 ページのまま、4,057,790 バイト
 `4efcd99c…ec10`。2 回組んで同じバイト)。6 節の `make_release_assets.py` を公開した v7.0.0 の exe で走らせ、5 つの検査が全部 OK、
 `sha256sum -c` OK。マニュアル以外の 5 つの SHA256 は v7 の Release の資産と同じ。`test_make_release_assets.py` 32 本 OK(この exe を渡して)。
-**v7 の Release の資産のマニュアル(`8bd78680…b04d`)と配布ページのマニュアルは前のまま**(差し替えるかはユーザーの了承を得てから)
+~~**v7 の Release の資産のマニュアル(`8bd78680…b04d`)と配布ページのマニュアルは前のまま**(差し替えるかはユーザーの了承を得てから)~~ → 下のとおり差し替えた
+
+**2026-10-19 14:4x に、マニュアルの資産と配布ページのマニュアルを組み直したものに差し替えた**(ユーザーの指示「PR #28 を merge したあと、
+Release v7 の資産のマニュアルと SHA256SUMS.txt、配布ページのマニュアルを、組み直したもの(4efcd99c…ec10)に差し替えて」)。
+
+- PR #28 を merge commit で統合(main = `1891069`)。main から `make_release_assets.py`(公開した v7.0.0 の exe)で資産一式を作り直し、
+  5 つの検査が全部 OK、`sha256sum -c` OK。マニュアル以外の 5 つの SHA256 は前と同じ(出力は `%USERPROFILE%\zahyou-dist-v7-manual3`)
+- Release v7: `gh release upload v7 --clobber` で `zahyou-manual-v4.pdf`(4,057,790 バイト `4efcd99c…ec10`)と `SHA256SUMS.txt`
+  (`aa06349d…1f7f`)を差し替えた。本文は SHA256SUMS の行のほかに、「nova.astrometry.net へ送るもの」の「(v6 と同じです)」を README と
+  同じ文に直した(PR #28 と同じ訂正。v6 の exe との違いの段落と、星が 0 個のときの一文)。Release から 7 つとも落として `sha256sum -c` OK、
+  GitHub の digest も一致、latest は `v7` のまま。exe は変えていないので更新の届き方には関係しない。前の本文・マニュアル・SHA256SUMS.txt・
+  資産の一覧はリポジトリの外の `Documents\claude\zahyou\release-backup\v7-manual-swap2-20261019\`
+- 配布ページ: 新しいマニュアルを `R:\_claude-tmp\zahyou-manual-swap2\` に置き、一時 cronjob(root)で SHA256 が合うときだけ
+  `cat 新しいもの > …マニュアルv4.pdf`。inode(232463)・所有者 AstroKIT:YoFu・644・ACL(owner@・group@・everyone@ の 3 つ)は前と同じ。
+  作業フォルダーは root で消し、cronjob も消した。公開 URL(public.php/webdav)から落として `4efcd99c…ec10` で一致、一覧の時刻も新しい。
+  `はじめにお読みください.txt` は exe の SHA256 とマニュアルのページ数(33 ページ)だけを書いていて、どちらも変わらないので触れていない
+  (nova の段落も「v6 と同じ」とは書いていない)
+- そのため、資産のマニュアルはタグ `v7`(b70f73a)の木のものではなく、main の `1891069` のもの(違いは［使い方］の写真と 2.3 の nova の段落)
 
 ### 2026-10-19 の直し(ノートブック版も画像ファイルを送るようにした)
 
@@ -667,7 +684,7 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
   `test_notebook_run.py` は手元に nbclient が無いので走らせていない(エンジンの読み込みは `test_online_settings.py` が直下のものを exec して確かめている)
 - 6 節の `make_release_assets.py` を公開した v7.0.0 の exe(`5ab3dec6…bae4`)で走らせ、5 つの検査が全部 OK、`sha256sum -c` OK。
   Release v7 の資産と違うのは **`zahyou_engine.py`(`3c0a2b20…3993`、257,532 バイト → `e50459f5…7598`、258,633 バイト)と `SHA256SUMS.txt` だけ**。
-  `zahyou_v7.ipynb`(`ab742a79…f784`)・exe・マニュアル(`4efcd99c…ec10`。この時点で Release の資産はすでにこの値だった)・`LICENSE.txt`・`THIRD-PARTY-NOTICES.md` は同じ。
+  `zahyou_v7.ipynb`(`ab742a79…f784`)・exe・マニュアル(`4efcd99c…ec10`。上の 14:4x の差し替えのあとの値)・`LICENSE.txt`・`THIRD-PARTY-NOTICES.md` は同じ。
   `test_make_release_assets.py` 32 本 OK(この exe を渡して)
   - 新しい worktree では manual の検査が落ちた。`dev/fonts`(.gitignore)の Noto Sans JP を Windows の可変フォントから作り直すと、作るたびに違うバイトになり、
     組んだ PDF も変わるため。PR #28 の worktree(`zahyou-nova-doc`)の `dev/fonts` を写すと通った(HackGen は毎回同じバイト)
