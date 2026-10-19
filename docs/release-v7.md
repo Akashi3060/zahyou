@@ -588,3 +588,22 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
   `zahyou-manual-v4.pdf` と `SHA256SUMS.txt` を差し替え、本文の SHA256SUMS の行も直した。exe は変えていないので更新の届き方には関係しない。
   配布ページのマニュアルも root の `cat >` で同じものに(inode・所有者・ACL は前のまま)。公開 URL と GitHub から落として SHA256 が一致した。
   そのため、資産のマニュアルはタグ `v7`(b70f73a)の木のものではなく、main の c42dde2 のもの(違いは［使い方］の写真だけ)
+
+### 2026-10-19 の後片付け(β の Release を消した・nova の過去の公開分は残す)
+
+- **β版 2 つの Release を消した**(ユーザーの指示「β版二つをリリース自体から消したい」)。`gh release delete v7.0.0-beta.1 --yes`・
+  `gh release delete v7.0.0-beta.2 --yes`(`--cleanup-tag` は付けない)。消したあとの Releases は v7(latest)・v6〜v2 だけで、β の資産の URL
+  (`…/releases/download/v7.0.0-beta.N/zahyou.exe` など)は 404。β1 の exe に作者のパスが 504 か所入っていた件(上の「v7.0.0-beta.1」)の始末を兼ねる
+- **タグ `v7.0.0-beta.1`(8b7060c)・`v7.0.0-beta.2`(0b73d36)は残した**。`dev/README.md`・`rs/README.md`・`zahyou-net/src/lib.rs` が
+  「消した `gui/` などはタグ v7.0.0-beta.2 の木に残っている」と指しているため。タグのページは開けるが、exe は落とせない
+- 消す前の本文・資産の一覧・SHA256SUMS.txt はリポジトリの外の `Documents\claude\zahyou\release-backup\beta-releases-20261019\` に控えた
+- β の exe の「更新を確認」は Releases の一覧(プレリリースを含む)から同じ大きな版の新しいものを探すので、β が無くなっても v7 が出る
+  (README の「β版を使っていた方」の 1 行はそのままで正しい)
+- **nova の作者のアカウント(利用者 52918)に公開のまま残る過去の提出は、非公開にしないことにした**(ユーザーの決定)。ログインせずに
+  `/users/52918/images` を数え直すと 1,560 件(30 件ずつ 52 ページ。番号は 11022092〜16539871)。試したこと:
+  - API キーの `/api/login` で得たセッションは、サイトの画面ではログインにならない(`/dashboard/images` が `/signin` へ転送)。
+    `/user_images/<id>/hide` は持ち主でなくても 302 で画像のページへ戻すだけで、何も変えない(1 件試して、一覧に残ったまま)
+  - ブラウザーで本人にサインインしてもらう方法は、GitHub でサインインしたアカウントが別の利用者(56859)だったので止めた。
+    52918 がどの外部アカウントに結びついているかは分からない。人間確認(`/ask_human`)のボタンは押していない
+  - 非公開にするなら、52918 のアカウントでサインインして各画像の hide を使う。番号の一覧と、サインインしたブラウザーから順に送るための
+    スクリプトはリポジトリの外の `Documents\claude\zahyou\nova-hide\`
