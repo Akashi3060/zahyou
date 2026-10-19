@@ -688,4 +688,22 @@ Release v7 の資産のマニュアルと SHA256SUMS.txt、配布ページのマ
   `test_make_release_assets.py` 32 本 OK(この exe を渡して)
   - 新しい worktree では manual の検査が落ちた。`dev/fonts`(.gitignore)の Noto Sans JP を Windows の可変フォントから作り直すと、作るたびに違うバイトになり、
     組んだ PDF も変わるため。PR #28 の worktree(`zahyou-nova-doc`)の `dev/fonts` を写すと通った(HackGen は毎回同じバイト)
-- **Release v7 の資産の `zahyou_engine.py` と配布ページの `zahyou_engine.py` は前のまま**(差し替えるかはユーザーの了承を得てから。版は 7.0.0 のまま)
+- ~~**Release v7 の資産の `zahyou_engine.py` と配布ページの `zahyou_engine.py` は前のまま**(差し替えるかはユーザーの了承を得てから。版は 7.0.0 のまま)~~ → 下のとおり差し替えた
+
+**2026-10-19 15:0x に、エンジンの資産と配布ページのエンジンを直したものに差し替えた**(ユーザーの指示「PR #30 を merge したあとで、
+Release v7 の zahyou_engine.py と SHA256SUMS.txt、配布ページの zahyou_engine.py を差し替えてください(版は 7.0.0 のまま)」)。
+
+- PR #30 を merge commit で統合(main = `a5e61e1`)。main の木から `make_release_assets.py`(公開した v7.0.0 の exe `5ab3dec6…bae4`)で資産一式を作り直し、
+  5 つの検査が全部 OK、`sha256sum -c` OK。エンジン以外の 5 つの SHA256 は前と同じ(出力は `%USERPROFILE%\zahyou-dist-v7-engine`)
+- Release v7: `gh release upload v7 --clobber` で `zahyou_engine.py`(258,633 バイト `e50459f5…7598`)と `SHA256SUMS.txt`(`d2367332…1673`)を差し替えた。
+  本文は「`SHA256SUMS.txt` の中身」のエンジンの行だけを書き換えた(元の本文との違いはその 1 行。nova へ送るものの段落は exe の動きで書いてあり、
+  ノートブックの 2 段目に触れていないので直していない)。Release から 7 つとも落として `sha256sum -c` OK、GitHub の digest も一致、draft でも
+  prerelease でもなく、latest は `v7` のまま。exe は変えていないので更新の届き方には関係しない。前の本文・エンジン・SHA256SUMS.txt・資産の一覧と、
+  配布ページの差し替えのスクリプトと記録は、リポジトリの外の `Documents\claude\zahyou\release-backup\v7-engine-swap-20261019\`
+- 配布ページ: 新しいエンジンを `R:\_claude-tmp\zahyou-engine-swap\` に置き、一時 cronjob(root)で、今の中身が `3c0a2b20…3993` で新しいものが
+  `e50459f5…7598` のときだけ `cat 新しいもの > zahyou_engine.py`。inode(2097915)・所有者 AstroKIT:YoFu・644・ACL(owner@・group@・everyone@ の 3 つ)は
+  前と同じ。作業フォルダーは root で消し、cronjob も消した。公開 URL(public.php/webdav)から落として `e50459f5…7598` で一致。
+  一覧(PROPFIND)は、落とす前は古い大きさと時刻のままで、落としたあとに 258,633 バイト・15:02:39 JST になった(外部ストレージの変化は触れたときに拾う)。
+  `はじめにお読みください.txt` は exe の SHA256 だけを書いていて、nova の段落(「それで解けなければ画像ファイルそのものを送ります」)も今の動きと合うので触れていない
+- 前のエンジン(`3c0a2b20…3993`)を落とした人には、photutils の入った環境で 2 段目が画像を送らない(FITS 以外は失敗する)ままになる。版は 7.0.0 のままなので、
+  ノートブックの版の表示では見分けられない(ファイルの SHA256 で見分ける)
