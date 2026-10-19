@@ -93,7 +93,8 @@ exe は windows サブシステムなので、結果はコンソールに出な�
 
 - **オンライン解析の API キー**: ［解析］の「API キー」の欄(gui.json の `api_key`)。初めは作者の既定のキー
   (環境変数 ASTROMETRY_API_KEY があればそちら)が入っている。そのため「自動」は、ネットがあれば nova.astrometry.net に
-  星の位置を送る(解けなければ画像も。v6 と同じ)。どちらも request-json に `publicly_visible: "n"`(公開しない)を付ける
+  星の位置を送る(解けなければ・星が 0 個なら画像ファイルも。v6 の exe は画像を送らず、同梱の astroquery 0.4.10 が photutils で
+  数え直した星の位置を送っていた。docs/release-v7.md の 2026-10-19 の記録)。どちらも request-json に `publicly_visible: "n"`(公開しない)を付ける
   (`zahyou_net::nova::PUBLICLY_VISIBLE`。2026-10-16 の決定。それでも nova の一覧や画像ファイルからは完全には隠れない場合があるので、
   利用者向けの文書には「送ったものは第三者に見られることがある」と書いた)。`--shot --run` で撮るときや試しに解かせるときに外へ送りたくなければ、
   一時の gui.json の `"solve"` を `"オフラインのみ"` にするか、`"api_key": ""` を書いておく。`--selftest --offline` は送らない。

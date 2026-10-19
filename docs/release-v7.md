@@ -26,7 +26,7 @@ main に統合してふつうの Release で出す、とした。** 1〜7 節が
 | API キー | ［解析］タブの「解析」の枠に欄(伏せ字・「表示」・「元に戻す」)。**既定は元のキー(v6 と同じ)** | gui.json の `api_key` に平文で保存。空なら問い合わせない。環境変数 ASTROMETRY_API_KEY は gui.json に `api_key` が無いときの初めの値だけ。キーの値は文書・ログ・画面の文に書かない |
 | 描画 | **DirectX 12 を既定**(主の画面の GPU・小さな塊)。開けなければ OpenGL → ソフトウェア描画(WARP) | 手で選ぶ引数 `--dx12` / `--glow` / `--gpu display\|low\|high\|warp`。想定は「Windows 11 が動く、RAM 8 GB 以上のノート PC」 |
 | v6 からの移り方 | **v7 は当面β版。v6 の自動更新の対象にしない** | 版 7.0.0-beta.N をプレリリースで出す(v6 の更新係が見る latest に出ない)。β 自身は v7 の新しいβ版と正式版を探す。**→ 2026-10-18 に正式版へ切り替えた(8 節)** |
-| 画像を外へ送ること | **同意を取らずに送ってよい**(今の動きのまま。v6 と同じ) | 方法が「自動」か「オンラインのみ」で、キーがあり、ネットにつながっていると、まず検出した星の位置(と画像の大きさ・手がかり)を、それで解けなければ画像ファイルそのもの(ファイル名も)を nova.astrometry.net へ送る。送らない方法(方法を「オフラインのみ」/ API キーの欄を空)と一緒に、README・マニュアル 2.3・［使い方］タブに書いた |
+| 画像を外へ送ること | **同意を取らずに送ってよい**(今の動きのまま。~~v6 と同じ~~ → 送る前に聞かないのは v6 と同じだが、v6 の exe は画像ファイルを送っていなかった。10 節の 2026-10-19 の訂正) | 方法が「自動」か「オンラインのみ」で、キーがあり、ネットにつながっていると、まず検出した星の位置(と画像の大きさ・手がかり)を、それで解けなければ画像ファイルそのもの(ファイル名も)を nova.astrometry.net へ送る。送らない方法(方法を「オフラインのみ」/ API キーの欄を空)と一緒に、README・マニュアル 2.3・［使い方］タブに書いた |
 | nova へ送るときの公開の扱い(3 回目) | **公開しない指定 `publicly_visible = "n"` を付ける**(Rust 版と Python 版(ノートブックを含む)の両方)。文書には「nova に送ったものは第三者に見られることがある」と書く | Rust: `zahyou_net::nova::PUBLICLY_VISIBLE`・`private_settings`(星の位置のリストと画像の両方の request-json の先頭に付ける。呼ぶ側が別の値を渡しても `"n"`)。Python: `dev/zahyou_core.py` の `solve_online` の設定(同じく先頭。native-solver の `b878079` で直し、`53e485e` で native-rs に取り込んだ。β1 の資産から入っている)。試験は偽の nova が受け取った本文と astroquery の記録(`rs/testdata/gen_net.py`)で。README・マニュアル 2.3・［使い方］タブ・rs/README.md に「公開しない指定を付けて送る。ただし第三者に見られることがある」を足した(0.1 節の注意のとおり、`"n"` でも完全には隠れない場合がある) |
 | β の Release の資産 | **exe 以外も付ける**(v6 の Release に合わせる) | `zahyou.exe`・`zahyou_v7_beta.ipynb` と `zahyou_engine.py`・`zahyou-manual-v4.pdf`・`LICENSE.txt`・`THIRD-PARTY-NOTICES.md`(rs/ のもの)・`SHA256SUMS.txt`。`rs/tools/make_release_assets.py` がそろえて検査する(6 節)。ノートブックはエンジンを名前で探すので、改名しても動く(確かめた) |
 | 超広角の画像(2026-10-18) | **考慮しない**(望遠鏡の用途では当たらない) | 索引 4115〜4119 の大きな quad で、写真側の code を画素の平面のまま作るために取りこぼす件(index-format.md 8.4・14 の 9。合成の試験では短辺 33° 以上で解けない)は直さない。README の「対応画角 4′〜2000′」もそのまま |
@@ -607,3 +607,35 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
     52918 がどの外部アカウントに結びついているかは分からない。人間確認(`/ask_human`)のボタンは押していない
   - 非公開にするなら、52918 のアカウントでサインインして各画像の hide を使う。番号の一覧と、サインインしたブラウザーから順に送るための
     スクリプトはリポジトリの外の `Documents\claude\zahyou\nova-hide\`
+
+### 2026-10-19 の訂正(v6 の exe は画像ファイルを送っていなかった)
+
+ブログの記事 (4) を書くときの検証で分かった。README・マニュアル 2.3 の「送る前に確かめることはせずに次のものを送ります(v6 と同じです)」は
+誤りだった。送る前に聞かないのは v6 と同じだが、**v6 の exe は画像ファイルを送っていなかった**。コードと配った exe を読んで確かめた
+(本物の nova へ画像を送る試験はしていない)。
+
+- v6(b25a42f)の `solve_online`: zahyou が検出した星の位置を `solve_from_source_list` で送り、解けなければ astroquery の
+  `solve_from_image(選んだ画像のパス)` を呼ぶ(星が 0 個ならはじめからこちら)。`force_image_upload` も `publicly_visible` も付けていない
+- astroquery 0.4.10 の `solve_from_image`(`astrometry_net/core.py` 408 行〜): 画像を上げるのは `force_image_upload or self._no_source_detector`
+  のときだけ。`photutils.detection` の DAOStarFinder を import できれば、`CCDData.read(画像, unit='adu')` → `sigma_clipped_stats` →
+  DAOStarFinder(fwhm=3、しきい値 5σ)で星を数え直し、`solve_from_source_list` で位置を送る。この経路には「photutils の機能を外す」という
+  AstropyDeprecationWarning が付いている(将来の版では画像を上げる側に変わりうる)。`force_image_upload` は 0.4.8 から非推奨(渡すと警告、値は効く)
+- **配った v6 の exe**(Release の `zahyou.exe`、107,288,075 バイト)の PyInstaller の中身を読んだ(実行はしていない): `astroquery.version` は 0.4.10、
+  `photutils.detection.daofinder` と、import に要る `photutils\CITATION.rst` が入っている。中のエンジンは Release の `zahyou_engine.py` と同じバイトで、
+  `force_image_upload` を含まない。`gui/zahyou.spec` も photutils を同梱する(データと hiddenimports)
+- `CCDData.read` は FITS しか読めない(astropy 7.1.0 で JPEG・PNG・TIFF は `IORegistryError: Format could not be identified`)。そのため v6 の exe では、
+  FITS 以外の画像は 2 段目が例外になり「⚠️ オンライン解析でエラー」→「自動」なら WSL へ移っていた
+- v6 のノートブック版: 案内の `!pip install` に photutils が無いので、その手順どおりの環境では画像ファイルを上げていた。photutils のある環境では exe と同じ
+- v7 の exe(Rust): 星の位置のリストに nova が「解けない」と答えたとき、または星が 0 個のとき(`pipeline.rs` は 0 個でもオンラインへ進む)、
+  画像ファイルの中身とファイル名をそのまま `api/upload` で送る(`zahyou-net/src/nova.rs` の `solve_online_inner`)。時間切れ・中止では送らない
+- **v7 のノートブック版**(`zahyou_engine.py` の `solve_online`)は、v6 と同じく `solve_from_image` を `force_image_upload` なしで呼ぶ。案内どおり
+  (photutils なし)なら画像ファイルを送るが、photutils の入った環境では v6 の exe と同じく数え直した位置を送り、FITS 以外はそこで失敗する
+  (そのときログの「画像そのものを送ります」は事実と違う)。`dev/test_online_settings.py` の 5 はこの経路を試している。ノートブックの文
+  (`dev/nb_settings.py` の「送ることがあります」)は外れていないので直していない。exe と同じ動きにそろえるかは決めていない
+
+直したもの: README の「nova.astrometry.net へ送るもの」とマニュアル 2.3(v6 との違いを 1 段落にし、星が 0 個のときの一文を足した)、
+`rs/README.md`、`rust-port.md` 10.2 節の 1 行、この手順書の 0 節の表。［使い方］タブ(`help_tab.rs`)は v6 に触れていないので直していない
+(星が 0 個のときの一文は無い。次に exe を建てるときに合わせるか決める)。マニュアル v4 を組み直した(33 ページのまま、4,057,790 バイト
+`4efcd99c…ec10`。2 回組んで同じバイト)。6 節の `make_release_assets.py` を公開した v7.0.0 の exe で走らせ、5 つの検査が全部 OK、
+`sha256sum -c` OK。マニュアル以外の 5 つの SHA256 は v7 の Release の資産と同じ。`test_make_release_assets.py` 32 本 OK(この exe を渡して)。
+**v7 の Release の資産のマニュアル(`8bd78680…b04d`)と配布ページのマニュアルは前のまま**(差し替えるかはユーザーの了承を得てから)
