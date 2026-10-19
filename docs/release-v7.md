@@ -707,3 +707,26 @@ Release v7 の zahyou_engine.py と SHA256SUMS.txt、配布ページの zahyou_e
   `はじめにお読みください.txt` は exe の SHA256 だけを書いていて、nova の段落(「それで解けなければ画像ファイルそのものを送ります」)も今の動きと合うので触れていない
 - 前のエンジン(`3c0a2b20…3993`)を落とした人には、photutils の入った環境で 2 段目が画像を送らない(FITS 以外は失敗する)ままになる。版は 7.0.0 のままなので、
   ノートブックの版の表示では見分けられない(ファイルの SHA256 で見分ける)
+
+### 2026-10-19 の直し(動作環境から「リモート デスクトップ」「GPU のドライバーが無い PC」を外した)
+
+ユーザーの指示(親のセッション経由):「掩蔽観測のときリモートデスクトップで使う人はいないはずなので記載しなくてよい」
+「掩蔽観測で使用するノートPCには内蔵GPUなどがあるはずなのでGPUドライバーが無いPCについても記載しなくてよい」。マニュアルの資産と配布ページも差し替える。
+
+- PR #32(docs-drop-rdp-gpu、`a718326`)を merge commit で統合(main = `95dcbb9`)。README の「確かめた PC は 2 台です」の囲みと
+  マニュアル 3 章の同じ囲みを「RAM 8 GB の PC では、まだ確かめていません。」だけにした(RAM 8 GB は外す指示に入っていないので残した)。
+  マニュアル v4 は 33 ページのまま 4,057,726 バイト `ec84638a…4644`(2 回組んで同じバイト)。
+  exe の中の文(`rs/app/src/main.rs` 164 行の、画面が開けないときの助言「リモート デスクトップや仮想マシンの中では…」)と、
+  開発の記録(`rust-port.md`)・コードのコメントは触っていない(指示どおり。exe を建て直すことになるため)
+- main から `make_release_assets.py`(公開した v7.0.0 の exe)で資産一式を作り直し、5 つの検査が全部 OK、`sha256sum -c` OK。
+  マニュアル以外の 5 つの SHA256 は、PR #31 で差し替えたあとの Release の資産と同じ(出力は `%USERPROFILE%\zahyou-dist-v7-manual4`)
+- Release v7: `gh release upload v7 --clobber` で `zahyou-manual-v4.pdf`(`ec84638a…4644`)と `SHA256SUMS.txt`(`10d169ff…a5ca`)を差し替えた。
+  本文は SHA256SUMS のマニュアルの行と、動作環境の「RAM 8 GB の PC・リモート デスクトップ・GPU のドライバーが無い PC では、まだ確かめていません。」を
+  「RAM 8 GB の PC では、まだ確かめていません。」に(違いはその 2 行)。Release から 7 つとも落として `sha256sum -c` OK、本文も用意したものと同じ、
+  latest は `v7` のまま。前の本文・マニュアル・SHA256SUMS.txt・資産の一覧・配布ページの txt は、リポジトリの外の
+  `Documents\claude\zahyou\release-backup\v7-manual-swap3-20261019\`
+- 配布ページ: マニュアルと `はじめにお読みください.txt`(動作環境の段落に同じ文があった)を、一時 cronjob(root)で、今の中身と新しい中身の
+  SHA256 が両方とも思ったとおりのときだけ `cat 新しいもの > …` で入れ替えた。マニュアルは `4efcd99c…ec10` → `ec84638a…4644`(inode 232463)、
+  txt は 15,140 バイト `d69ee6fa…4391` → 15,063 バイト `ea15d975…d664`(inode 2097551。BOM 付き UTF-8・CRLF のまま、その 1 文を 2 行から 1 行にしただけ)。
+  所有者 AstroKIT:YoFu・644・ACL(owner@・group@・everyone@ の 3 つ)は前と同じ。作業フォルダー(`R:\_claude-tmp\zahyou-manual-swap3`)は root で消し、
+  cronjob も消した。公開 URL(public.php/webdav)から 2 つとも落として SHA256 が一致
