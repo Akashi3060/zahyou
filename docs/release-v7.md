@@ -730,3 +730,21 @@ Release v7 の zahyou_engine.py と SHA256SUMS.txt、配布ページの zahyou_e
   txt は 15,140 バイト `d69ee6fa…4391` → 15,063 バイト `ea15d975…d664`(inode 2097551。BOM 付き UTF-8・CRLF のまま、その 1 文を 2 行から 1 行にしただけ)。
   所有者 AstroKIT:YoFu・644・ACL(owner@・group@・everyone@ の 3 つ)は前と同じ。作業フォルダー(`R:\_claude-tmp\zahyou-manual-swap3`)は root で消し、
   cronjob も消した。公開 URL(public.php/webdav)から 2 つとも落として SHA256 が一致
+
+### 2026-10-19 の直し(マニュアル 6.3 の「ビニングやレデューサーで画角を広げて」)
+
+ユーザーの指示(親のセッション経由):「マニュアル 6.3 節の「ビニングやレデューサーで画角を広げて」を、6.2 節に合わせて
+「レデューサーで画角を広げて(ビニングしても画角は変わりません)」に直す」。マニュアルの資産と配布ページも差し替える。
+
+- PR #34(docs-binning-fov、`48047a2`)を merge commit で統合(main = `de75909`)。6.3 節の囲みを
+  「レデューサーで画角を広げてください（ビニングしても画角は変わりません）。」に。マニュアル v4 は 33 ページのまま 4,057,756 バイト
+  `92faed8a…eace1`(2 回組んで同じバイト)。同じ書き方は README・［使い方］タブ・exe とエンジンの文・Release 本文・配布ページの txt には無く、
+  リポジトリでは v5 の開発メモ `CODE_REVIEW_v5.md` 380 行(「ビニングやモザイクで画角を稼ぐか」)だけ(触っていない)
+- main から `make_release_assets.py`(公開した v7.0.0 の exe)で資産一式を作り直し、5 つの検査が全部 OK、`sha256sum -c` OK。
+  マニュアル以外の 5 つの SHA256 は今の Release の資産と同じ(出力は `%USERPROFILE%\zahyou-dist-v7-manual5`)
+- Release v7: `gh release upload v7 --clobber` で `zahyou-manual-v4.pdf`(`92faed8a…eace1`)と `SHA256SUMS.txt`(`a0297e0a…d53d`)を差し替え、
+  本文は SHA256SUMS のマニュアルの行だけを直した。Release から 7 つとも落として `sha256sum -c` OK、本文も用意したものと同じ、latest は `v7` のまま。
+  前の本文・マニュアル・SHA256SUMS.txt・資産の一覧は、リポジトリの外の `Documents\claude\zahyou\release-backup\v7-manual-swap4-20261019\`
+- 配布ページ: マニュアルだけを、一時 cronjob(root)で、今の中身が `ec84638a…4644` で新しいものが `92faed8a…eace1` のときだけ `cat >` で入れ替えた
+  (inode 232463・所有者 AstroKIT:YoFu・644・ACL は前と同じ)。`はじめにお読みください.txt` にはマニュアルの SHA256 もこの文も無いので触れていない。
+  作業フォルダー(`R:\_claude-tmp\zahyou-manual-swap4`)は root で消し、cronjob も消した。公開 URL から落として `92faed8a…eace1` で一致
