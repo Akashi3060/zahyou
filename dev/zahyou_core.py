@@ -1478,6 +1478,9 @@ def solve_online(image_path, api_key, sources=None, shape=None, timeout=120,
     画像そのものは送らない (中止を押した人の画像を、押したあとに外へ送らない)。
     nova が「解けない」と空の結果を返したときも None (成功扱いにしてオフラインを飛ばさない)。
 
+    星の位置で解けなかったとき (星が 0 個ならはじめから) は、画像ファイルそのもの (ファイル名も) を
+    api/upload で送る。photutils が入っていても同じ (exe と同じ動き。下の _no_source_detector)。
+
     送るときは必ず「公開しない」(publicly_visible='n') を付ける。付けないと nova は公開 ('y') として
     受け付け、画像のページや「最近送られた画像」の一覧などに、API キーの持ち主のアカウント名で載る
     (astroquery も既定値を自分では付けない)。'n' にしても解き方は変わらない。
@@ -1489,6 +1492,13 @@ def solve_online(image_path, api_key, sources=None, shape=None, timeout=120,
 
     ast = AstrometryNet()
     ast.api_key = api_key
+    # astroquery 0.4.10 の solve_from_image は、photutils を import できると画像を上げず、
+    # CCDData.read (FITS しか読めない) と DAOStarFinder で星を数え直して位置を送る。そのままだと
+    # JPEG・PNG・TIFF はそこで例外になり、FITS でも「画像そのものを送ります」が事実と違う (v6 の exe がそうだった)。
+    # 内部の旗をこのインスタンスにだけ立てて、いつも画像を上げさせる。force_image_upload=True は 0.4.8 から非推奨で、
+    # 引数が消えると「Setting force_image_upload is not allowed」で画像の段が必ず失敗するので使わない。
+    # 予告どおり photutils の経路が消えれば、この旗は読まれなくなるだけで画像は送られる。
+    ast._no_source_detector = True
     settings = {"publicly_visible": "n"}      # 星の位置を送るときも画像を送るときも
     if hint_radec is not None:
         settings.update(center_ra=float(hint_radec[0]),
