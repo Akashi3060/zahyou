@@ -117,9 +117,9 @@ $PY -B app/testdata/gen_run_solver.py         # run() を本物の解法で 20 �
 送っていなければ値を作らずに止まる(Rust 版は必ず付けるので。Python 版のリポジトリは環境変数 ZAHYOU_PY_REPO で変えられる)。
 
 `gen_net.py` は `dev/` のほかに、v6 と試作版の Python の画面 `gui/`(`zahyou_env.py`・`zahyou_update.py`)も基準として読む。
-`gui/` は 7.0.0 の準備でリポジトリから消したので、作り直すときは `gui/` が残っているタグ `v7.0.0-beta.2` の木を出して指す
-(`git worktree add <置き場所> v7.0.0-beta.2` → `ZAHYOU_PY_REPO=<置き場所>`)。ソースの注釈にある「Python 版の `gui/…`」も、
-その木のファイルのこと(`git show v7.0.0-beta.2:gui/zahyou_gui.py`)。
+`gui/` は 7.0.0 の準備でリポジトリから消したので、作り直すときは `gui/` が残っている commit `0b73d36`(旧タグ v7.0.0-beta.2。main の歴史にある)の木を出して指す
+(`git worktree add --detach <置き場所> 0b73d36` → `ZAHYOU_PY_REPO=<置き場所>`)。ソースの注釈にある「Python 版の `gui/…`」も、
+その木のファイルのこと(`git show 0b73d36:gui/zahyou_gui.py`)。
 
 ## 速さの物差し
 
