@@ -88,7 +88,7 @@ python test_notebook_run.py      # 本物のカーネルでセル A/B を実行�
 | `test_robust.py` | 読み込み・前処理・検出（図の星と、解析エンジンに渡す深い検出の星） | 38 ケース（うち 3 つは手元に実写があるときだけ走る。置き場所は `ZAHYOU_TEST_IMAGES`（既定はホームフォルダー）の下の `Downloads`） |
 
 画面の試験は Rust 版のもの（[../rs/README.md](../rs/README.md)）。v6 と試作版（`v7-dev`）の Python の画面（`gui/`）と
-その試験は 7.0.0 の準備で消した（タグ `v7.0.0-beta.2` の木に残っている。`git show v7.0.0-beta.2:gui/README.md`）。
+その試験は 7.0.0 の準備で消した（commit `0b73d36`(旧タグ v7.0.0-beta.2。main の歴史にある)の木に残っている。`git show 0b73d36:gui/README.md`）。
 
 ### 別の言語へ移すときの備え
 
@@ -172,7 +172,7 @@ python make_manual.py                 # ../天体画像解析プログラム「z
 ```
 
 マニュアル v4 は v7（デスクトップ版は Rust の exe）の本文。v6（WSL を使う版）の v3 の PDF は
-7.0.0 の準備でリポジトリから消した（タグ `v7.0.0-beta.2` の木に残っている。配布ページも v4 に差し替える。
+7.0.0 の準備でリポジトリから消した（commit `0b73d36`(旧タグ v7.0.0-beta.2)の木に残っている。配布ページも v4 に差し替える。
 [../docs/release-v7.md](../docs/release-v7.md) の 8 節）。
 作成日時などを固定して組む（ReportLab の `invariant`）ので、同じ `make_manual.py` とフォントからは同じバイトの PDF になる。
 `make_manual.py` を直したら PDF も組み直して一緒に commit する（`rs/tools/make_release_assets.py` の manual の検査が、
@@ -195,7 +195,7 @@ python make_manual.py                 # ../天体画像解析プログラム「z
 配っている exe（Rust）の表示は `rs/THIRD-PARTY-NOTICES.md` で、`rs/tools/gen_notices.py` が作る（release-v7.md の 3 節）。
 星図データの条件・Gaia の謝辞・出典の文も `gen_notices.py` の `HEAD` などに書いてある。
 v6 と試作版の Python の exe（PyInstaller）用の表示（リポジトリ直下の `THIRD-PARTY-NOTICES.md`）と、それを作る `make_notices.py` は
-7.0.0 の準備で消した（タグ `v7.0.0-beta.2` の木に残っている）。
+7.0.0 の準備で消した（commit `0b73d36`(旧タグ v7.0.0-beta.2)の木に残っている）。
 
 ---
 

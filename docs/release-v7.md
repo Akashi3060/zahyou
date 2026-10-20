@@ -440,8 +440,8 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
   README の「中身に興味がある方へ」の説明はそのまま)。~~ → **済み(2026-10-18、ユーザーの決定で消した)**。消したのは `gui/` の全部
   (Python の試作の画面・v6 の更新係 `zahyou_update.py`・`zahyou_env.py`・PyInstaller の `build_exe.ps1`・`zahyou.spec`・画面の試験
   `test_*.py`・`README.md`・`.gitignore`)、`dev/make_notices.py`、`dev/upload_share.py`、直下の `THIRD-PARTY-NOTICES.md`(Python の exe 用)、
-  直下の `zahyou.ipynb`(2025-11 の v5 のノートブック)、直下のマニュアル v3 の PDF。どれもタグ `v7.0.0-beta.2` の木に残っている
-  (`git show v7.0.0-beta.2:gui/zahyou_update.py` など)。照合値を作る `rs/testdata/gen_net.py` は `gui/` の Python 版を読むので、
+  直下の `zahyou.ipynb`(2025-11 の v5 のノートブック)、直下のマニュアル v3 の PDF。どれも commit `0b73d36`(旧タグ v7.0.0-beta.2)の木に残っている
+  (`git show 0b73d36:gui/zahyou_update.py` など)。照合値を作る `rs/testdata/gen_net.py` は `gui/` の Python 版を読むので、
   作り直すときはそのタグの木を `ZAHYOU_PY_REPO` に指す(rs/README.md)。
 
 ## 10. 出した記録
@@ -594,7 +594,7 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
 - **β版 2 つの Release を消した**(ユーザーの指示「β版二つをリリース自体から消したい」)。`gh release delete v7.0.0-beta.1 --yes`・
   `gh release delete v7.0.0-beta.2 --yes`(`--cleanup-tag` は付けない)。消したあとの Releases は v7(latest)・v6〜v2 だけで、β の資産の URL
   (`…/releases/download/v7.0.0-beta.N/zahyou.exe` など)は 404。β1 の exe に作者のパスが 504 か所入っていた件(上の「v7.0.0-beta.1」)の始末を兼ねる
-- **タグ `v7.0.0-beta.1`(8b7060c)・`v7.0.0-beta.2`(0b73d36)は残した**。`dev/README.md`・`rs/README.md`・`zahyou-net/src/lib.rs` が
+- **タグ `v7.0.0-beta.1`(8b7060c)・`v7.0.0-beta.2`(0b73d36)は残した**(→ 2026-10-20 に消した。下の「2026-10-20 の整理」)。`dev/README.md`・`rs/README.md`・`zahyou-net/src/lib.rs` が
   「消した `gui/` などはタグ v7.0.0-beta.2 の木に残っている」と指しているため。タグのページは開けるが、exe は落とせない
 - 消す前の本文・資産の一覧・SHA256SUMS.txt はリポジトリの外の `Documents\claude\zahyou\release-backup\beta-releases-20261019\` に控えた
 - β の exe の「更新を確認」は Releases の一覧(プレリリースを含む)から同じ大きな版の新しいものを探すので、β が無くなっても v7 が出る
@@ -748,3 +748,22 @@ Release v7 の zahyou_engine.py と SHA256SUMS.txt、配布ページの zahyou_e
 - 配布ページ: マニュアルだけを、一時 cronjob(root)で、今の中身が `ec84638a…4644` で新しいものが `92faed8a…eace1` のときだけ `cat >` で入れ替えた
   (inode 232463・所有者 AstroKIT:YoFu・644・ACL は前と同じ)。`はじめにお読みください.txt` にはマニュアルの SHA256 もこの文も無いので触れていない。
   作業フォルダー(`R:\_claude-tmp\zahyou-manual-swap4`)は root で消し、cronjob も消した。公開 URL から落として `92faed8a…eace1` で一致
+
+### 2026-10-20 の整理(ブランチ・β のタグ・作業フォルダーを main に一本化)
+
+ユーザーの指示「ブランチとタグが増えすぎなので整理して。main に統合できるものは一本化して」。
+
+- **ブランチは main だけにした**。消したのは 15 本(手元と GitHub の両方): native-solver・native-rs・v6・v7-after-release・
+  v7-beta-cleanup・v7-manual-swap〜v7-manual-swap4・v7-engine-swap・nb-nova-image-upload・docs-nova-v6-upload・
+  docs-drop-rdp-gpu・docs-binning-fov(と、この整理の PR のブランチ)。v6 以外の 14 本は、main に無い commit が 0 だった。
+  v6 ブランチの 2 commit(97215f5・fecece4。2026-08-31)は、main の ecf7618(タグ v6 = Release v6)と同じ作業の前の形で、
+  main はその先の b25a42f まで進んでいる(Release v6 の本文のリンクも main の b25a42f を指す)ので、統合せずに消した。
+  v6 はタグとブランチが同じ名前で、`git` が「v6 is ambiguous」と言っていたのも、これで無くなった
+- **β のタグ 2 つ(v7.0.0-beta.1・v7.0.0-beta.2)を消した**。どちらの commit も main の歴史にあるので失われない。
+  消した gui/ などを指す手順と注釈(dev/README.md・rs/README.md・zahyou-net/src/lib.rs・rs/testdata/gen_net.py・この文書の 6 節)は、
+  先に commit `0b73d36`(旧タグ v7.0.0-beta.2)を指す形に直した。残るタグは Release が使う v2〜v7 の 6 つ
+- **作業フォルダーは `GitHub\zahyou` 1 つ(main)にした**。git worktree の zahyou-rs・zahyou-nova-doc・zahyou-nova-nb を外した
+  (どれも変更・未 push 無し)。zahyou-rs の rs/target*(ビルドの作り置き)も一緒に消えたので、次に exe を建てるときは最初から建て直す。
+  `dev/fonts` の NotoSansJP は zahyou-nova-doc のものに入れ替えた(main のマニュアル v4 は、このフォントで組むと一字一句同じ PDF になる。
+  ほかの 2 組では一致しなかった)
+- 整理の前の全部の参照(ブランチ・タグ・stash)は、リポジトリの外の `Documents\claude\zahyou\repo-backup\` に bundle で控えた
