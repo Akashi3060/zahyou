@@ -465,21 +465,25 @@ fn finish_series(
 ) -> Result<Option<Found>, Abort> {
     let sc = SeriesCtx::new(store, iid, members[0].file);
     // 当たりの数は索引の順に足す。Python は 1 本ずつ照合するので、問題が起きた索引より前の分だけが数えられる
-    let mut all: Vec<Hyp> = Vec::new();
+    let mut per_file: Vec<Vec<Hyp>> = Vec::with_capacity(results.len());
     for r in results {
         match r {
             Ok((hy, nhit)) => {
                 st.hits += nhit;
                 st.flushes[fl].hits += nhit;
-                all.extend(hy);
+                per_file.push(hy);
             }
             Err(e) => return Err(clock.prefer_cancel(e)),
         }
     }
+    // 同じ系列のタイルの仮説をつなぎ、newpoint の順(quad の行の順。同じ行は索引の順)に並べる。
+    // 仮説(約 270 バイト)を 1 本につないで並べ替えると、写しと並べ替えの作業領域が大きい(しかも並列の外)ので、
+    // 参照(8 バイト)を並べる。参照の列は今までの連結と同じ順(索引の順、その中は索引の中の順)に作り、同じ鍵 row で
+    // 安定に並べるので、並びは仮説そのものを並べたときと完全に同じ
+    let mut all: Vec<&Hyp> = per_file.iter().flatten().collect();
     if all.is_empty() {
         return Ok(None);
     }
-    // 同じ系列のタイルの仮説をつなぎ、newpoint の順(quad の行の順。同じ行は索引の順)に並べる
     all.sort_by_key(|h| h.row);
     verify_and_pick(field, &sc, params, &all, clock, log, st, fl)
 }
@@ -665,7 +669,7 @@ fn verify_and_pick(
     field: &Field,
     sc: &SeriesCtx,
     params: &Params,
-    hyps: &[Hyp],
+    hyps: &[&Hyp],
     clock: Clock,
     log: &dyn Fn(&str),
     st: &mut SearchState,
@@ -718,7 +722,7 @@ fn verify_and_pick(
             if !(r.best >= tune) {
                 continue;
             }
-            let h = &part[i];
+            let h = part[i];
             let name = sc.store.file(sc.files[h.fid]).name.clone();
             if r.best < solve {
                 // tune-up: 1 次で改良して検証し直す
