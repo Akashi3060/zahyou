@@ -1,0 +1,5 @@
+# GitHub の言語の集計(Linguist)から、配布用のノートブックを外す。
+# ノートブックは出力の画像まで入った大きな JSON(約 2 MB)で、本体の Rust より大きく数えられ、
+# リポジトリの言語の一番上に「Jupyter Notebook」と出てしまうため。
+# 外れるのは言語の集計だけで、ファイルの中身・差分の表示・配布には影響しない。
+*.ipynb linguist-documentation
