@@ -11,6 +11,8 @@
 //!   (numpy 2 は q を配列の型で割り、位置 (n−1)·q も、補間も float32)
 //! - 伸張の式は float64(ImageNormalize は値を float64 にしてから計算する)
 
+use std::borrow::Cow;
+
 use rayon::prelude::*;
 use zahyou_image::Image2D;
 use zahyou_image::kernels::{sigma_clipped_stats, std_f32};
@@ -97,13 +99,40 @@ pub fn compute_norm(data: &[f32]) -> Option<Norm> {
 }
 
 /// 有限な値だけを、並びを保ったまま集める(`data[np.isfinite(data)]`)。
-pub(crate) fn finite_values(data: &[f32]) -> Vec<f32> {
+///
+/// 全部有限なら写さずに `data` をそのまま返す(図 1 の表示用画像はふつう NaN を含まない)。写した配列は
+/// 元と同じ並び・同じ値になるだけなので、後の和(区切りは配列の先頭からの位置で決まる)・σ クリップ・
+/// パーセント点はビット単位で同じ。NaN・±∞ を含むとき(北が上の図は外側がいつも NaN)は、CHUNK ごとに
+/// 個数を数えて合計の長さで 1 回だけ確保し、塊ごとの出力の区切りへ並列に書く(旧版は塊ごとの Vec を作って
+/// から 1 本のスレッドで concat していた)。数える述語と書く述語は同じ is_finite なので区切りの長さは合い、
+/// 並びも旧版と同じ。
+pub(crate) fn finite_values(data: &[f32]) -> Cow<'_, [f32]> {
     if data.len() < CHUNK {
-        return data.iter().copied().filter(|x| x.is_finite()).collect();
+        if data.iter().all(|x| x.is_finite()) {
+            return Cow::Borrowed(data);
+        }
+        return Cow::Owned(data.iter().copied().filter(|x| x.is_finite()).collect());
     }
-    let parts: Vec<Vec<f32>> =
-        data.par_chunks(CHUNK).map(|c| c.iter().copied().filter(|x| x.is_finite()).collect()).collect();
-    parts.concat()
+    if data.par_iter().all(|x| x.is_finite()) {
+        return Cow::Borrowed(data);
+    }
+    let counts: Vec<usize> = data.par_chunks(CHUNK).map(|c| c.iter().filter(|x| x.is_finite()).count()).collect();
+    let total: usize = counts.iter().sum();
+    let mut out = vec![0.0f32; total];
+    let mut parts: Vec<&mut [f32]> = Vec::with_capacity(counts.len());
+    let mut rest: &mut [f32] = &mut out;
+    for &c in &counts {
+        let (h, t) = rest.split_at_mut(c);
+        parts.push(h);
+        rest = t;
+    }
+    data.par_chunks(CHUNK).zip(parts.into_par_iter()).for_each(|(c, o)| {
+        // zip なので、仮に長さが食い違っても添字の外へは書かない(述語が同じなので食い違わない)
+        for (d, x) in o.iter_mut().zip(c.iter().copied().filter(|x| x.is_finite())) {
+            *d = x;
+        }
+    });
+    Cow::Owned(out)
 }
 
 /// 北が上の図の `_norm`。Python では reproject の結果が **float64** の配列なので、σ クリップ・`np.std`・
@@ -111,6 +140,8 @@ pub(crate) fn finite_values(data: &[f32]) -> Vec<f32> {
 /// Rust は描き直した画像を float32 で持つので、値を float64 にして同じ式で計算する(差は float32 の丸め程度)。
 /// float64 なので、±∞ を float32 の最大値にした画素があっても 2 乗の和があふれない(Python と同じ)。
 pub fn compute_norm_f64(data: &[f32]) -> Option<Norm> {
+    // NaN を含む data を直接読む形にはしない(和の 8192 個の区切りが写した配列とずれて、最後の桁が変わる)。
+    // finite_values は写した配列と同じ並び・同じ値を返す(全部有限なら data そのもの)ので、区切りも同じ
     let vals = finite_values(data);
     if vals.is_empty() {
         return None;
@@ -603,6 +634,92 @@ mod tests {
             for &v in &vals {
                 assert_eq!(map.gray8(v), n.gray8(v), "{n:?} の {v}");
             }
+        }
+    }
+
+    /// 旧版の finite_values(塊ごとに filter().collect() してから concat)。新版と比べる参照
+    fn finite_values_old(data: &[f32]) -> Vec<f32> {
+        if data.len() < CHUNK {
+            return data.iter().copied().filter(|x| x.is_finite()).collect();
+        }
+        let parts: Vec<Vec<f32>> =
+            data.par_chunks(CHUNK).map(|c| c.iter().copied().filter(|x| x.is_finite()).collect()).collect();
+        parts.concat()
+    }
+
+    fn compute_norm_old(data: &[f32]) -> Option<Norm> {
+        norm_of_finite(&finite_values_old(data))
+    }
+
+    fn compute_norm_f64_old(data: &[f32]) -> Option<Norm> {
+        let vals = finite_values_old(data);
+        if vals.is_empty() {
+            return None;
+        }
+        let (med, mut sigma) = clip_stats_f64(&vals);
+        if !sigma.is_finite() || sigma <= 0.0 {
+            let s = std_f64(&vals);
+            sigma = if s == 0.0 { 1.0 } else { s };
+        }
+        let p = percentile_f64(&vals, 99.9);
+        Some(finish(med, sigma, p))
+    }
+
+    fn bits(n: Option<Norm>) -> Option<(u64, u64)> {
+        n.map(|n| (n.vmin.to_bits(), n.vmax.to_bits()))
+    }
+
+    #[test]
+    fn finite_values_matches_old() {
+        // NaN・±∞ を混ぜた配列(塊の境目をまたぐ長さ、塊がまるごと非有限、先頭・末尾が非有限)と、全部有限の配列で、
+        // 新版の写し(または写さない)が旧版と要素ごとに to_bits まで同じ。伸張の範囲(float32 と float64)も同じ
+        let mut st: u64 = 12345;
+        let mut rnd = || {
+            st = st.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (st >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let mut cases: Vec<Vec<f32>> = Vec::new();
+        for (n, bad) in
+            [(250_001usize, 0.01f64), (200_000, 0.3), (70_000, 0.0), (65_536, 0.5), (65_535, 0.2), (1000, 0.1)]
+        {
+            let v: Vec<f32> = (0..n)
+                .map(|i| {
+                    let u = rnd();
+                    if u < bad / 3.0 {
+                        f32::NAN
+                    } else if u < bad * 2.0 / 3.0 {
+                        f32::INFINITY
+                    } else if u < bad {
+                        f32::NEG_INFINITY
+                    } else {
+                        (1000.0 + 50.0 * (rnd() - 0.5) + if i % 997 == 0 { 3e4 } else { 0.0 }) as f32
+                    }
+                })
+                .collect();
+            cases.push(v);
+        }
+        // 2 つ目の塊がまるごと NaN、先頭と末尾が NaN(北が上の図の外側の形)
+        let mut v: Vec<f32> = (0..300_000).map(|i| (i % 4093) as f32 * 0.25 - 100.0).collect();
+        for x in &mut v[CHUNK..2 * CHUNK] {
+            *x = f32::NAN;
+        }
+        v[0] = f32::NAN;
+        let last = v.len() - 1;
+        v[last] = f32::NEG_INFINITY;
+        cases.push(v);
+        cases.push(vec![f32::NAN; 200_000]);
+        cases.push(vec![]);
+        for (k, d) in cases.iter().enumerate() {
+            let new = finite_values(d);
+            let old = finite_values_old(d);
+            assert_eq!(new.len(), old.len(), "例 {k}");
+            assert!(new.iter().zip(&old).all(|(a, b)| a.to_bits() == b.to_bits()), "例 {k}");
+            // 全部有限なら写さない
+            if d.iter().all(|x| x.is_finite()) {
+                assert!(matches!(new, Cow::Borrowed(_)), "例 {k}");
+            }
+            assert_eq!(bits(compute_norm(d)), bits(compute_norm_old(d)), "例 {k}");
+            assert_eq!(bits(compute_norm_f64(d)), bits(compute_norm_f64_old(d)), "例 {k}");
         }
     }
 

@@ -15,7 +15,9 @@
 //!
 //! 画面の向きは「x が右、y が上」。flip_y(上下反転の表示)なら画像の y が画面の下向きになる。
 
-use zahyou_wcs::Wcs;
+use std::cell::OnceCell;
+
+use zahyou_wcs::{Vec3, Wcs, radec_to_xyz, xyz_to_radec};
 
 use crate::sexa::{ARCMIN_TO_DEG, ARCSEC_TO_DEG, DEG_TO_HOURANGLE, HOURANGLE_TO_DEG, sexagesimal_string};
 
@@ -223,42 +225,95 @@ fn screen_scale(w: f64, h: f64) -> f64 {
 }
 
 /// 画素 ↔ 天の写し(SIP は常にニュートン法で解く。astropy の all_world2pix と同じく近似を使わない)。
+///
+/// 点はまとめて写す(格子の線 1 本・枠の 1 辺・範囲の 51×51 点ごと)。zahyou-wcs の `*_batch` は接点の基底と
+/// CD⁻¹ を 1 回だけ計算し、点ごとには単発の `pix_to_xyz`・`xyz_to_pix(_exact)` と同じ関数を同じ値の基底で
+/// 呼ぶので、値は点ごとに呼んだとき(`pix_to_radec`・`radec_to_pix_exact`)とビット単位で同じ。
+/// 直列のまま(UI のスレッドから呼ぶので、解析が rayon を使っている間に待たされないように)。
 struct Trans<'a> {
     wcs: &'a Wcs,
+    /// SIP を外した TAN(SIP があるときだけ。遠すぎる点の打ち切りの判定に使う)。旧版は点ごとに `tan_only()` で
+    /// 複製していた(SIP の係数の Vec 4 本の確保と解放)。crval・crpix・cd は同じなので、判定の値も同じ
+    tan: Option<Wcs>,
     /// 画像の大きさ(遠すぎる点の打ち切りに使う)
     lim: f64,
     cx: f64,
     cy: f64,
 }
 
+/// 両方の座標が有限か(有限でない点は計算せず (NaN, NaN) にする)。
+#[inline]
+fn finite2(p: &[f64; 2]) -> bool {
+    p[0].is_finite() && p[1].is_finite()
+}
+
 impl<'a> Trans<'a> {
     fn new(wcs: &'a Wcs, width: usize, height: usize) -> Self {
         let (w, h) = (width as f64, height as f64);
-        Trans { wcs, lim: 3.0 * w.max(h).max(1.0), cx: (w - 1.0) / 2.0, cy: (h - 1.0) / 2.0 }
+        let tan = if wcs.has_sip() { Some(wcs.tan_only()) } else { None };
+        Trans { wcs, tan, lim: 3.0 * w.max(h).max(1.0), cx: (w - 1.0) / 2.0, cy: (h - 1.0) / 2.0 }
     }
 
-    fn p2w(&self, x: f64, y: f64) -> (f64, f64) {
-        if !(x.is_finite() && y.is_finite()) {
-            return (f64::NAN, f64::NAN);
-        }
-        self.wcs.pix_to_radec(x, y)
+    /// 画素 → (赤経, 赤緯) をまとめて(`pix_to_radec` と同じ値)。有限でない点は (NaN, NaN)。
+    fn p2w_many(&self, pts: &[[f64; 2]]) -> Vec<[f64; 2]> {
+        let ok: Vec<[f64; 2]> = pts.iter().filter(|p| finite2(p)).copied().collect();
+        let mut xyz = self.wcs.pix_to_xyz_batch(&ok).into_iter();
+        pts.iter()
+            .map(|p| {
+                if !finite2(p) {
+                    return [f64::NAN, f64::NAN];
+                }
+                // 有限な点の数と xyz の数は同じ(next が尽きることはない。尽きても NaN にするだけ)
+                match xyz.next() {
+                    Some(v) => {
+                        let (l, b) = xyz_to_radec(v);
+                        [l, b]
+                    }
+                    None => [f64::NAN, f64::NAN],
+                }
+            })
+            .collect()
     }
 
-    fn w2p(&self, lon: f64, lat: f64) -> (f64, f64) {
-        if !(lon.is_finite() && lat.is_finite()) {
-            return (f64::NAN, f64::NAN);
-        }
-        // 画像からずっと遠い点は SIP の多項式が意味を持たず、解くのも重いので打ち切る(どのみち枠の外)
-        if self.wcs.has_sip() {
-            match self.wcs.tan_only().radec_to_pix(lon, lat) {
-                Some((x, y)) if (x - self.cx).abs() < self.lim && (y - self.cy).abs() < self.lim => {}
-                _ => return (f64::NAN, f64::NAN),
+    /// (赤経, 赤緯) → 画素をまとめて(`radec_to_pix_exact` と同じ値)。写せない点・有限でない点は (NaN, NaN)。
+    fn w2p_many(&self, world: &[[f64; 2]]) -> Vec<[f64; 2]> {
+        let mut out = vec![[f64::NAN, f64::NAN]; world.len()];
+        // 有限な点の添字と単位ベクトル。radec_to_xyz は 1 回だけ計算し、打ち切りの判定と正確な解の両方に
+        // 同じ値を渡す(旧版は radec_to_pix と radec_to_pix_exact の中で同じ式を 2 回計算していた)
+        let mut idx: Vec<usize> = Vec::with_capacity(world.len());
+        let mut v: Vec<Vec3> = Vec::with_capacity(world.len());
+        for (i, p) in world.iter().enumerate() {
+            if finite2(p) {
+                idx.push(i);
+                v.push(radec_to_xyz(p[0], p[1]));
             }
         }
-        match self.wcs.radec_to_pix_exact(lon, lat) {
-            Some((x, y)) => (x, y),
-            None => (f64::NAN, f64::NAN),
+        // 画像からずっと遠い点は SIP の多項式が意味を持たず、解くのも重いので打ち切る(どのみち枠の外)。
+        // 判定を通った点だけをニュートン法で解く(TAN だけの WCS は判定しない。旧版と同じ分岐)
+        if let Some(tan) = &self.tan {
+            let near = tan.xyz_to_pix_batch(&v, false);
+            let mut k = 0;
+            for (j, q) in near.iter().enumerate() {
+                if let Some((x, y)) = *q
+                    && (x - self.cx).abs() < self.lim
+                    && (y - self.cy).abs() < self.lim
+                {
+                    // k ≤ j なので、まだ読んでいない所は書き換えない
+                    idx[k] = idx[j];
+                    v[k] = v[j];
+                    k += 1;
+                }
+            }
+            idx.truncate(k);
+            v.truncate(k);
         }
+        let px = self.wcs.xyz_to_pix_batch(&v, true);
+        for (&i, q) in idx.iter().zip(&px) {
+            if let Some((x, y)) = *q {
+                out[i] = [x, y];
+            }
+        }
+        out
     }
 }
 
@@ -326,13 +381,14 @@ fn coordinate_range(tr: &Trans, view: &View) -> [(f64, f64); 2] {
     let n = RANGE_SAMPLES + 1;
     let xs = linspace(view.x.0, view.x.1, n);
     let ys = linspace(view.y.0, view.y.1, n);
-    // world[c][j][i]: j が y(行)、i が x(列)
+    // world[c][j][i]: j が y(行)、i が x(列)。51×51 点をまとめて写す(点の値は 1 点ずつ写すのと同じ)
+    let pts: Vec<[f64; 2]> = ys.iter().flat_map(|&y| xs.iter().map(move |&x| [x, y])).collect();
+    let sky = tr.p2w_many(&pts);
     let mut world = [vec![vec![0.0; n]; n], vec![vec![0.0; n]; n]];
-    for (j, &y) in ys.iter().enumerate() {
-        for (i, &x) in xs.iter().enumerate() {
-            let (lon, lat) = tr.p2w(x, y);
-            world[0][j][i] = lon;
-            world[1][j][i] = lat;
+    for (j, row) in sky.chunks(n).enumerate() {
+        for (i, w) in row.iter().enumerate() {
+            world[0][j][i] = w[0];
+            world[1][j][i] = w[1];
         }
     }
     let mut out = [(f64::NAN, f64::NAN); 2];
@@ -545,6 +601,39 @@ struct Spine {
     world: Vec<[f64; 2]>,
     /// 各区間の内向きの法線の角度(画面、度)
     normal: Vec<f64>,
+    /// 目盛りの向きを測る 2 点(各標本から画面で横・縦へ 2 単位進めた点)の (赤経, 赤緯)。
+    /// 点は (標本, 表示の範囲, 上下反転) だけで決まり座標(赤経・赤緯)に依らないので、辺ごとに 1 回だけ
+    /// 求めて 2 つの座標で使い回す(旧版は座標ごとに同じ点を写していた)。使うときに初めて求める
+    /// (ticks_for が早く戻るときは旧版と同じく計算しない)
+    steps: OnceCell<TickSteps>,
+}
+
+/// 目盛りの向きを測る 2 点の (赤経, 赤緯)(枠の標本ごと)。
+struct TickSteps {
+    /// 画面で横へ 2 単位進めた点
+    across: Vec<[f64; 2]>,
+    /// 画面で縦(画像の +y の向き)へ 2 単位進めた点
+    up: Vec<[f64; 2]>,
+}
+
+impl Spine {
+    /// 目盛りの向きを測る 2 点の (赤経, 赤緯)。初めて呼んだときに求める。
+    fn steps(&self, tr: &Trans, view: &View) -> &TickSteps {
+        self.steps.get_or_init(|| {
+            // WCSAxes と同じく、縦は画像の +y の向きへ進める(上下反転の表示では画面の下向き)
+            let flipped = view.y.1 < view.y.0;
+            let mut a: Vec<[f64; 2]> = Vec::with_capacity(self.data.len());
+            let mut b: Vec<[f64; 2]> = Vec::with_capacity(self.data.len());
+            for d in &self.data {
+                let (dx0, dy0) = view.to_disp(d[0], d[1]);
+                let (ax, ay) = view.from_disp(dx0 + 2.0, dy0);
+                let (bx, by) = view.from_disp(dx0, dy0 + if flipped { -2.0 } else { 2.0 });
+                a.push([ax, ay]);
+                b.push([bx, by]);
+            }
+            TickSteps { across: tr.p2w_many(&a), up: tr.p2w_many(&b) }
+        })
+    }
 }
 
 fn spines(tr: &Trans, view: &View) -> Vec<Spine> {
@@ -566,16 +655,10 @@ fn spines(tr: &Trans, view: &View) -> Vec<Spine> {
                     if t >= 1.0 { b } else { [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t] }
                 })
                 .collect();
-            let world: Vec<[f64; 2]> = data
-                .iter()
-                .map(|d| {
-                    let (l, b) = tr.p2w(d[0], d[1]);
-                    [l, b]
-                })
-                .collect();
+            let world = tr.p2w_many(&data);
             let disp: Vec<(f64, f64)> = data.iter().map(|d| view.to_disp(d[0], d[1])).collect();
             let normal = disp.windows(2).map(|w| (w[1].0 - w[0].0).atan2(-(w[1].1 - w[0].1)).to_degrees()).collect();
-            Spine { side, data, world, normal }
+            Spine { side, data, world, normal, steps: OnceCell::new() }
         })
         .collect()
 }
@@ -606,15 +689,12 @@ fn ticks_for(
     // WCSAxes と同じく、縦は画像の +y の向きへ進める(上下反転の表示では画面の下向き)。WCSAxes はその差を
     // そのまま画面の角度として使うので、上下反転の図では目盛りが左右の鏡像に傾く。ここでは画面の向きに直す
     let flipped = view.y.1 < view.y.0;
+    // 横・縦へ進めた点の座標(辺ごとに 1 回だけ写し、赤経・赤緯の両方で使う。Spine::steps)
+    let st = sp.steps(tr, view);
     let mut tick_angle: Vec<f64> = Vec::with_capacity(n);
-    for (i, d) in sp.data.iter().enumerate() {
-        let (dx0, dy0) = view.to_disp(d[0], d[1]);
-        let (ax, ay) = view.from_disp(dx0 + 2.0, dy0);
-        let (bx, by) = view.from_disp(dx0, dy0 + if flipped { -2.0 } else { 2.0 });
+    for (i, (pa, pb)) in st.across.iter().zip(&st.up).enumerate() {
         let w0 = sp.world[i][coord];
-        let w1 = tr.p2w(ax, ay);
-        let w2 = tr.p2w(bx, by);
-        let (w1, w2) = if coord == 0 { (w1.0, w2.0) } else { (w1.1, w2.1) };
+        let (w1, w2) = (pa[coord], pb[coord]);
         let mut dx = w1 - w0;
         let mut dy = w2 - w0;
         (dx, dy) = (-dy, dx);
@@ -843,20 +923,9 @@ pub fn grid_for_view(wcs: &Wcs, width: usize, height: usize, view: &View) -> Gri
         let samples = linspace(other.0, other.1, GRID_SAMPLES);
         for &w in &grid.tick_values[c] {
             let world: Vec<[f64; 2]> = samples.iter().map(|&s| if c == 0 { [w, s] } else { [s, w] }).collect();
-            let pixel: Vec<[f64; 2]> = world
-                .iter()
-                .map(|p| {
-                    let (x, y) = tr.w2p(p[0], p[1]);
-                    [x, y]
-                })
-                .collect();
-            let check: Vec<[f64; 2]> = pixel
-                .iter()
-                .map(|p| {
-                    let (l, b) = tr.p2w(p[0], p[1]);
-                    [l, b]
-                })
-                .collect();
+            // 線 1 本(1000 点)をまとめて写す。往復の検査の check も同じ
+            let pixel = tr.w2p_many(&world);
+            let check = tr.p2w_many(&pixel);
             for piece in split_gridline(&world, &pixel, &check) {
                 // 極ちょうどの赤緯の線のように、全部の点が 1 つに重なる線は描かない(長さ 0。astropy も描かない)
                 let (x0, x1, y0, y1) = piece
@@ -939,6 +1008,10 @@ pub fn grid_for_view(wcs: &Wcs, width: usize, height: usize, view: &View) -> Gri
     }
     grid
 }
+
+/// 旧版(点ごとに写す)の格子の作り方と、新版と Grid がビット単位で同じかを確かめる試験(axes/reference.rs)
+#[cfg(test)]
+mod reference;
 
 #[cfg(test)]
 mod tests {
