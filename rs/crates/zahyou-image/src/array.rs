@@ -296,6 +296,50 @@ pub(crate) fn lum_weights() -> [f32; 3] {
     [c[0] / s, c[1] / s, c[2] / s]
 }
 
+/// 長さ n の、`T::default()`(数なら 0)で埋めた配列。確保できなければ Err(abort しない)。
+///
+/// `resize` で埋めると 1 本のスレッドで全部のページに初めて書く(24 MP の f32 で 96 MB・ページの割り当て約 2.4 万回)。
+/// ここでは予約した領域へ rayon で並列に書く(rayon の Vec への `par_extend` は、長さの分かる反復なら予約済みの
+/// 領域へ添字の順に直接書く。予約が足りているので中で確保し直さない)。中身は `resize` と同じ値。
+pub(crate) fn alloc_filled<T: Clone + Default + Send>(n: usize) -> Result<Vec<T>, String> {
+    let mut v = Vec::new();
+    v.try_reserve_exact(n).map_err(|_| format!("画像が大きすぎてメモリに載りません ({n} 画素)"))?;
+    v.par_extend(rayon::iter::repeat_n(T::default(), n));
+    Ok(v)
+}
+
+/// 画素ごとに色が並ぶ配列(numpy の形 (高さ, 幅, ch)、ch は 3 か 4)を輝度にする。n は画素の数。
+///
+/// 以前は全体を float32 の 3〜4 面ぶん(24 MP で 288 MB)に読んでから合成していた。ここでは blk 画素ずつ
+/// 使い回しの作業領域に読み、合成した輝度だけを出力に積む。作業領域の値は以前の全体の配列の同じ添字の値と同じ
+/// (同じ `read_f32` を同じ添字で呼ぶ)で、輝度の式も括弧まで同じなので、結果はビット単位で同じ。
+/// 区切りは必ず画素の境目(添字は ch の倍数)で、最後の端数の区切りも読む。`par_extend` は添字の順に書く。
+pub(crate) fn luminance_interleaved(
+    src: &mut dyn ArraySource,
+    n: usize,
+    ch: usize,
+    w: [f32; 3],
+    blk: usize,
+) -> Result<Vec<f32>, String> {
+    let mut out = Vec::new();
+    out.try_reserve_exact(n).map_err(|_| format!("画像が大きすぎてメモリに載りません ({n} 画素)"))?;
+    let blk = blk.max(1);
+    let mut tmp = vec![0.0f32; blk.min(n) * ch];
+    let mut start = 0;
+    while start < n {
+        let len = blk.min(n - start);
+        let t = &mut tmp[..len * ch];
+        src.read_f32(start * ch, t)?;
+        out.par_extend(t.par_chunks_exact(ch).map(|p| (w[0] * p[0] + w[1] * p[1]) + w[2] * p[2]));
+        start += len;
+    }
+    Ok(out)
+}
+
+/// `luminance_interleaved` の 1 区切りの画素数(作業領域は 3 色で 6 MB。rayon の呼び出しは区切りごとに 2 回なので
+/// 小さすぎると呼び出しの重さが目立つ)
+pub(crate) const LUM_BLOCK: usize = 1 << 19;
+
 /// `_reduce_to_2d(data, max_frames=200)`: 3 次元以上を 2 次元へ。戻り値 (画素, 高さ, 幅, 説明)。
 pub(crate) fn reduce_to_2d(
     src: &mut dyn ArraySource,
@@ -317,12 +361,7 @@ pub(crate) fn reduce_to_2d(
         shape = shape[shape.len() - 3..].to_vec();
     }
     let total: usize = shape.iter().product();
-    let alloc = |n: usize| -> Result<Vec<f32>, String> {
-        let mut v = Vec::new();
-        v.try_reserve_exact(n).map_err(|_| format!("画像が大きすぎてメモリに載りません ({n} 画素)"))?;
-        v.resize(n, 0.0f32);
-        Ok(v)
-    };
+    let alloc = alloc_filled::<f32>;
     match shape.len() {
         2 => {
             let (ny, nx) = (shape[0], shape[1]);
@@ -347,13 +386,8 @@ pub(crate) fn reduce_to_2d(
                 return Ok((p0, ny, nx, "カラー 3 面を輝度に合成".to_string()));
             }
             if (nx == 3 || nx == 4) && ny > 8 && nz > 8 {
-                let mut all = alloc(total)?;
-                src.read_f32(0, &mut all)?;
-                let mut out = alloc(nz * ny)?;
-                out.par_iter_mut().enumerate().for_each(|(i, o)| {
-                    let p = &all[i * nx..i * nx + 3];
-                    *o = (w[0] * p[0] + w[1] * p[1]) + w[2] * p[2];
-                });
+                // 画素ごとに色が並ぶ (高さ, 幅, 3|4)(カラーの PNG・JPEG・TIFF はここ)
+                let out = luminance_interleaved(src, nz * ny, nx, w, LUM_BLOCK)?;
                 return Ok((out, nz, ny, "カラー 3 面を輝度に合成".to_string()));
             }
             let used = nz.min(max_frames);
@@ -364,10 +398,92 @@ pub(crate) fn reduce_to_2d(
                 src.read_f64(i * plane, &mut buf)?;
                 acc.par_iter_mut().zip(buf.par_iter()).for_each(|(a, &b)| *a += b);
             }
+            // 出力を集める前に読み込み用の面を放す(値には関わらない)。FITS の FileArray は読んだバイトの作業領域
+            // (最大 READ_CHUNK 要素ぶん)を reduce_to_2d が返るまで持ち続けるので、buf を残したまま out を作ると
+            // 私有メモリの最大が、呼ぶたびに作業領域を作って放していた以前(max(16p + 作業領域, 20p) バイト。
+            // p は面の画素数)より増える。ここで放せば最大は 16p + 作業領域(ループの中)で、以前を超えない
+            drop(buf);
             let d = used as f64;
             let out: Vec<f32> = acc.par_iter().map(|&a| (a / d) as f32).collect();
             Ok((out, ny, nx, format!("{nz} 枚のキューブのうち先頭 {used} 枚を平均 (SNR 稼ぎ)")))
         }
         _ => Err(format!("2 次元画像に変換できない形状です: {}", py_tuple(&shape))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 以前の (高さ, 幅, ch) の合成: 全体を float32 に読んでから輝度に
+    fn old_luminance(src: &mut dyn ArraySource, n: usize, ch: usize, w: [f32; 3]) -> Vec<f32> {
+        let mut all = alloc_filled::<f32>(n * ch).unwrap();
+        src.read_f32(0, &mut all).unwrap();
+        let mut out = alloc_filled::<f32>(n).unwrap();
+        out.par_iter_mut().enumerate().for_each(|(i, o)| {
+            let p = &all[i * ch..i * ch + 3];
+            *o = (w[0] * p[0] + w[1] * p[1]) + w[2] * p[2];
+        });
+        out
+    }
+
+    /// 決まった擬似乱数(xorshift64*)
+    fn rand_u64(n: usize, seed: u64) -> Vec<u64> {
+        let mut x = seed | 1;
+        (0..n)
+            .map(|_| {
+                x ^= x >> 12;
+                x ^= x << 25;
+                x ^= x >> 27;
+                x.wrapping_mul(0x2545F4914F6CDD1D)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn luminance_blocks_same_as_whole() {
+        let w = lum_weights();
+        for &ch in &[3usize, 4] {
+            for &(h, wd) in &[(9usize, 9usize), (23, 37), (64, 50)] {
+                let n = h * wd;
+                let r = rand_u64(n * ch, (h * 1000 + wd * 10 + ch) as u64);
+                // u8(画像ファイル)と float32(FITS の (H,W,3)。NaN・±inf・-0・非正規数も混ざる)と BSCALE つきの uint16
+                let arrays: Vec<(Typed, Scaling)> = vec![
+                    (Typed::U8(r.iter().map(|&x| (x >> 56) as u8).collect()), Scaling::raw(8)),
+                    (Typed::F32(r.iter().map(|&x| f32::from_bits((x >> 32) as u32)).collect()), Scaling::raw(-32)),
+                    (
+                        Typed::U16(r.iter().map(|&x| (x >> 48) as u16).collect()),
+                        Scaling::new(16, 0.75, 3.0, None, true),
+                    ),
+                ];
+                for (data, scaling) in arrays {
+                    let mut a = MemArray { shape: vec![h, wd, ch], data, scaling };
+                    let old = old_luminance(&mut a, n, ch, w);
+                    // 区切り: 1 画素・端数の出る大きさ・ちょうど割り切れる大きさ・全体より大きい
+                    for &blk in &[1usize, 7, n / 3, n, n + 5, LUM_BLOCK] {
+                        let new = luminance_interleaved(&mut a, n, ch, w, blk).unwrap();
+                        assert_eq!(new.len(), n);
+                        for i in 0..n {
+                            assert_eq!(new[i].to_bits(), old[i].to_bits(), "ch {ch} {h}x{wd} 区切り {blk} 添字 {i}");
+                        }
+                    }
+                    // reduce_to_2d を通しても同じ(形と説明も)
+                    let (d, ny, nx, note) = reduce_to_2d(&mut a, 200).unwrap();
+                    assert_eq!((ny, nx, note.as_str()), (h, wd, "カラー 3 面を輝度に合成"));
+                    assert!(d.iter().zip(&old).all(|(x, y)| x.to_bits() == y.to_bits()));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn luminance_out_of_range_is_err() {
+        // 形より短い配列(壊れた入力)は以前と同じく Err で、panic しない
+        let mut a = MemArray { shape: vec![10, 10, 3], data: Typed::U8(vec![1; 250]), scaling: Scaling::raw(8) };
+        assert_eq!(
+            luminance_interleaved(&mut a, 100, 3, lum_weights(), 7).unwrap_err(),
+            "配列の範囲外を読もうとしました"
+        );
+        assert!(reduce_to_2d(&mut a, 200).is_err());
     }
 }
