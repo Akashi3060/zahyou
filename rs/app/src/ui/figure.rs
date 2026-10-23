@@ -605,7 +605,13 @@ fn paint_arrow(p: &egui::Painter, from: Pos2, to: Pos2, color: Color32, tail: f3
 }
 
 /// 段 1 つをテクスチャに上げる(GPU の上限を超えればタイルに分ける)。
-fn upload_level(ctx: &egui::Context, img: &egui::ColorImage, name: &str) -> LevelTex {
+///
+/// 上限に収まる段は Arc をそのまま egui に渡す(以前は `img.clone()` で段を丸ごと写していた。画面のスレッドで、
+/// 段を初めて出すフレームに 24 MP の原寸なら 96 MB、61 MP を OpenGL で 1 枚に貼るなら 240 MB)。
+/// GPU へ上げる画素は同じ ColorImage の pixels で、値は変わらない(egui-wgpu は Cow::Borrowed で借りて書く)。
+/// 上限を超える段のタイルは、今までどおり行を集めて写す(ワーカーで前もってタイルに分ける案は採らない:
+/// 分ける瞬間に段 0 が二重になり、GPU の上限をワーカーが知らないため)。
+fn upload_level(ctx: &egui::Context, img: &Arc<egui::ColorImage>, name: &str) -> LevelTex {
     let max_side = ctx.input(|i| i.max_texture_side).clamp(512, 16384);
     let tile = max_side.min(4096);
     let [w, h] = img.size;
@@ -617,7 +623,7 @@ fn upload_level(ctx: &egui::Context, img: &egui::ColorImage, name: &str) -> Leve
     };
     let mut tiles = Vec::new();
     if w <= max_side && h <= max_side {
-        let t = ctx.load_texture(name, img.clone(), opts);
+        let t = ctx.load_texture(name, egui::ImageData::Color(Arc::clone(img)), opts);
         tiles.push((t, [0, 0, w, h]));
         return LevelTex { tiles };
     }
@@ -677,10 +683,39 @@ mod tests {
     fn 大きな画像はタイルに分ける() {
         let ctx = egui::Context::default();
         // 既定の上限(2048 などの小さな値)より大きい画像
-        let img = egui::ColorImage::new([5000, 300], vec![Color32::GRAY; 5000 * 300]);
-        let _ = ctx.run(egui::RawInput { max_texture_side: Some(2048), ..Default::default() }, |_| {});
+        // 画素は位置ごとに違う値にして、タイルの中身も元の段の切り出しと同じか見る
+        let (w, h) = (5000usize, 300usize);
+        let px: Vec<Color32> = (0..w * h).map(|i| Color32::from_rgb(i as u8, (i >> 8) as u8, (i >> 16) as u8)).collect();
+        let img = Arc::new(egui::ColorImage::new([w, h], px));
+        let input = || egui::RawInput { max_texture_side: Some(2048), ..Default::default() };
+        let _ = ctx.run(input(), |_| {});
         let t = upload_level(&ctx, &img, "t");
         assert_eq!(t.tiles.len(), 3);
         assert_eq!(t.tiles[2].1, [4096, 0, 5000, 300]);
+        let out = ctx.run(input(), |_| {});
+        for (tex, [x0, y0, x1, y1]) in &t.tiles {
+            let d = out.textures_delta.set.iter().find(|(id, _)| *id == tex.id()).expect("タイルが上がっていない");
+            let egui::ImageData::Color(part) = &d.1.image;
+            let want: Vec<Color32> = (*y0..*y1).flat_map(|y| img.pixels[y * w + x0..y * w + x1].iter().copied()).collect();
+            assert_eq!(part.size, [x1 - x0, y1 - y0]);
+            assert!(part.pixels == want, "タイル {x0},{y0} の中身が違う");
+        }
+    }
+
+    #[test]
+    fn 上限に収まる段は写さずに上げる() {
+        let ctx = egui::Context::default();
+        let input = || egui::RawInput { max_texture_side: Some(2048), ..Default::default() };
+        let _ = ctx.run(input(), |_| {});
+        let px: Vec<Color32> = (0..300 * 200).map(|i| Color32::from_rgba_premultiplied(i as u8, (i >> 8) as u8, 7, 255)).collect();
+        let img = Arc::new(egui::ColorImage::new([300, 200], px));
+        let t = upload_level(&ctx, &img, "s");
+        assert_eq!(t.tiles.len(), 1);
+        assert_eq!(t.tiles[0].1, [0, 0, 300, 200]);
+        // egui へ渡した画像は段そのもの(同じ Arc。以前の img.clone() のような写しが無い)
+        let out = ctx.run(input(), |_| {});
+        let d = out.textures_delta.set.iter().find(|(id, _)| *id == t.tiles[0].0.id()).expect("段が上がっていない");
+        let egui::ImageData::Color(up) = &d.1.image;
+        assert!(Arc::ptr_eq(up, &img), "段を写して渡している");
     }
 }

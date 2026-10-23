@@ -104,7 +104,9 @@ pub struct ZahyouApp {
     pub detail: String,
     pub figs: [Option<FigureView>; 2],
     pub fig_src: [Option<FigureOut>; 2],
-    pub last_result: Option<ResultView>,
+    // 前回の結果(ResultView)は持ち続けない。以前は last_result に入れていたが読む所が無く、図(縮小の段と rgba。
+    // 24 MP・目標ありで約 450 MB)を、clear_figures() のあとも次の結果が来るまで握っていた。
+    // 表示と保存に要る分は figs・fig_src が Arc で持つ。「前の結果」を使う機能を足すなら、そのとき足し直す。
 
     // --- ログ・状態 ---
     pub log_run: String,
@@ -174,7 +176,6 @@ impl ZahyouApp {
             detail: DETAIL_START.into(),
             figs: [None, None],
             fig_src: [None, None],
-            last_result: None,
             log_run: String::new(),
             log_env: String::new(),
             status: String::new(),
@@ -527,12 +528,10 @@ impl ZahyouApp {
     fn show_result(&mut self, r: ResultView) {
         if r.cancelled || self.cancel.load(Ordering::Relaxed) {
             self.detail = "中止しました。".into();
-            self.last_result = Some(r);
             return;
         }
         if !r.solved {
             self.detail = "解けませんでした。ログを見てください。".into();
-            self.last_result = Some(r);
             return;
         }
         match &r.numbers {
@@ -561,7 +560,7 @@ impl ZahyouApp {
             want = if self.figs[0].is_some() { ResultTab::Orig } else { ResultTab::Log };
         }
         self.out_tab = want;
-        self.last_result = Some(r);
+        // r はここで捨てる(図は figs・fig_src の Arc だけが持つ)
     }
 
     /// 結果の内側のタブを利用者が切り替えた(次からの既定にする)
@@ -1077,6 +1076,46 @@ pub fn fig_index(t: ResultTab) -> Option<usize> {
 fn push_log_text(buf: &mut String, s: &str) {
     buf.extend(s.chars().filter(|&c| c != '\u{FE0F}'));
     buf.push('\n');
+}
+
+#[cfg(test)]
+mod result_memory_tests {
+    use super::*;
+
+    /// 小さな図 1 枚(画面の形と元の図)。試験の手元にも Arc を 1 つずつ残す
+    fn small_out() -> FigureOut {
+        let (w, h) = (40usize, 30usize);
+        let img = zahyou_image::Image2D::new(w, h, vec![10.0f32; w * h]).unwrap();
+        let s = 2.0 / 3600.0;
+        let wcs = zahyou_wcs::Wcs::tan(zahyou_wcs::radec_to_xyz(61.9, 41.97), [19.5, 14.5], [[-s, 0.0], [0.0, s]]);
+        let f = zahyou_plot::figure_original(&img, &wcs, &[], None, false, false).unwrap();
+        FigureOut { scene: Arc::new(bridge::figure_to_scene(&f)), source: Arc::new(f) }
+    }
+
+    #[test]
+    fn 図を消したら前の結果を握らない() {
+        super::super::settings::override_path(std::env::temp_dir().join("zahyou-test-cancel.json"));
+        let ctx = egui::Context::default();
+        let opts = Options { headless: true, debug_wcs: None, no_startup_checks: true, no_save: true };
+        let mut app = ZahyouApp::new(&ctx, Default::default(), opts);
+        // 解けた結果: 表示している間は figs・fig_src だけが持ち、clear_figures() で手放す
+        // (以前は last_result が前の結果を次の結果まで握っていて、ここで参照が 2 になっていた)
+        let mine = small_out();
+        let r = ResultView { solved: true, status: "解析できました".into(), figures: vec![mine.clone()], ..Default::default() };
+        app.show_result(r);
+        assert!(app.figs[0].is_some() && app.fig_src[0].is_some());
+        app.clear_figures();
+        assert_eq!(Arc::strong_count(&mine.scene), 1, "画面の形をまだ誰かが持っている");
+        assert_eq!(Arc::strong_count(&mine.source), 1, "元の図をまだ誰かが持っている");
+        // 中止・解けなかった結果は表示しないので、受け取ったらすぐ手放す
+        for (solved, cancelled) in [(false, true), (false, false)] {
+            let mine = small_out();
+            app.show_result(ResultView { solved, cancelled, figures: vec![mine.clone()], ..Default::default() });
+            assert!(app.figs[0].is_none());
+            assert_eq!(Arc::strong_count(&mine.scene), 1, "solved={solved} cancelled={cancelled}");
+            assert_eq!(Arc::strong_count(&mine.source), 1, "solved={solved} cancelled={cancelled}");
+        }
+    }
 }
 
 #[cfg(test)]
