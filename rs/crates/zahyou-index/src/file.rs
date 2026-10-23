@@ -709,7 +709,8 @@ mod tests {
             eprintln!("SKIP: {} が無い", p.display());
             return None;
         }
-        IndexFile::open(p).ok()
+        // ファイルがあるのに開けないなら失敗にする(黙って飛ばすと、比べずに通ってしまう。python_match.rs と同じ決まり)
+        Some(IndexFile::open(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display())))
     }
 
     /// 星 v から方向 dir へ角距離 r の点。
