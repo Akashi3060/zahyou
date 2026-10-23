@@ -520,7 +520,10 @@ pub(crate) fn verify_one(
         }
         sel.push((refs.sweep[k], refs.fid[k], refs.sid[k], k, rx, ry));
     }
-    sel.sort_by(|a, b| (a.0, a.1, a.2).cmp(&(b.0, b.1, b.2)));
+    // sweep・タイル・番号の順(今までは (sweep, タイル, 番号) で安定に並べていた)。sel は k(refs の中の位置)の昇順に
+    // 積んであるので、安定な並べ替えで同じ鍵の間に残る順は k の昇順。k を 4 つめの鍵に足した不安定な並べ替えは、
+    // k が重ならない(全順序になる)ので同じ順になり、作業領域を取らない
+    sel.sort_unstable_by_key(|e| (e.0, e.1, e.2, e.3));
     let nr0 = sel.len() as f64;
     // 2・3. 位置の分散と関連半径(RoR)
     let pix2 = pix2_of(params, sc.rep, h.scale);
@@ -624,6 +627,29 @@ mod tests {
         // r が NaN・負なら式どおり(NaN は届かない)
         assert!(!tile_reaches(0.9, 0.1, 0.1f64.cos(), f64::NAN));
         assert_eq!(tile_reaches(0.995, 0.1, 0.1f64.cos(), -0.05), 0.995 >= (0.1f64 - 0.05 + 1e-9).cos());
+    }
+
+    /// 参照星の並べ替え: (sweep, タイル, 番号) の安定な並べ替えと、k を足した不安定な並べ替えが同じ順
+    /// (鍵が重なる場合も。sel は k の昇順に積む)。
+    #[test]
+    fn sel_sort_matches_stable_sort() {
+        let mut s = 0x9E3779B97F4A7C15u64;
+        let mut rnd = |n: u64| {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            s % n
+        };
+        for _ in 0..20_000 {
+            let n = rnd(400) as usize;
+            let sel: Vec<(u8, u32, u32, usize, f64, f64)> =
+                (0..n).map(|k| (rnd(4) as u8, rnd(3) as u32, rnd(6) as u32, k, k as f64 * 0.5, 1.0)).collect();
+            let mut a = sel.clone();
+            a.sort_by(|a, b| (a.0, a.1, a.2).cmp(&(b.0, b.1, b.2)));
+            let mut b = sel;
+            b.sort_unstable_by_key(|e| (e.0, e.1, e.2, e.3));
+            assert_eq!(a, b);
+        }
     }
 
     /// 今の series_cone が、変える前の形(stars_in_cone の番号ごとに star_xyz と sweep を引く)と、集める星・順・

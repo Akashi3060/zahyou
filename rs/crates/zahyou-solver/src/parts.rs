@@ -570,9 +570,15 @@ pub(crate) fn nearest_refs(
     if ref_xy.is_empty() || nt == 0 {
         return (nn, nd2);
     }
-    // x の順に並べた参照星(番号つき)
+    // x の順に並べた参照星(番号つき)。比較は (x, 番号)。x に NaN が無ければこれは全順序で番号は重ならないので、
+    // 安定でも不安定でも並べた結果は同じ(不安定のほうが軽い)。NaN があると全順序でなくなるので、今までどおり安定に
+    let cmp = |a: &(f64, u32), b: &(f64, u32)| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal).then(a.1.cmp(&b.1));
     let mut xs: Vec<(f64, u32)> = ref_xy.iter().enumerate().map(|(i, p)| (p[0], i as u32)).collect();
-    xs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal).then(a.1.cmp(&b.1)));
+    if xs.iter().any(|e| e.0.is_nan()) {
+        xs.sort_by(cmp);
+    } else {
+        xs.sort_unstable_by(cmp);
+    }
     let mut coord_max: f64 = 0.0;
     for p in ref_xy {
         coord_max = coord_max.max(p[0].abs()).max(p[1].abs());
@@ -678,9 +684,16 @@ pub(crate) fn accumulate(
     let bail = params.logodds_bail;
     let nr = nref as f64;
     let lnfg0 = ((1.0 - d) / (2.0 * std::f64::consts::PI * nr)).ln();
+    // 偽物の尤度 logd(μ)(Python と同じ式)。μ は 0 から 1.0 ずつ増える整数なので、列ごとに ln を取り直さず、
+    // μ が増えたときだけ計算する。ld_cur = logd(μ)、ld_prev = logd(max(μ − 1, 0))(μ = 0 では両方 logd(0))。
+    // μ − 1 は 2^53 未満の整数どうしの引き算で正確なので、ld_prev は今までの列ごとの logd((μ − 1).max(0)) とビットまで同じ。
+    // 付け替えの候補の列 j の logd(μ_j) は、j が組になったときのその列の ld そのもの(同じ式・同じ μ)なので ld_at に覚える
+    let logd = |x: f64| (d + (1.0 - d) * x / nr).ln() + logbg;
+    let mut ld_cur = logd(0.0);
+    let mut ld_prev = ld_cur;
     let mut owner = vec![-1i64; nref.max(1)];
     let mut fg_at = vec![0.0f64; nt];
-    let mut mu_at = vec![0.0f64; nt];
+    let mut ld_at = vec![0.0f64; nt];
     let mut sacc = vec![0.0f64; nt + 1];
     let mut lo = 0.0f64;
     let mut mu = 0.0f64;
@@ -696,8 +709,8 @@ pub(crate) fn accumulate(
         let k = nn[i];
         let has = k >= 0 && (k as usize) < nref;
         let logfg = if has { lnfg0 - s2.ln() - nd2[i] / (2.0 * s2) } else { f64::NEG_INFINITY };
-        let ld = (d + (1.0 - d) * mu / nr).ln() + logbg;
-        let ld_m1 = (d + (1.0 - d) * (mu - 1.0).max(0.0) / nr).ln() + logbg;
+        let ld = ld_cur;
+        let ld_m1 = ld_prev;
         let isdis = logfg < ld;
         let kk = if has { k as usize } else { 0 };
         let j = if has { owner[kk] } else { -1 };
@@ -707,7 +720,7 @@ pub(crate) fn accumulate(
         let mut switch = 0.0;
         if conflict {
             let jj = j as usize;
-            let ldj = (d + (1.0 - d) * mu_at[jj] / nr).ln() + logbg;
+            let ldj = ld_at[jj];
             switch = logfg + (ldj - fg_at[jj]) + (sacc[i] - sacc[jj + 1]);
             do_sw = switch > ld;
         }
@@ -722,7 +735,7 @@ pub(crate) fn accumulate(
         if newm || do_sw {
             owner[kk] = i as i64;
             fg_at[i] = logfg;
-            mu_at[i] = mu;
+            ld_at[i] = ld;
             if record {
                 events.push((i, ti as usize, kk, logfg - ld));
             }
@@ -730,6 +743,8 @@ pub(crate) fn accumulate(
         if newm {
             mu += 1.0;
             nmatch += 1;
+            ld_prev = ld_cur;
+            ld_cur = logd(mu);
         }
         if isdis {
             ndis += 1;
@@ -922,5 +937,281 @@ mod tests {
         // 参照星が無ければ −∞
         let r = verify_core(&test_xy, &[0, 1], &[1.0, 1.0], &[], 0.0, &p, false);
         assert!(r.best.is_infinite() && r.best < 0.0);
+    }
+
+    // ---- 変える前の最近傍と積み上げ(参照実装)。今の形と to_bits まで同じ答えになることを確かめる ----
+
+    fn nearest_refs_ref(
+        test_xy: &[[f64; 2]],
+        test_idx: &[i64],
+        sig2: &[f64],
+        ref_xy: &[[f64; 2]],
+    ) -> (Vec<i64>, Vec<f64>) {
+        let nt = test_idx.len();
+        let mut nn = vec![-1i64; nt];
+        let mut nd2 = vec![f64::INFINITY; nt];
+        if ref_xy.is_empty() || nt == 0 {
+            return (nn, nd2);
+        }
+        // x の順に並べた参照星(番号つき)
+        let mut xs: Vec<(f64, u32)> = ref_xy.iter().enumerate().map(|(i, p)| (p[0], i as u32)).collect();
+        xs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal).then(a.1.cmp(&b.1)));
+        let mut coord_max: f64 = 0.0;
+        for p in ref_xy {
+            coord_max = coord_max.max(p[0].abs()).max(p[1].abs());
+        }
+        let r32: Vec<[f32; 2]> = ref_xy.iter().map(|p| [p[0] as f32, p[1] as f32]).collect();
+        for i in 0..nt {
+            let t = test_idx[i];
+            if t < 0 {
+                continue;
+            }
+            let Some(txy) = test_xy.get(t as usize) else { continue };
+            let lim = 25.0 * sig2.get(i).copied().unwrap_or(f64::NAN);
+            if !(lim >= 0.0) {
+                continue;
+            }
+            let cm = coord_max.max(txy[0].abs()).max(txy[1].abs());
+            let rad = lim.sqrt() + nn_margin(lim.sqrt(), cm);
+            let t32 = [txy[0] as f32, txy[1] as f32];
+            let lo = txy[0] - rad;
+            let hi = txy[0] + rad;
+            let start = xs.partition_point(|e| e.0 < lo);
+            let mut best: Option<(f32, u32)> = None;
+            for &(x, j) in &xs[start..] {
+                if x > hi {
+                    break;
+                }
+                let ry = ref_xy[j as usize][1];
+                if (ry - txy[1]).abs() > rad {
+                    continue;
+                }
+                let r = r32[j as usize];
+                let dx = t32[0] - r[0];
+                let mut dd = dx * dx;
+                let dy = t32[1] - r[1];
+                dd += dy * dy;
+                best = match best {
+                    None => Some((dd, j)),
+                    Some((bd, bj)) if dd < bd || (dd == bd && j < bj) => Some((dd, j)),
+                    b => b,
+                };
+            }
+            if let Some((_, j)) = best {
+                let r = ref_xy[j as usize];
+                let e = [txy[0] - r[0], txy[1] - r[1]];
+                let m = e[0] * e[0] + e[1] * e[1];
+                if m <= lim {
+                    nn[i] = j as i64;
+                    nd2[i] = m;
+                }
+            }
+        }
+        (nn, nd2)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn accumulate_ref(
+        test_idx: &[i64],
+        sig2: &[f64],
+        nn: &[i64],
+        nd2: &[f64],
+        nref: usize,
+        logbg: f64,
+        params: &Params,
+        record: bool,
+    ) -> CoreResult {
+        let nt = test_idx.len();
+        let mut res = CoreResult {
+            best: f64::NEG_INFINITY,
+            nmatch: 0,
+            ndistract: 0,
+            nconflict: 0,
+            nused: 0,
+            best_col: -1,
+            matches: Vec::new(),
+        };
+        if nt == 0 || nref == 0 {
+            // 参照星が無い仮説は検証できない(Python でも best は −∞ のまま、数は 0)
+            return res;
+        }
+        let d = params.distractor;
+        let bail = params.logodds_bail;
+        let nr = nref as f64;
+        let lnfg0 = ((1.0 - d) / (2.0 * std::f64::consts::PI * nr)).ln();
+        let mut owner = vec![-1i64; nref.max(1)];
+        let mut fg_at = vec![0.0f64; nt];
+        let mut mu_at = vec![0.0f64; nt];
+        let mut sacc = vec![0.0f64; nt + 1];
+        let mut lo = 0.0f64;
+        let mut mu = 0.0f64;
+        let (mut nmatch, mut ndis, mut ncon, mut nused) = (0usize, 0usize, 0usize, 0usize);
+        let mut events: Vec<(usize, usize, usize, f64)> = Vec::new(); // (列, 画像の星, 参照星, 1 つの一致の対数オッズ)
+        for i in 0..nt {
+            let ti = test_idx[i];
+            if ti < 0 {
+                sacc[i + 1] = sacc[i];
+                continue;
+            }
+            let s2 = sig2[i];
+            let k = nn[i];
+            let has = k >= 0 && (k as usize) < nref;
+            let logfg = if has { lnfg0 - s2.ln() - nd2[i] / (2.0 * s2) } else { f64::NEG_INFINITY };
+            let ld = (d + (1.0 - d) * mu / nr).ln() + logbg;
+            let ld_m1 = (d + (1.0 - d) * (mu - 1.0).max(0.0) / nr).ln() + logbg;
+            let isdis = logfg < ld;
+            let kk = if has { k as usize } else { 0 };
+            let j = if has { owner[kk] } else { -1 };
+            let conflict = !isdis && j >= 0;
+            let newm = !isdis && j < 0;
+            let mut do_sw = false;
+            let mut switch = 0.0;
+            if conflict {
+                let jj = j as usize;
+                let ldj = (d + (1.0 - d) * mu_at[jj] / nr).ln() + logbg;
+                switch = logfg + (ldj - fg_at[jj]) + (sacc[i] - sacc[jj + 1]);
+                do_sw = switch > ld;
+            }
+            let keepc = conflict && !do_sw;
+            let term = if isdis || keepc {
+                ld
+            } else if do_sw {
+                switch
+            } else {
+                logfg
+            };
+            if newm || do_sw {
+                owner[kk] = i as i64;
+                fg_at[i] = logfg;
+                mu_at[i] = mu;
+                if record {
+                    events.push((i, ti as usize, kk, logfg - ld));
+                }
+            }
+            if newm {
+                mu += 1.0;
+                nmatch += 1;
+            }
+            if isdis {
+                ndis += 1;
+            }
+            if conflict {
+                ncon += 1;
+            }
+            nused += 1;
+            sacc[i + 1] = sacc[i] + if isdis || keepc { ld_m1 - ld } else { 0.0 };
+            lo = lo + term - logbg;
+            if lo > res.best {
+                res.best = lo;
+                res.nmatch = nmatch;
+                res.ndistract = ndis;
+                res.nconflict = ncon;
+                res.nused = nused;
+                res.best_col = i as i64;
+            }
+            if lo < bail {
+                break;
+            }
+        }
+        if record && res.best_col >= 0 {
+            // best の列の時点で組になっていたもの(参照星ごとに、best の列までで最後に組になった星)
+            let bc = res.best_col as usize;
+            let mut last: Vec<Option<(usize, usize, usize, f64)>> = vec![None; nref.max(1)];
+            for e in events {
+                if e.0 <= bc {
+                    last[e.2] = Some(e);
+                }
+            }
+            let mut m: Vec<CoreMatch> = last
+                .into_iter()
+                .flatten()
+                .map(|(col, test, reference, logodds)| CoreMatch { col, test, reference, logodds })
+                .collect();
+            m.sort_by_key(|c| c.col);
+            res.matches = m;
+        }
+        res
+    }
+
+    /// 試験用の乱数(xorshift)。
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> f64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 >> 11) as f64 / (1u64 << 53) as f64
+        }
+    }
+
+    fn same_core(a: &CoreResult, b: &CoreResult) -> bool {
+        a.best.to_bits() == b.best.to_bits()
+            && (a.nmatch, a.ndistract, a.nconflict, a.nused, a.best_col) == (b.nmatch, b.ndistract, b.nconflict, b.nused, b.best_col)
+            && a.matches.len() == b.matches.len()
+            && a.matches.iter().zip(&b.matches).all(|(x, y)| {
+                (x.col, x.test, x.reference) == (y.col, y.test, y.reference) && x.logodds.to_bits() == y.logodds.to_bits()
+            })
+    }
+
+    /// 最近傍(並べ替えを不安定にした)と積み上げ(ln を μ が増えたときだけ計算する)が、変える前の形と to_bits まで同じ。
+    /// 乱数の星野で、一致・偽物・取り合い(付け替えあり・なし)・詰め物(−1)・打ち切り・同じ x の参照星・NaN を混ぜる。
+    #[test]
+    fn nearest_and_accumulate_match_reference() {
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+        let (mut nconf, mut nbail, mut nm) = (0usize, 0usize, 0usize);
+        for it in 0..20_000 {
+            let nt = 1 + (rng.next() * 120.0) as usize;
+            let nref = (rng.next() * 80.0) as usize;
+            let w = 50.0 + rng.next() * 500.0;
+            let test_xy: Vec<[f64; 2]> = (0..nt).map(|_| [rng.next() * w, rng.next() * w]).collect();
+            // 参照星: 画像の星の近く(一致)・同じ画像の星の近くに 2 つ(取り合いの元)・ばらばら(偽物)・同じ x
+            let mut ref_xy: Vec<[f64; 2]> = Vec::with_capacity(nref);
+            for k in 0..nref {
+                let t = test_xy[(rng.next() * nt as f64) as usize % nt];
+                let p = match k % 5 {
+                    0 | 1 => [t[0] + (rng.next() - 0.5) * 3.0, t[1] + (rng.next() - 0.5) * 3.0],
+                    2 => [rng.next() * w, rng.next() * w],
+                    3 => match ref_xy.last() {
+                        Some(q) => [q[0], q[1] + (rng.next() - 0.5) * 2.0],
+                        None => [t[0], t[1]],
+                    },
+                    _ => [t[0] + (rng.next() - 0.5) * 0.5, t[1]],
+                };
+                ref_xy.push(p);
+            }
+            if it % 97 == 0 && !ref_xy.is_empty() {
+                ref_xy[0][0] = f64::NAN; // x が NaN の参照星(並べ替えが安定に戻る道)
+            }
+            // 並び: 画像の星の番号(ときどき詰め物 −1、ときどき同じ星を 2 回)
+            let test_idx: Vec<i64> = (0..nt)
+                .map(|i| match (rng.next() * 20.0) as usize {
+                    0 => -1,
+                    1 => ((i + 1) % nt) as i64,
+                    _ => i as i64,
+                })
+                .collect();
+            let sig2: Vec<f64> = (0..nt).map(|_| 0.2 + rng.next() * 3.0).collect();
+            let logbg = -(w * w * (0.2 + rng.next())).ln();
+            // 3 回に 1 回は早めに打ち切る
+            let bail = if it % 3 == 0 { -5.0 - rng.next() * 30.0 } else { Params::default().logodds_bail };
+            let p = Params { distractor: [0.25, 0.1, 0.5, 0.01][it % 4], logodds_bail: bail, ..Params::default() };
+            let (nn, nd2) = nearest_refs(&test_xy, &test_idx, &sig2, &ref_xy);
+            let (nn0, nd20) = nearest_refs_ref(&test_xy, &test_idx, &sig2, &ref_xy);
+            assert_eq!(nn, nn0, "it={it}");
+            assert!(nd2.iter().zip(&nd20).all(|(a, b)| a.to_bits() == b.to_bits()), "it={it}");
+            for record in [false, true] {
+                let a = accumulate(&test_idx, &sig2, &nn, &nd2, ref_xy.len(), logbg, &p, record);
+                let b = accumulate_ref(&test_idx, &sig2, &nn, &nd2, ref_xy.len(), logbg, &p, record);
+                assert!(same_core(&a, &b), "it={it} record={record}\n{a:?}\n{b:?}");
+                if record {
+                    nconf += a.nconflict;
+                    nm += a.nmatch;
+                    nbail += (a.nused < test_idx.iter().filter(|&&t| t >= 0).count()) as usize;
+                }
+            }
+        }
+        eprintln!("最近傍と積み上げが変える前と一致: 一致 {nm}・取り合い {nconf}・打ち切り {nbail}");
+        assert!(nconf > 1000 && nbail > 100 && nm > 10_000);
     }
 }
