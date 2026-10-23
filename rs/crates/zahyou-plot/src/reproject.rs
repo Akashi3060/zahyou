@@ -343,7 +343,11 @@ impl Mapper {
 /// 入力の画素をニュートン法で解いた式そのものが「戻すと一致する」条件なので、解けた点は必ず通る(省く)。
 /// 解けなかった点(ニュートン法が収束しない・反対の半球)は NaN。
 pub fn reproject_interp(img: &Image2D, wcs_in: &Wcs, wcs_out: &Wcs, width_out: usize, height_out: usize) -> Image2D {
-    let mut out = vec![f32::NAN; width_out * height_out];
+    // 既定値は NaN(写せない画素・範囲の外は下のループが continue してこのまま残る)。NaN は 0 でないので
+    // vec! だと 1 本のスレッドで全部を埋める(24 MP で 96 MB)。添字つきの並列の collect なら、予約した領域へ
+    // 添字の順に並列で書く。書くのは f32::NAN の定数そのもの(0x7FC00000)なので、vec! の NaN と同じビット。
+    // 「既定値 NaN」の形は保つ(0 で確保して写せない画素に NaN を書く形は、書き忘れた経路が黙って黒になる)
+    let mut out: Vec<f32> = (0..width_out * height_out).into_par_iter().map(|_| f32::NAN).collect();
     let (w, h) = (img.width, img.height);
     if check_image(img).is_err() || width_out == 0 {
         return Image2D { width: width_out, height: height_out, data: out };
@@ -351,15 +355,19 @@ pub fn reproject_interp(img: &Image2D, wcs_in: &Wcs, wcs_out: &Wcs, width_out: u
     let Some(map) = Mapper::new(wcs_in, wcs_out, w, h) else {
         return Image2D { width: width_out, height: height_out, data: out };
     };
-    out.par_chunks_mut(width_out).enumerate().for_each(|(row, dst)| {
-        let mut pix: Vec<Option<(f64, f64)>> = vec![None; width_out];
-        map.row(row as f64, &mut pix);
-        for (d, p) in dst.iter_mut().zip(&pix) {
-            let Some((xi, yi)) = *p else { continue };
-            let (Some(cx), Some(cy)) = (fix_coord(xi, w), fix_coord(yi, h)) else { continue };
-            *d = bilinear(&img.data, w, h, cx, cy) as f32;
-        }
-    });
+    // 行の作業用の Vec(6000 画素で 144 KB)は並列の塊ごとに 1 本だけ確保して使い回す。Mapper::row は
+    // 各画素の先頭で必ず `*o = None` を書いてから進むので、前の行の値が残っていても結果は同じ
+    out.par_chunks_mut(width_out).enumerate().for_each_init(
+        || vec![None::<(f64, f64)>; width_out],
+        |pix, (row, dst)| {
+            map.row(row as f64, pix);
+            for (d, p) in dst.iter_mut().zip(pix.iter()) {
+                let Some((xi, yi)) = *p else { continue };
+                let (Some(cx), Some(cy)) = (fix_coord(xi, w), fix_coord(yi, h)) else { continue };
+                *d = bilinear(&img.data, w, h, cx, cy) as f32;
+            }
+        },
+    );
     Image2D { width: width_out, height: height_out, data: out }
 }
 
@@ -461,6 +469,98 @@ mod tests {
             }
             // 値は 0〜1150 ほど。float32 の丸め(1e-4)程度まで同じ
             assert!(worst <= 2e-4, "速い版と素直な版の差 {worst}");
+        }
+    }
+
+    /// 旧版の reproject_interp(vec! の NaN 埋め、行ごとに作業用の Vec を確保)。新版と比べる参照
+    fn reproject_interp_old(
+        img: &Image2D,
+        wcs_in: &Wcs,
+        wcs_out: &Wcs,
+        width_out: usize,
+        height_out: usize,
+    ) -> Image2D {
+        let mut out = vec![f32::NAN; width_out * height_out];
+        let (w, h) = (img.width, img.height);
+        if check_image(img).is_err() || width_out == 0 {
+            return Image2D { width: width_out, height: height_out, data: out };
+        }
+        let Some(map) = Mapper::new(wcs_in, wcs_out, w, h) else {
+            return Image2D { width: width_out, height: height_out, data: out };
+        };
+        out.par_chunks_mut(width_out).enumerate().for_each(|(row, dst)| {
+            let mut pix: Vec<Option<(f64, f64)>> = vec![None; width_out];
+            map.row(row as f64, &mut pix);
+            for (d, p) in dst.iter_mut().zip(&pix) {
+                let Some((xi, yi)) = *p else { continue };
+                let (Some(cx), Some(cy)) = (fix_coord(xi, w), fix_coord(yi, h)) else { continue };
+                *d = bilinear(&img.data, w, h, cx, cy) as f32;
+            }
+        });
+        Image2D { width: width_out, height: height_out, data: out }
+    }
+
+    fn same_bits(a: &Image2D, b: &Image2D) -> bool {
+        a.width == b.width
+            && a.height == b.height
+            && a.data.len() == b.data.len()
+            && a.data.iter().zip(&b.data).all(|(x, y)| x.to_bits() == y.to_bits())
+    }
+
+    #[test]
+    fn parallel_fill_matches_old() {
+        use zahyou_wcs::fit_sip_inverse;
+        // SIP(逆変換あり・なし)・TAN・回転・反転の WCS、NaN と ±∞ を含む画像で、全画素が旧版と to_bits まで同じ。
+        // 写せない画素(外側)の NaN の位置とビットも同じ
+        let (w, h) = (420usize, 260usize);
+        let mut data: Vec<f32> = (0..w * h).map(|i| ((i * 7919) % 1000) as f32 + (i % w) as f32 * 0.5).collect();
+        data[5 * w + 7] = f32::NAN;
+        data[100 * w + 200] = f32::INFINITY;
+        data[150 * w + 3] = f32::NEG_INFINITY;
+        let img = Image2D::new(w, h, data).unwrap();
+        let s = 2.0 / 3600.0;
+        let m = 4;
+        let mut a = vec![0.0; m * m];
+        let mut b = vec![0.0; m * m];
+        a[2 * m] = 3e-5;
+        a[m + 1] = -2e-5;
+        b[2] = 2.5e-5;
+        a[3 * m] = 4e-8;
+        b[3] = -5e-8;
+        let sip = Sip::new(3, a, b).unwrap();
+        let mut checked = 0;
+        for (t, par, dec) in [(0.6f64, 1.0f64, 60.0f64), (0.785, -1.0, -30.0), (0.0, 1.0, 89.99), (2.5, -1.0, 0.0)] {
+            let cd = [[-s * t.cos(), par * s * t.sin()], [s * t.sin(), par * s * t.cos()]];
+            let base = Wcs::new(radec_to_xyz(10.0, dec), [200.0, 120.0], cd, Some(sip.clone()));
+            let inv = fit_sip_inverse(&base, w as f64, h as f64, None).unwrap();
+            for wcs in [base.clone(), inv, base.tan_only()] {
+                let (out, wo, ho) = north_up_frame(&wcs, w, h).unwrap();
+                let new = reproject_interp(&img, &wcs, &out, wo, ho);
+                let old = reproject_interp_old(&img, &wcs, &out, wo, ho);
+                assert!(same_bits(&new, &old), "t={t} par={par} dec={dec}");
+                assert!(new.data.iter().any(|v| v.is_nan()) && new.data.iter().any(|v| !v.is_nan()));
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 12);
+        // 早く抜ける経路: 大きさの合わない画像・特異な CD・幅 0・高さ 0
+        let wcs = Wcs::tan(radec_to_xyz(10.0, 20.0), [200.0, 120.0], [[-s, 0.0], [0.0, s]]);
+        let (out, wo, ho) = north_up_frame(&wcs, w, h).unwrap();
+        let broken = Image2D { width: w, height: h, data: vec![1.0; 10] };
+        assert!(same_bits(
+            &reproject_interp(&broken, &wcs, &out, wo, ho),
+            &reproject_interp_old(&broken, &wcs, &out, wo, ho)
+        ));
+        let singular = Wcs::tan(radec_to_xyz(10.0, 20.0), [200.0, 120.0], [[0.0, 0.0], [0.0, 0.0]]);
+        assert!(same_bits(
+            &reproject_interp(&img, &singular, &out, wo, ho),
+            &reproject_interp_old(&img, &singular, &out, wo, ho)
+        ));
+        for (a, b) in [(0usize, 50usize), (50, 0), (0, 0), (1, 1)] {
+            assert!(same_bits(
+                &reproject_interp(&img, &wcs, &out, a, b),
+                &reproject_interp_old(&img, &wcs, &out, a, b)
+            ));
         }
     }
 
