@@ -679,9 +679,14 @@ fn verify_and_pick(
     let tune = params.logodds_tune;
     for part in hyps.chunks(VERIFY_STEP) {
         let m = part.len();
+        // 区切りごとに全部の検証の終わりを待つので、終わりぎわに残る仕事を小さくする: 仕事は 16〜31 仮説にそろえる
+        // (with_max_len が無いと、盗まれない部分の仕事は 8192 / 32 = 256 仮説になる)。collect は並びを保つので、
+        // 結果の順も選ぶ仮説も分け方によらない。Err は今までと同じく、並列で先に出たものを返す(種類は締め切り・中止・
+        // 壊れた索引・開けない索引で、同時に起きたときにどれになるかが決まっていないのは分け方によらず前から同じ)
         let res: Vec<VerifyOut> = part
             .par_iter()
             .with_min_len(16)
+            .with_max_len(16)
             .map(|h| -> Result<VerifyOut, Abort> {
                 clock.check()?;
                 if !quick_pass(field, sc, params, h, 1.0)? {
