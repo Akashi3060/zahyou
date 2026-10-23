@@ -576,6 +576,24 @@ mod tests {
         Image2D { width: nx, height: ny, data: d }
     }
 
+    /// 1 つの縁(0 上・1 下・2 左・3 右)から 2 本目の線に、5 画素おきの焼き込みを置いた画像(ny, nx ≥ 2)
+    fn band_image(ny: usize, nx: usize, seed: u64, side: usize) -> Image2D {
+        let mut img = test_image(ny, nx, seed, 0, false, false);
+        let d = &mut img.data;
+        if side < 2 {
+            let y = if side == 0 { 1 } else { ny - 2 };
+            for x in (0..nx).step_by(5) {
+                d[y * nx + x] = 65000.0;
+            }
+        } else {
+            let x = if side == 2 { 1 } else { nx - 2 };
+            for y in (0..ny).step_by(5) {
+                d[y * nx + x] = 65000.0;
+            }
+        }
+        img
+    }
+
     const SHAPES: [(usize, usize); 9] =
         [(1, 1), (1, 300), (300, 1), (2, 3), (9, 9), (37, 300), (130, 257), (201, 700), (64, 1100)];
 
@@ -630,6 +648,21 @@ mod tests {
         }
         // 印が立つ場合を通したこと
         assert!(n_dead >= 5 && n_band >= 5, "死んだ縁 {n_dead} 件・焼き込み {n_band} 件");
+        // 4 つの縁それぞれに帯を置き、前から・後ろから見る行の表引きと、左右の列の数え上げを全部、帯が立つ線で通す
+        // (上の test_image の帯は上の行と右の列にしか無い)
+        let mut hit = [0usize; 4];
+        for (ny, nx) in SHAPES.into_iter().filter(|&(ny, nx)| ny >= 9 && nx >= 9) {
+            for (side, h) in hit.iter_mut().enumerate() {
+                let img = band_image(ny, nx, (ny * 7 + nx + side) as u64, side);
+                let mut a = vec![false; ny * nx];
+                let mut b = vec![false; ny * nx];
+                let ka = mask_overlay_bands(&img.data, ny, nx, &mut a);
+                let kb = mask_overlay_bands_ref(&img.data, ny, nx, &mut b);
+                assert_eq!((ka, &a), (kb, &b), "overlay side={side} {ny}x{nx}");
+                *h += (ka > 0) as usize;
+            }
+        }
+        assert!(hit.iter().all(|&h| h >= 1), "縁(上・下・左・右)ごとに帯が立った形の数 {hit:?}");
         // 空の画像で落ちない
         mask_dead_edges(&Image2D { width: 0, height: 5, data: Vec::new() }, &mut [], 1.0);
         mask_dead_edges(&Image2D { width: 5, height: 0, data: Vec::new() }, &mut [], 1.0);
