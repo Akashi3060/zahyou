@@ -1,7 +1,7 @@
 //! 図の速さを測る: `cargo run --release -p zahyou-plot --example bench_plot -- [幅 高さ 回数]`
 //!
 //! 合成した画像(既定 6000×4000、星を散らした float32)と、30° 回して SIP 3 次を付けた WCS で、
-//! 伸張・格子・図 1・北が上の描き直し・図 2・PNG の書き出しの時間(回数のうち最速)を出す。
+//! 伸張・格子・図 1・北が上の描き直し・図 2・PNG の書き出し・拡大した表示の格子の時間(回数のうち最速)を出す。
 //! ZAHYOU_BENCH_OUT=<フォルダー> を付けると 2 枚の PNG(明るい配色と暗い配色)を書き出す。
 //! ZAHYOU_BENCH_DUMP=<フォルダー> を付けると、Python 版と比べるための入力(画像と WCS のカード)と、
 //! 北が上の描き直しの結果(bench_northup.f32 と .json)を書き出す。
@@ -11,8 +11,8 @@ use std::time::Instant;
 
 use zahyou_image::{Image2D, Source};
 use zahyou_plot::{
-    RenderOptions, Theme, axes_box, compute_norm, compute_norm_f64, figure_north_up, figure_original, figure_size,
-    gray_rgba, render_png, reproject_north_up, wcs_grid,
+    RenderOptions, Theme, View, axes_box, compute_norm, compute_norm_f64, figure_north_up, figure_original,
+    figure_size, gray_rgba, grid_for_view, render_png, reproject_north_up, wcs_grid,
 };
 use zahyou_wcs::{Sip, Wcs, fit_sip_inverse, radec_to_xyz};
 
@@ -143,6 +143,10 @@ fn main() {
         (render_png(&a, &opts).unwrap(), render_png(&b, &opts).unwrap())
     });
     println!("図 2 枚の作成と PNG(通し)  {:8.3} 秒", tt);
+    // 画面でホイールで拡大したとき(UI のスレッドが毎フレーム作り直す)の格子。WCS は上と同じ SIP 3 次 + 逆変換
+    let zoom = View::new((w as f64 * 0.42, w as f64 * 0.58), (h as f64 * 0.6, h as f64 * 0.45));
+    let (t, g) = best(reps, || grid_for_view(&wcs, w, h, &zoom));
+    println!("拡大した格子と目盛り(SIP)   {:8.3} 秒  線 {} 本・目盛り {} 本", t, g.lines.len(), g.ticks.len());
     if std::env::var_os("ZAHYOU_BENCH_CHECK").is_some() {
         // 灰色への速い写し(gray_rgba)が、画素ごとの式(Norm::gray8)と全画素で同じか
         let nu = reproject_north_up(&img, &wcs).unwrap();
