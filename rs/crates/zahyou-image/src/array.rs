@@ -398,6 +398,11 @@ pub(crate) fn reduce_to_2d(
                 src.read_f64(i * plane, &mut buf)?;
                 acc.par_iter_mut().zip(buf.par_iter()).for_each(|(a, &b)| *a += b);
             }
+            // 出力を集める前に読み込み用の面を放す(値には関わらない)。FITS の FileArray は読んだバイトの作業領域
+            // (最大 READ_CHUNK 要素ぶん)を reduce_to_2d が返るまで持ち続けるので、buf を残したまま out を作ると
+            // 私有メモリの最大が、呼ぶたびに作業領域を作って放していた以前(max(16p + 作業領域, 20p) バイト。
+            // p は面の画素数)より増える。ここで放せば最大は 16p + 作業領域(ループの中)で、以前を超えない
+            drop(buf);
             let d = used as f64;
             let out: Vec<f32> = acc.par_iter().map(|&a| (a / d) as f32).collect();
             Ok((out, ny, nx, format!("{nz} 枚のキューブのうち先頭 {used} 枚を平均 (SNR 稼ぎ)")))

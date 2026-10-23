@@ -144,10 +144,11 @@ fn min_max(v: &[f32]) -> (f32, f32) {
 }
 
 /// 非有限値の数と `min_max` を 1 回の走査で(読み込みで全面を 2 回読まないため)。
-/// 最小・最大は、非有限値が 1 つも無いときだけ `min_max(v)` と同じ値になる(NaN・±inf も混ぜて畳むので、
-/// 非有限値があるときの値は使わないこと)。同じ値でもビットが違いうるのは ±0 だけ(0 以外の有限値は、
-/// 等しければビットも同じ)。±0 のどちらを選ぶかは畳み方(ベクトル化の仕方)で変わりうるので、
-/// 呼ぶ側は最小・最大が 0 のときは `min_max` で取り直す。
+/// 最小・最大の畳み方は `min_max` と同じ(`f32::min`・`max` なので NaN は飛ばし、±inf は混ぜる)で、同じ `v` なら
+/// 非有限値があっても `min_max(v)` と同じ値になる。ただしこれは補完の前の面の値なので、読み込みで補完のあとの
+/// `min_max(&data)` として使えるのは、補完が要らない(非有限値が 0 個の)ときだけ。補完したら `min_max` で取り直す。
+/// 同じ値でもビットが違いうるのは ±0 だけ(0 以外の値は、等しければビットも同じ)。±0 のどちらを選ぶかは
+/// 畳み方(ベクトル化の仕方)で変わりうるので、呼ぶ側は最小・最大が 0 のときも `min_max` で取り直す。
 fn count_bad_min_max(v: &[f32]) -> (usize, f32, f32) {
     v.par_chunks(1 << 16)
         .map(|c| {
@@ -439,6 +440,33 @@ mod tests {
             LoadError::TooSmall { height: 15, width: 20 }
         );
         assert!(matches!(finish(vec![1.0; 10], 16, 16, vec![], vec![], false), Err(LoadError::NotTwoDimensional(_))));
+    }
+
+    #[test]
+    fn count_bad_min_max_values() {
+        // 最小・最大は、非有限値があっても同じ v の min_max と同じ値(説明のとおり)。0 以外ならビットも同じ。
+        // 区切り(1 << 16)をまたぐ長さで、NaN・±inf の有り無しを試す
+        let mut r = Rng(0x0dd_ba11_cafe_f00d);
+        let n = (1 << 16) * 2 + 333;
+        let base: Vec<f32> = (0..n).map(|_| r.next() * 1000.0 - 500.0).collect();
+        let mut nan = base.clone();
+        for i in (0..n).step_by(97) {
+            nan[i] = f32::NAN;
+        }
+        let mut inf = nan.clone();
+        inf[12345] = f32::INFINITY;
+        inf[(1 << 16) + 7] = f32::NEG_INFINITY;
+        for (name, v, bad) in
+            [("有限", &base, 0usize), ("NaN", &nan, n.div_ceil(97)), ("NaN+inf", &inf, n.div_ceil(97) + 2)]
+        {
+            let (nb, lo, hi) = count_bad_min_max(v);
+            let (a, b) = min_max(v);
+            assert_eq!(nb, bad, "{name}: 非有限値の数");
+            assert_eq!((lo.to_bits(), hi.to_bits()), (a.to_bits(), b.to_bits()), "{name}: 最小・最大");
+        }
+        assert_eq!(count_bad_min_max(&[f32::NAN; 5]).0, 5);
+        let (_, lo, hi) = count_bad_min_max(&[f32::NAN; 5]);
+        assert_eq!((lo, hi), min_max(&[f32::NAN; 5]));
     }
 
     #[test]

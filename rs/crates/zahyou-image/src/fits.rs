@@ -473,7 +473,10 @@ struct FileArray<'a> {
     bitpix: i32,
     sc: Scaling,
     /// ファイルから読んだバイトを置く作業領域(呼ぶたびに作り直さず使い回す。最大 READ_CHUNK 要素ぶん)。
-    /// 小さく区切って何度も読む呼び方(画素ごとに色が並ぶ配列の輝度の合成)で、毎回新しいページを触らないため
+    /// 小さく区切って何度も読む呼び方(画素ごとに色が並ぶ配列の輝度の合成)で、毎回新しいページを触らないため。
+    /// FileArray(= reduce_to_2d の間)が生きているあいだ持ち続けるので、reduce_to_2d の枝で「読み終えてから
+    /// 大きな配列を作る」ときは、先に要らなくなった配列を放して私有メモリの最大を以前より増やさないこと
+    /// (キューブの平均の枝が buf を放しているのはそのため)
     scratch: Vec<u8>,
 }
 
@@ -884,6 +887,46 @@ mod tests {
             let (d, ny, nx, _) = reduce_to_2d(&mut a, 200).unwrap();
             assert_eq!((ny, nx), (h, w));
             assert!(d.iter().zip(&old).all(|(x, y)| x.to_bits() == y.to_bits()), "BITPIX {bp} reduce_to_2d");
+        }
+    }
+
+    #[test]
+    fn fits_cube_mean_same_as_old() {
+        // キューブの平均の枝(読み込み用の buf を出力の前に放すようにした)を、作業領域を使い回す FileArray で通し、
+        // 以前の読み方で 1 枚ずつ読んで同じ順に足して割った値とビット単位で同じか。200 枚を超えるキューブ(先頭 200 枚)も
+        for (k, &(bp, bscale, bzero, blank, shape)) in [
+            (-32i32, 1.0f64, 0.0f64, None, [5usize, 40usize, 30usize]),
+            (16, 1.0, 32768.0, None, [2, 17, 19]),
+            (16, 0.5, -3.0, Some(-1i64), [7, 9, 33]),
+            (-64, 1.0, 0.0, None, [3, 5, 6]),
+            (8, 1.0, 0.0, None, [205, 3, 5]),
+            (32, 1.5, 100.0, Some(12345), [4, 12, 8]),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let [nz, ny, nx] = shape;
+            let plane = ny * nx;
+            let used = nz.min(200);
+            let bpp = (bp.unsigned_abs() / 8) as usize;
+            let bytes = rand_bytes(nz * plane * bpp, 0xCAFE_0000 + k as u64);
+            let mut src = Src::Mem(bytes);
+            let sc = Scaling::new(bp, bscale, bzero, blank, false);
+            let mut a =
+                FileArray { src: &mut src, start: 0, shape: shape.to_vec(), bitpix: bp, sc, scratch: Vec::new() };
+            let mut acc = vec![0.0f64; plane];
+            let mut buf = vec![0.0f64; plane];
+            for i in 0..used {
+                old_read_f64(&mut a, i * plane, &mut buf).unwrap();
+                for (x, &b) in acc.iter_mut().zip(&buf) {
+                    *x += b;
+                }
+            }
+            let old: Vec<f32> = acc.iter().map(|&x| (x / used as f64) as f32).collect();
+            let (d, gy, gx, note) = reduce_to_2d(&mut a, 200).unwrap();
+            assert_eq!((gy, gx), (ny, nx));
+            assert_eq!(note, format!("{nz} 枚のキューブのうち先頭 {used} 枚を平均 (SNR 稼ぎ)"));
+            assert!(d.iter().zip(&old).all(|(x, y)| x.to_bits() == y.to_bits()), "BITPIX {bp} 形 {shape:?}");
         }
     }
 
