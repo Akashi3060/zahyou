@@ -39,9 +39,30 @@ fn nearest_index(i: isize, n: usize) -> usize {
 /// 速さのため、行ごとに「重み 1 つ分を行全体に足す」を外側から順に繰り返す(画素ごとの足す順は同じ)。
 /// 出力は 1 枚だけ確保し、軸 1 はその行の写しから計算して同じ行へ書き戻す。
 fn separable_sym(data: &[f32], ny: usize, nx: usize, w: &[f64], index: fn(isize, usize) -> usize) -> Vec<f32> {
+    let mut out = Vec::new();
+    separable_sym_into(data, ny, nx, w, index, &mut out);
+    out
+}
+
+/// `separable_sym` の書き先を受け取る版。out の長さが ny×nx 以上なら切り詰めて使う(確保もゼロ埋めもしない)。
+/// 軸 0 が全画素を書く(各行の nx 個すべて)ので、前の中身は残らず、値は新しく確保したときと同じ。
+fn separable_sym_into(
+    data: &[f32],
+    ny: usize,
+    nx: usize,
+    w: &[f64],
+    index: fn(isize, usize) -> usize,
+    out: &mut Vec<f32>,
+) {
     let r = w.len() - 1;
     let nxc = nx.max(1);
-    let mut out = vec![0.0f32; ny * nx];
+    if out.len() >= ny * nx {
+        out.truncate(ny * nx);
+    } else {
+        // 古い配列を先に捨ててから確保する(一瞬でも 2 本持たない)
+        drop(std::mem::take(out));
+        *out = vec![0.0f32; ny * nx];
+    }
     // 軸 0: 出力の行 y は入力の行 y-r..y+r から決まる(行ごとに並列)
     out.par_chunks_mut(nxc).enumerate().for_each_init(
         || vec![0.0f64; nx],
@@ -92,7 +113,6 @@ fn separable_sym(data: &[f32], ny: usize, nx: usize, w: &[f64], index: fn(isize,
             }
         },
     );
-    out
 }
 
 /// `ndimage.gaussian_filter(a, sigma=1.0)`(mode="reflect"、truncate=4)。
@@ -130,12 +150,24 @@ pub fn gaussian_weights(sigma: f64) -> Option<Vec<f64>> {
 /// `ndimage.gaussian_filter(a, sigma)`(mode="reflect"、truncate=4)。軸 0 → 軸 1 の順で、途中を float32 に丸める。
 /// sigma が使えない値なら入力をそのまま返す(scipy は sigma ≤ 1e-15 なら何もしない)。
 pub fn gaussian(data: &[f32], ny: usize, nx: usize, sigma: f64) -> Vec<f32> {
+    let mut out = Vec::new();
+    gaussian_into(data, ny, nx, sigma, &mut out);
+    out
+}
+
+/// `gaussian` の書き先を受け取る版(深い検出が、使い終えた同じ大きさの配列を書き先に回す)。
+/// out の前の中身は値に効かない(separable_sym_into は全画素を書き、sigma が使えないときは data の写しにする)。
+pub(crate) fn gaussian_into(data: &[f32], ny: usize, nx: usize, sigma: f64, out: &mut Vec<f32>) {
     if ny == 0 || nx == 0 || data.len() != ny * nx {
-        return Vec::new();
+        out.clear();
+        return;
     }
     match gaussian_weights(sigma) {
-        Some(w) if sigma > 1e-15 => separable_sym(data, ny, nx, &w, reflect_index),
-        _ => data.to_vec(),
+        Some(w) if sigma > 1e-15 => separable_sym_into(data, ny, nx, &w, reflect_index, out),
+        _ => {
+            out.clear();
+            out.extend_from_slice(data);
+        }
     }
 }
 
@@ -194,13 +226,43 @@ pub fn uniform3(data: &[f32], ny: usize, nx: usize) -> Vec<f32> {
     if ny == 0 || nx == 0 {
         return Vec::new();
     }
-    // 軸 0: 列ごとの持ち回し。縦の帯(幅 STRIP)ごとに並列に計算して、あとで行へ並べ直す
-    const STRIP: usize = 256;
-    let strips: Vec<(usize, Vec<f32>)> = (0..nx.div_ceil(STRIP))
+    let strips = uniform3_strips(data, ny, nx);
+    // 軸 1: 行ごと。軸 0 の結果の行を帯から集めてかける(全面の並べ直しの配列は作らない)
+    let mut out = vec![0.0f32; ny * nx];
+    out.par_chunks_mut(nx).enumerate().for_each_init(
+        || vec![0.0f32; nx],
+        |t0, (y, orow)| {
+            uniform3_gather_row(&strips, y, t0);
+            uniform3_row(t0, orow);
+        },
+    );
+    out
+}
+
+/// uniform3 の軸 0 の結果の縦の帯 1 本(列 x0..x0+w、行優先の ny×w)。
+pub(crate) struct Strip {
+    x0: usize,
+    w: usize,
+    buf: Vec<f32>,
+}
+
+/// 縦の帯の幅。列ごとに独立に計算するので幅は値に効かない。帯の数を、幅 256 以下になるスレッド数の倍数にして
+/// 最後の周回で遊ぶスレッドを減らす(細すぎると 1 列あたりの手間が増えるので 32 列以上)。
+fn strip_width(nx: usize) -> usize {
+    let t = rayon::current_num_threads().max(1);
+    let n = nx.div_ceil(256).div_ceil(t).max(1) * t;
+    nx.div_ceil(n).max(32)
+}
+
+/// uniform3 の軸 0: 列ごとの持ち回しの和(scipy と同じく `tmp += 新 - 旧` を float64 で、毎回 3 で割って float32)。
+/// 縦の帯ごとに並列に計算する。ny・nx は 1 以上、data は ny×nx 以上。
+pub(crate) fn uniform3_strips(data: &[f32], ny: usize, nx: usize) -> Vec<Strip> {
+    let sw = strip_width(nx);
+    (0..nx.div_ceil(sw))
         .into_par_iter()
         .map(|s| {
-            let x0 = s * STRIP;
-            let x1 = (x0 + STRIP).min(nx);
+            let x0 = s * sw;
+            let x1 = (x0 + sw).min(nx);
             let w = x1 - x0;
             let mut buf = vec![0.0f32; ny * w];
             let mut tmp = vec![0.0f64; w];
@@ -220,33 +282,33 @@ pub fn uniform3(data: &[f32], ny: usize, nx: usize) -> Vec<f32> {
                     buf[l * w + x] = (tmp[x] / 3.0) as f32;
                 }
             }
-            (x0, buf)
+            Strip { x0, w, buf }
         })
-        .collect();
-    let mut t0 = vec![0.0f32; ny * nx];
-    t0.par_chunks_mut(nx).enumerate().for_each(|(y, orow)| {
-        for (x0, buf) in &strips {
-            let w = (STRIP).min(nx - x0);
-            orow[*x0..x0 + w].copy_from_slice(&buf[y * w..y * w + w]);
-        }
-    });
-    drop(strips);
-    // 軸 1: 行ごと
-    let mut out = vec![0.0f32; ny * nx];
-    out.par_chunks_mut(nx).enumerate().for_each(|(y, orow)| {
-        let row = &t0[y * nx..y * nx + nx];
-        let at = |x: isize| row[nearest_index(x, nx)] as f64;
-        let mut t = 0.0f64;
-        t += at(-1);
-        t += at(0);
-        t += at(1);
-        orow[0] = (t / 3.0) as f32;
-        for (l, o) in orow.iter_mut().enumerate().skip(1) {
-            t += at(l as isize + 1) - at(l as isize - 2);
-            *o = (t / 3.0) as f32;
-        }
-    });
-    out
+        .collect()
+}
+
+/// 帯から軸 0 の結果の行 y を t0row(長さ nx)へ集める。
+#[inline]
+pub(crate) fn uniform3_gather_row(strips: &[Strip], y: usize, t0row: &mut [f32]) {
+    for s in strips {
+        t0row[s.x0..s.x0 + s.w].copy_from_slice(&s.buf[y * s.w..y * s.w + s.w]);
+    }
+}
+
+/// uniform3 の軸 1 の 1 行ぶん: t0row(軸 0 の結果の行、長さ 1 以上)の持ち回しの和を orow(同じ長さ)へ。
+#[inline]
+pub(crate) fn uniform3_row(t0row: &[f32], orow: &mut [f32]) {
+    let nx = t0row.len();
+    let at = |x: isize| t0row[nearest_index(x, nx)] as f64;
+    let mut t = 0.0f64;
+    t += at(-1);
+    t += at(0);
+    t += at(1);
+    orow[0] = (t / 3.0) as f32;
+    for (l, o) in orow.iter_mut().enumerate().skip(1) {
+        t += at(l as isize + 1) - at(l as isize - 2);
+        *o = (t / 3.0) as f32;
+    }
 }
 
 /// 9 個の中央値(5 番目)。
@@ -319,6 +381,22 @@ fn zoom_axis(n_in: usize, n_out: usize) -> Vec<(usize, usize, f64, f64)> {
         .collect()
 }
 
+/// zoom の 1 画素: 4 点の重みつきの和を float64 で足して float32 に丸める。zoom_linear と zoom_linear_sub で共通。
+#[inline]
+fn zoom_px(
+    c: &[f32],
+    bx: usize,
+    (y0, y1, wy0, wy1): (usize, usize, f64, f64),
+    (x0, x1, wx0, wx1): (usize, usize, f64, f64),
+) -> f32 {
+    let mut t = 0.0f64;
+    t += c[y0 * bx + x0] as f64 * wy0 * wx0;
+    t += c[y0 * bx + x1] as f64 * wy0 * wx1;
+    t += c[y1 * bx + x0] as f64 * wy1 * wx0;
+    t += c[y1 * bx + x1] as f64 * wy1 * wx1;
+    t as f32
+}
+
 /// `ndimage.zoom(c, (oy/by, ox/bx), order=1)` の本体(出力の大きさは呼ぶ側で決める)。
 pub fn zoom_linear(c: &[f32], by: usize, bx: usize, oy: usize, ox: usize) -> Vec<f32> {
     let ay = zoom_axis(by, oy);
@@ -328,15 +406,25 @@ pub fn zoom_linear(c: &[f32], by: usize, bx: usize, oy: usize, ox: usize) -> Vec
         return out;
     }
     out.par_chunks_mut(ox).enumerate().for_each(|(i, orow)| {
-        let (y0, y1, wy0, wy1) = ay[i];
-        for (j, o) in orow.iter_mut().enumerate() {
-            let (x0, x1, wx0, wx1) = ax[j];
-            let mut t = 0.0f64;
-            t += c[y0 * bx + x0] as f64 * wy0 * wx0;
-            t += c[y0 * bx + x1] as f64 * wy0 * wx1;
-            t += c[y1 * bx + x0] as f64 * wy1 * wx0;
-            t += c[y1 * bx + x1] as f64 * wy1 * wx1;
-            *o = t as f32;
+        for (o, &a) in orow.iter_mut().zip(ax.iter()) {
+            *o = zoom_px(c, bx, ay[i], a);
+        }
+    });
+    out
+}
+
+/// `data - zoom_linear(c, by, bx, ny, nx)`(data は ny×nx)。背景の配列を作らずに、引いた値を直接書く。
+/// 各画素は zoom_linear と同じ zoom_px の値を float32 で引くだけなので、背景を作ってから引くのとビット単位で同じ。
+pub(crate) fn zoom_linear_sub(c: &[f32], by: usize, bx: usize, data: &[f32], ny: usize, nx: usize) -> Vec<f32> {
+    let ay = zoom_axis(by, ny);
+    let ax = zoom_axis(bx, nx);
+    let mut out = vec![0.0f32; ny * nx];
+    if nx == 0 {
+        return out;
+    }
+    out.par_chunks_mut(nx).zip(data.par_chunks(nx)).enumerate().for_each(|(i, (orow, drow))| {
+        for ((o, &d), &a) in orow.iter_mut().zip(drow).zip(ax.iter()) {
+            *o = d - zoom_px(c, bx, ay[i], a);
         }
     });
     out
@@ -349,8 +437,127 @@ pub fn zoom_out_len(n_in: usize, target: usize) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// 2026-10-24 までの uniform3(帯の幅 256、軸 0 の結果を全面の t0 へ並べ直してから軸 1)。照合の基準
+    pub(crate) fn uniform3_ref(data: &[f32], ny: usize, nx: usize) -> Vec<f32> {
+        if ny == 0 || nx == 0 {
+            return Vec::new();
+        }
+        const STRIP: usize = 256;
+        let strips: Vec<(usize, Vec<f32>)> = (0..nx.div_ceil(STRIP))
+            .map(|s| {
+                let x0 = s * STRIP;
+                let x1 = (x0 + STRIP).min(nx);
+                let w = x1 - x0;
+                let mut buf = vec![0.0f32; ny * w];
+                let mut tmp = vec![0.0f64; w];
+                let at = |y: isize, x: usize| data[nearest_index(y, ny) * nx + x0 + x] as f64;
+                for x in 0..w {
+                    let mut t = 0.0f64;
+                    t += at(-1, x);
+                    t += at(0, x);
+                    t += at(1, x);
+                    tmp[x] = t;
+                    buf[x] = (t / 3.0) as f32;
+                }
+                for l in 1..ny {
+                    let (yn, yo) = (l as isize + 1, l as isize - 2);
+                    for x in 0..w {
+                        tmp[x] += at(yn, x) - at(yo, x);
+                        buf[l * w + x] = (tmp[x] / 3.0) as f32;
+                    }
+                }
+                (x0, buf)
+            })
+            .collect();
+        let mut t0 = vec![0.0f32; ny * nx];
+        for (y, orow) in t0.chunks_mut(nx).enumerate() {
+            for (x0, buf) in &strips {
+                let w = (STRIP).min(nx - x0);
+                orow[*x0..x0 + w].copy_from_slice(&buf[y * w..y * w + w]);
+            }
+        }
+        let mut out = vec![0.0f32; ny * nx];
+        for (y, orow) in out.chunks_mut(nx).enumerate() {
+            let row = &t0[y * nx..y * nx + nx];
+            let at = |x: isize| row[nearest_index(x, nx)] as f64;
+            let mut t = 0.0f64;
+            t += at(-1);
+            t += at(0);
+            t += at(1);
+            orow[0] = (t / 3.0) as f32;
+            for (l, o) in orow.iter_mut().enumerate().skip(1) {
+                t += at(l as isize + 1) - at(l as isize - 2);
+                *o = (t / 3.0) as f32;
+            }
+        }
+        out
+    }
+
+    /// 決まった擬似乱数(xorshift)の画像。値の幅は大きめ(持ち回しの和の丸めの積み重ねが出るように)
+    pub(crate) fn rand_vals(n: usize, seed: u64) -> Vec<f32> {
+        let mut s = seed | 1;
+        (0..n)
+            .map(|_| {
+                s ^= s << 13;
+                s ^= s >> 7;
+                s ^= s << 17;
+                ((s >> 11) as f64 / (1u64 << 53) as f64 * 1.0e4 - 3.0e3) as f32
+            })
+            .collect()
+    }
+
+    #[test]
+    fn uniform3_matches_reference() {
+        // 帯の幅を変え、全面の並べ直しをやめても、前の版とビット単位で同じ(帯の境目をまたぐ幅・1 行・1 列・NaN 入り)
+        for (ny, nx) in
+            [(1usize, 1usize), (1, 700), (700, 1), (2, 3), (37, 300), (5, 257), (64, 256), (90, 1030), (33, 6001)]
+        {
+            let mut d = rand_vals(ny * nx, (ny * 7919 + nx) as u64);
+            if d.len() > 50 {
+                d[17] = f32::NAN;
+                d[40] = f32::INFINITY;
+            }
+            let want = uniform3_ref(&d, ny, nx);
+            let got = uniform3(&d, ny, nx);
+            assert_eq!(got.len(), want.len());
+            assert!(got.iter().zip(&want).all(|(a, b)| a.to_bits() == b.to_bits()), "{ny}x{nx}");
+        }
+    }
+
+    #[test]
+    fn zoom_sub_matches_zoom_then_subtract() {
+        // 背景を作ってから引くのと、引いた値を直接書くのが同じ
+        for (by, bx, ny, nx) in [(3usize, 3usize, 200usize, 250usize), (5, 9, 333, 600), (62, 93, 4000, 6000)] {
+            let c = rand_vals(by * bx, 3);
+            let d = rand_vals(ny * nx, 4);
+            let back = zoom_linear(&c, by, bx, ny, nx);
+            let want: Vec<f32> = d.iter().zip(&back).map(|(&d, &b)| d - b).collect();
+            let got = zoom_linear_sub(&c, by, bx, &d, ny, nx);
+            assert!(got.iter().zip(&want).all(|(a, b)| a.to_bits() == b.to_bits()), "{ny}x{nx}");
+        }
+    }
+
+    #[test]
+    fn gaussian_into_ignores_old_contents() {
+        // 書き先に前の値(NaN・長い・短い)が残っていても、新しく作ったものと同じ。sigma が使えないときは写し
+        let (ny, nx) = (61, 77);
+        let d = rand_vals(ny * nx, 9);
+        for sigma in [1.0, 1.7, 3.2, 0.0, f64::NAN, 1e-20] {
+            let want = gaussian(&d, ny, nx, sigma);
+            for init in [Vec::new(), vec![f32::NAN; ny * nx], vec![5.0f32; 10], vec![-1.0f32; ny * nx + 99]] {
+                let mut out = init;
+                gaussian_into(&d, ny, nx, sigma, &mut out);
+                assert_eq!(out.len(), want.len());
+                assert!(out.iter().zip(&want).all(|(a, b)| a.to_bits() == b.to_bits()), "sigma={sigma}");
+            }
+        }
+        let mut out = vec![1.0f32; 5];
+        gaussian_into(&d, ny, nx + 1, 1.0, &mut out);
+        assert!(out.is_empty());
+    }
 
     #[test]
     fn reflect_matches_scipy_rule() {
