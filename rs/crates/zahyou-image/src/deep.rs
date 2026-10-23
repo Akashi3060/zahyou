@@ -22,12 +22,13 @@
 //! 2026-10-16 から `np.argsort(..., kind="stable")` で同じ順にした(それまでは安定でなく、飽和して頂が平らな星で
 //! 位置が 1 px 変わることがあった)。
 
+use std::borrow::Cow;
 use std::f64::consts::PI;
 use std::time::Instant;
 
 use rayon::prelude::*;
 
-use crate::filters::{gaussian, median3};
+use crate::filters::{gaussian, gaussian_into, median3};
 use crate::stats::{f32_key, key_to_f32, median_finite_f32, sigma_clipped_stats};
 use crate::{DeepInfo, DeepOpts, DeepRejected, DetectOpts, Image2D, Prep, Source};
 
@@ -230,6 +231,30 @@ fn interp_axis(n: usize, o: usize, bsz: usize, nb: usize) -> Vec<(usize, f64)> {
             (i, f - i as f64)
         })
         .collect()
+}
+
+/// 場所ごとの雑音の地図: 一辺 nbox の升ごとの MAD の σ(block_grid の MadSigma)を引き伸ばし、0.7 ns を下限にする
+/// (星で埋まった升で雑音を低く見積もらない)。升が足りなければ全面 ns。
+/// 升の地図があるときは expand が全画素を上書きするので、確保は 0 埋め(OS のゼロページで、直列に埋めない)でよい。
+/// 前の版は全面を ns で埋めてから上書きしていたが、上書きされる値は同じ。
+fn noise_map(sm: &[f32], bad: &[bool], dims: (usize, usize), nbox: usize, ns: f64) -> Vec<f32> {
+    let mut nmap = vec![0.0f32; dims.0 * dims.1];
+    match block_grid(sm, bad, false, dims, nbox, BlockFn::MadSigma) {
+        Some(g) => g.expand(&mut nmap, dims, false),
+        None => {
+            let v = ns as f32;
+            nmap.par_iter_mut().for_each(|a| *a = v);
+        }
+    }
+    let floor = (0.7 * ns) as f32;
+    nmap.par_iter_mut().for_each(|v| {
+        if v.is_nan() || floor.is_nan() {
+            *v = f32::NAN;
+        } else if floor > *v {
+            *v = floor;
+        }
+    });
+    nmap
 }
 
 /// 並列の処理単位(画素数)
@@ -472,7 +497,8 @@ fn psf_sigma(
 /// d(y) = min(g(yy) + |yy - y|) を前向き・後ろ向きの 2 回の掃引で出す。n より遠いものは要らないので、
 /// 行の帯ごとに上下 n 行だけ広げて並列に掃引する。距離は 255 で頭打ちの u8(n ≤ 17 なので足りる)。
 fn dilate_l1(invalid: &[bool], ny: usize, nx: usize, n: usize) -> Vec<bool> {
-    let mut g = vec![u8::MAX; ny * nx];
+    // 初めの値は使わない(各行の最初のループが全要素を書く)ので、0 埋めの確保にする(直列に埋めない)
+    let mut g = vec![0u8; ny * nx];
     g.par_chunks_mut(nx).enumerate().for_each(|(y, row)| {
         let inv = &invalid[y * nx..y * nx + nx];
         let mut d = u8::MAX;
@@ -595,7 +621,12 @@ pub fn detect_deep_raw(
         return (Vec::new(), None, None);
     }
     let dims = (ny, nx);
-    let work: Vec<f32> = sub.data.par_iter().zip(mask.par_iter()).map(|(&s, &m)| if m { 0.0 } else { s }).collect();
+    // マスクの画素を 0 にした画像。マスクが空なら sub そのもの(写さない。`if m {0} else {s}` は m が全部偽なら s のビットのまま)
+    let work: Cow<[f32]> = if n_valid == npx {
+        Cow::Borrowed(&sub.data)
+    } else {
+        Cow::Owned(sub.data.par_iter().zip(mask.par_iter()).map(|(&s, &m)| if m { 0.0 } else { s }).collect())
+    };
 
     // 1. 星像の幅
     let mut sm1 = gaussian(&work, ny, nx, 1.0);
@@ -605,19 +636,24 @@ pub fn detect_deep_raw(
         ns1 = 0.28 * sigma;
     }
     let (s_psf, n_psf, sharp_max) = psf_sigma(&sm1, &work, mask, ny, nx, ns1, sigma);
-    drop(sm1);
     // Python の `s_psf if s_psf else ...`(0 は偽)
     let s_psf_true = s_psf.filter(|&p| p != 0.0);
     let s = py_min(py_max(s_psf_true.map_or(1.5, |p| 1.25 * p), 1.0), 8.0);
 
     // 2. ぼかす・背景を引く・雑音を測る
-    let mut sm = gaussian(&work, ny, nx, s);
+    // 使い終えた sm1(同じ ny×nx)を書き先に回す。ガウスは全画素を書くので、前の中身は値に効かない(gaussian_into)
+    let mut sm = sm1;
+    gaussian_into(&work, ny, nx, s, &mut sm);
     let bsz = ((8.0 * s).round_ties_even() as usize).max(16);
     subtract_background(&mut sm, mask, false, dims, bsz);
-    // マスクの縁はぼかしでマスクの 0 が混ざって沈むので、ぼかしの幅だけ広げて除く
-    let bad: Vec<bool> =
-        if n_valid == npx { vec![false; npx] } else { dilate_l1(mask, ny, nx, (2.0 * s).ceil() as usize + 1) };
-    let n_good = bad.par_iter().filter(|&&b| !b).count();
+    // マスクの縁はぼかしでマスクの 0 が混ざって沈むので、ぼかしの幅だけ広げて除く。
+    // マスクが空なら mask そのもの(全部偽で、前の版の `vec![false; npx]` と同じ中身)
+    let bad: Cow<[bool]> = if n_valid == npx {
+        Cow::Borrowed(mask)
+    } else {
+        Cow::Owned(dilate_l1(mask, ny, nx, (2.0 * s).ceil() as usize + 1))
+    };
+    let n_good = if n_valid == npx { npx } else { bad.par_iter().filter(|&&b| !b).count() };
     if n_good < 256 {
         return (Vec::new(), None, None);
     }
@@ -628,18 +664,7 @@ pub fn detect_deep_raw(
     let med32 = med as f32;
     sm.par_iter_mut().for_each(|a| *a -= med32);
     let nbox = ((16.0 * s).round_ties_even() as usize).max(32);
-    let mut nmap = vec![ns as f32; npx];
-    if let Some(g) = block_grid(&sm, &bad, false, dims, nbox, BlockFn::MadSigma) {
-        g.expand(&mut nmap, dims, false);
-    }
-    let floor = (0.7 * ns) as f32; // 星で埋まった升で雑音を低く見積もらない
-    nmap.par_iter_mut().for_each(|v| {
-        if v.is_nan() || floor.is_nan() {
-            *v = f32::NAN;
-        } else if floor > *v {
-            *v = floor;
-        }
-    });
+    let nmap = noise_map(&sm, &bad, dims, nbox, ns);
 
     // 3. しきい値と候補
     let area = n_good as f64;
@@ -898,6 +923,41 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn noise_map_matches_reference() {
+        // 2026-10-24 までの雑音の地図(全面を ns で埋めてから升の地図で上書きし、下限をかける)とビット単位で同じ。
+        // 升の地図が作れる大きさ・作れない大きさ(升が 3 つ未満)・マスク入り・ns が NaN のとき
+        fn noise_map_ref(sm: &[f32], bad: &[bool], dims: (usize, usize), nbox: usize, ns: f64) -> Vec<f32> {
+            let mut nmap = vec![ns as f32; dims.0 * dims.1];
+            if let Some(g) = block_grid(sm, bad, false, dims, nbox, BlockFn::MadSigma) {
+                g.expand(&mut nmap, dims, false);
+            }
+            let floor = (0.7 * ns) as f32;
+            nmap.iter_mut().for_each(|v| {
+                if v.is_nan() || floor.is_nan() {
+                    *v = f32::NAN;
+                } else if floor > *v {
+                    *v = floor;
+                }
+            });
+            nmap
+        }
+        let mut n_grid = 0;
+        for (ny, nx, nbox, seed) in [(100usize, 130usize, 32usize, 1u64), (64, 64, 32, 2), (200, 90, 20, 3), (50, 50, 32, 4)] {
+            let sm: Vec<f32> = rand_img(ny, nx, seed, 1000).iter().map(|&v| v * 0.01).collect();
+            for masked in [false, true] {
+                let bad: Vec<bool> = (0..ny * nx).map(|i| masked && (i % 13 == 0 || i < 3 * nx)).collect();
+                for ns in [1.0f64, 3.7, 1e-12, f64::NAN] {
+                    let want = noise_map_ref(&sm, &bad, (ny, nx), nbox, ns);
+                    let got = noise_map(&sm, &bad, (ny, nx), nbox, ns);
+                    assert!(got.iter().zip(&want).all(|(a, b)| a.to_bits() == b.to_bits()), "{ny}x{nx} ns={ns}");
+                }
+                n_grid += block_grid(&sm, &bad, false, (ny, nx), nbox, BlockFn::MadSigma).is_some() as usize;
+            }
+        }
+        assert!((2..8).contains(&n_grid), "升の地図あり {n_grid} 件");
     }
 
     #[test]

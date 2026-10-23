@@ -291,21 +291,43 @@ pub fn median_f32(a: &[f32]) -> f32 {
 
 /// 順序を保ったまま、条件を満たす要素だけを集める(並列)。
 pub(crate) fn filter_ordered<P: Fn(f32) -> bool + Sync>(a: &[f32], keep: P) -> Vec<f32> {
-    let counts: Vec<usize> = a.par_chunks(CHUNK).map(|c| c.iter().filter(|&&x| keep(x)).count()).collect();
-    filter_with_counts(a, keep, &counts)
+    let counts = count_kept(a, &keep);
+    let mut out = Vec::new();
+    filter_into(a, keep, &counts, &mut out);
+    out
 }
 
-/// `filter_ordered` の書き出し(区切り CHUNK ごとの個数を数え済みのとき)。
-fn filter_with_counts<P: Fn(f32) -> bool + Sync>(a: &[f32], keep: P, counts: &[usize]) -> Vec<f32> {
+/// 区切り CHUNK ごとの、条件を満たす要素の数。
+fn count_kept<P: Fn(f32) -> bool + Sync>(a: &[f32], keep: &P) -> Vec<usize> {
+    a.par_chunks(CHUNK).map(|c| c.iter().filter(|&&x| keep(x)).count()).collect()
+}
+
+/// 書き先 out を合計 Σcounts の長さにし、区切りごとの書き場所(長さ counts[i])に分ける。
+/// out の長さが足りていれば切り詰めるだけ(ゼロ埋めも確保もしない)。呼ぶ側が [0, 合計) を全部書く
+/// (区切り i にちょうど counts[i] 個)ので、前の中身は残らない。足りなければ古い配列を先に捨ててから
+/// 新しく確保する(右辺を先に確保すると、一瞬だけ古い配列と新しい配列が両方あり、clip_core では読む側と合わせて 3 本になる)。
+fn split_out<'a>(out: &'a mut Vec<f32>, counts: &[usize]) -> Vec<&'a mut [f32]> {
     let total: usize = counts.iter().sum();
-    let mut out = vec![0.0f32; total];
+    if out.len() >= total {
+        out.truncate(total);
+    } else {
+        drop(std::mem::take(out));
+        *out = vec![0.0f32; total];
+    }
     let mut parts: Vec<&mut [f32]> = Vec::with_capacity(counts.len());
-    let mut rest: &mut [f32] = &mut out;
+    let mut rest: &mut [f32] = out;
     for &c in counts {
         let (h, t) = rest.split_at_mut(c);
         parts.push(h);
         rest = t;
     }
+    parts
+}
+
+/// `filter_ordered` の書き出し(区切り CHUNK ごとの個数を数え済みのとき)。書き先 out を使い回す(split_out)。
+/// counts は同じ述語 keep で数えたもの(keep は純粋な比較なので、書き出しでも区切り i でちょうど counts[i] 個残る)。
+fn filter_into<P: Fn(f32) -> bool + Sync>(a: &[f32], keep: P, counts: &[usize], out: &mut Vec<f32>) {
+    let parts = split_out(out, counts);
     a.par_chunks(CHUNK).zip(parts.into_par_iter()).for_each(|(c, o)| {
         let mut j = 0;
         for &x in c {
@@ -315,7 +337,24 @@ fn filter_with_counts<P: Fn(f32) -> bool + Sync>(a: &[f32], keep: P, counts: &[u
             }
         }
     });
-    out
+}
+
+/// `a[~mask]`(マスクが偽の要素)を順序を保って out へ書く(並列。out の扱いは filter_into と同じ)。
+/// 前処理の最後の σ で使う。a と mask は同じ長さ(違えば短いほうまで)。
+pub(crate) fn unmasked_into(a: &[f32], mask: &[bool], out: &mut Vec<f32>) {
+    let n = a.len().min(mask.len());
+    let (a, mask) = (&a[..n], &mask[..n]);
+    let counts: Vec<usize> = mask.par_chunks(CHUNK).map(|c| c.iter().filter(|&&m| !m).count()).collect();
+    let parts = split_out(out, &counts);
+    a.par_chunks(CHUNK).zip(mask.par_chunks(CHUNK)).zip(parts.into_par_iter()).for_each(|((c, mc), o)| {
+        let mut j = 0;
+        for (&x, &m) in c.iter().zip(mc) {
+            if !m {
+                o[j] = x;
+                j += 1;
+            }
+        }
+    });
 }
 
 /// `sigma_clipped_stats(data, sigma=3.0)` の戻り値(mean, median, std)。値は float32。
@@ -456,43 +495,77 @@ fn median_std_big(cur: &[f32], sum: f32, h1: &[u32]) -> (f32, f32) {
     ((s as f64 / 2.0) as f32, std)
 }
 
+/// 中央値・ヒストグラムを読む回数を減らした版(pass_sum_hist + median_std_big)を使う長さ。
+/// median_finite_f32 がヒストグラムで選ぶ長さ(kth_pair の select_radix)と同じ範囲。
+#[inline]
+fn is_big(n: usize) -> bool {
+    (RADIX_MIN..=u32::MAX as usize).contains(&n)
+}
+
 fn clip_core(data: &[f32], full: bool) -> ClipStats {
-    let all_finite = data.par_iter().all(|x| x.is_finite());
-    let mut owned: Option<Vec<f32>> = if all_finite { None } else { Some(filter_ordered(data, |x| x.is_finite())) };
-    // 直近の境界を計算した配列の std(最後に変化が無かったときに使い回す)
-    let mut last_std: Option<f32> = None;
+    // 残す値の配列は 2 本を交互に使う(今読む側と書く側)。残る個数は回ごとに減るか同じなので、3 回目からは
+    // 2 回前の配列を切り詰めて書き先にでき、新しい確保と初回の書き込みが要らない(split_out)。値・並び・個数は
+    // 書き先の場所に依らない(同じ述語 keep と同じ counts で決まる)。書き出しの瞬間に新旧 2 本あるのは前と同じなので、
+    // メモリの最大は変わらない(違うのは、使い終えた 1 本を関数を出るまで持つことだけ)。
+    let mut bufs: [Vec<f32>; 2] = [Vec::new(), Vec::new()];
+    // 今読む配列: None = data、Some(i) = bufs[i]
+    let mut cur_i: Option<usize> = None;
+    if !data.par_iter().all(|x| x.is_finite()) {
+        let fin = |x: f32| x.is_finite();
+        let counts = count_kept(data, &fin);
+        filter_into(data, fin, &counts, &mut bufs[0]);
+        cur_i = Some(0);
+    }
+    // 直近に境界を計算した配列の std と、大きい配列ならその回の (中心, 和)。最後に変化が無かったときに使い回す
+    let mut last: Option<(f32, Option<(f32, f32)>)> = None;
     for _ in 0..5 {
-        let cur: &[f32] = owned.as_deref().unwrap_or(data);
+        // 書く側は今読む側でないほう(data を読んでいるときは bufs[0])
+        let w = cur_i.map_or(0, |i| 1 - i);
+        let (b0, b1) = bufs.split_at_mut(1);
+        let (rd, wr) = if w == 0 { (&b1[0], &mut b0[0]) } else { (&b0[0], &mut b1[0]) };
+        let cur: &[f32] = if cur_i.is_some() { rd } else { data };
         let size = cur.len();
         // 大きい配列は読む回数を減らした版(値は同じ)。小さい配列はそのまま
-        let (cen, sd) = if (RADIX_MIN..=u32::MAX as usize).contains(&size) {
+        let (cen, sd, sum) = if is_big(size) {
             let (sum, h1) = pass_sum_hist(cur);
-            median_std_big(cur, sum, &h1)
+            let (c, s) = median_std_big(cur, sum, &h1);
+            (c, s, Some(sum))
         } else {
-            (median_finite_f32(cur), std_f32(cur))
+            (median_finite_f32(cur), std_f32(cur), None)
         };
         let lo = cen - sd * 3.0f32;
         let hi = cen + sd * 3.0f32;
         let keep = |x: f32| x >= lo && x <= hi;
-        let counts: Vec<usize> = cur.par_chunks(CHUNK).map(|c| c.iter().filter(|&&x| keep(x)).count()).collect();
+        let counts = count_kept(cur, &keep);
         let kept: usize = counts.iter().sum();
         if kept == size {
-            last_std = Some(sd);
+            last = Some((sd, sum.map(|s| (cen, s))));
             break;
         }
-        let next = filter_with_counts(cur, keep, &counts);
-        owned = Some(next);
-        last_std = None;
+        filter_into(cur, keep, &counts, wr);
+        cur_i = Some(w);
+        last = None;
     }
-    let cur: &[f32] = owned.as_deref().unwrap_or(data);
-    let std = match last_std {
-        Some(s) => s,
-        None => std_f32(cur),
+    let cur: &[f32] = match cur_i {
+        Some(i) => &bufs[i],
+        None => data,
     };
-    if full {
-        ClipStats { mean: mean_f32(cur), median: median_finite_f32(cur), std }
-    } else {
-        ClipStats { mean: f32::NAN, median: f32::NAN, std }
+    let n = cur.len();
+    match last {
+        // 収束して抜けた大きい配列: その回の値がそのまま答え(cur はその回と同じ配列)。
+        // median_std_big の中心は median_finite_f32 と、pass_sum_hist の和は sum_f32 とビット一致する
+        // (fused_median_std_matches)。mean_f32 は (sum_f32 as f64 / n as f64) as f32 なので同じ式で作る
+        Some((sd, Some((cen, sum)))) if full => ClipStats { mean: (sum as f64 / n as f64) as f32, median: cen, std: sd },
+        Some((sd, _)) if full => ClipStats { mean: mean_f32(cur), median: median_finite_f32(cur), std: sd },
+        Some((sd, _)) => ClipStats { mean: f32::NAN, median: f32::NAN, std: sd },
+        // 5 回で収束しなかった大きい配列: 最後の配列の中央値・std・平均を 2 回の読みで出す(値は上と同じ理由で同じ)
+        None if full && is_big(n) => {
+            let (sum, h1) = pass_sum_hist(cur);
+            let (med, sd) = median_std_big(cur, sum, &h1);
+            ClipStats { mean: (sum as f64 / n as f64) as f32, median: med, std: sd }
+        }
+        None if full => ClipStats { mean: mean_f32(cur), median: median_finite_f32(cur), std: std_f32(cur) },
+        None => ClipStats { mean: f32::NAN, median: f32::NAN, std: std_f32(cur) },
     }
 }
 
@@ -528,6 +601,193 @@ mod tests {
             let (med, sd) = median_std_big(&a, sum, &h1);
             assert_eq!(med.to_bits(), median_finite_f32(&a).to_bits(), "n={n}");
             assert_eq!(sd.to_bits(), std_f32(&a).to_bits(), "n={n}");
+        }
+    }
+
+    /// 決まった擬似乱数(xorshift)の [0, 1)
+    fn rng(seed: u64) -> impl FnMut() -> f64 {
+        let mut s = seed | 1;
+        move || {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            (s >> 11) as f64 / (1u64 << 53) as f64
+        }
+    }
+
+    /// 2026-10-24 までの clip_core(回ごとに新しい配列を確保し、最後の平均・中央値・std を別々に計算し直す版)。
+    /// 照合の基準。戻り値の 2 つ目は回った回数と、収束して抜けたか。
+    fn clip_core_ref(data: &[f32], full: bool) -> (ClipStats, (usize, bool)) {
+        fn filter_ref<P: Fn(f32) -> bool + Sync>(a: &[f32], keep: P, counts: &[usize]) -> Vec<f32> {
+            let total: usize = counts.iter().sum();
+            let mut out = vec![0.0f32; total];
+            let mut parts: Vec<&mut [f32]> = Vec::with_capacity(counts.len());
+            let mut rest: &mut [f32] = &mut out;
+            for &c in counts {
+                let (h, t) = rest.split_at_mut(c);
+                parts.push(h);
+                rest = t;
+            }
+            a.par_chunks(CHUNK).zip(parts.into_par_iter()).for_each(|(c, o)| {
+                let mut j = 0;
+                for &x in c {
+                    if keep(x) {
+                        o[j] = x;
+                        j += 1;
+                    }
+                }
+            });
+            out
+        }
+        let all_finite = data.par_iter().all(|x| x.is_finite());
+        let mut owned: Option<Vec<f32>> = if all_finite {
+            None
+        } else {
+            let counts: Vec<usize> =
+                data.par_chunks(CHUNK).map(|c| c.iter().filter(|&&x| x.is_finite()).count()).collect();
+            Some(filter_ref(data, |x| x.is_finite(), &counts))
+        };
+        let mut last_std: Option<f32> = None;
+        let mut iters = (0, false);
+        for _ in 0..5 {
+            iters.0 += 1;
+            let cur: &[f32] = owned.as_deref().unwrap_or(data);
+            let size = cur.len();
+            let (cen, sd) = if (RADIX_MIN..=u32::MAX as usize).contains(&size) {
+                let (sum, h1) = pass_sum_hist(cur);
+                median_std_big(cur, sum, &h1)
+            } else {
+                (median_finite_f32(cur), std_f32(cur))
+            };
+            let lo = cen - sd * 3.0f32;
+            let hi = cen + sd * 3.0f32;
+            let keep = |x: f32| x >= lo && x <= hi;
+            let counts: Vec<usize> = cur.par_chunks(CHUNK).map(|c| c.iter().filter(|&&x| keep(x)).count()).collect();
+            let kept: usize = counts.iter().sum();
+            if kept == size {
+                last_std = Some(sd);
+                iters.1 = true;
+                break;
+            }
+            let next = filter_ref(cur, keep, &counts);
+            owned = Some(next);
+            last_std = None;
+        }
+        let cur: &[f32] = owned.as_deref().unwrap_or(data);
+        let std = match last_std {
+            Some(s) => s,
+            None => std_f32(cur),
+        };
+        let st = if full {
+            ClipStats { mean: mean_f32(cur), median: median_finite_f32(cur), std }
+        } else {
+            ClipStats { mean: f32::NAN, median: f32::NAN, std }
+        };
+        (st, iters)
+    }
+
+    #[test]
+    fn clip_reuse_matches_reference() {
+        // 配列を使い回す clip_core と、最後の値を使い回す枝が、前の版とビット単位で同じ。
+        // 5 回で収束しない大小の配列・途中で収束する配列・非有限値混じり・同じ値ばかり・区切りの前後の長さ
+        let mut cases: Vec<Vec<f32>> = Vec::new();
+        for &n in &[0usize, 1, 2, 7, 100, 8191, 8192, 8193, 32767, 32768, 32769, 65535, 65536, 65537, 200_001] {
+            let mut r = rng(n as u64 + 3);
+            // ほぼ正規分布(4 つの一様の和)。3σ で切ると毎回少しずつ外れて、5 回では収束しないことが多い
+            let g: Vec<f32> = (0..n).map(|_| ((r() + r() + r() + r() - 2.0) * 10.0 + 100.0) as f32).collect();
+            cases.push(g.clone());
+            // 外れ値入り(7 個に 1 個)
+            cases.push(g.iter().enumerate().map(|(i, &v)| if i % 7 == 0 { v + (i % 5000) as f32 } else { v }).collect());
+            // 非有限値入り
+            cases.push(
+                g.iter()
+                    .enumerate()
+                    .map(|(i, &v)| match i % 97 {
+                        0 => f32::NAN,
+                        13 => f32::INFINITY,
+                        41 => f32::NEG_INFINITY,
+                        _ => v,
+                    })
+                    .collect(),
+            );
+            // 一様分布(数回で収束する)
+            cases.push((0..n).map(|_| r() as f32).collect());
+        }
+        let mut r = rng(99);
+        cases.push((0..1_000_000).map(|i| if i % 7 == 0 { 5000.0 } else { (r() * 50.0) as f32 }).collect());
+        cases.push((0..2_000_000).map(|_| ((r() + r() + r() + r() - 2.0) * 3.0) as f32).collect());
+        cases.push(vec![3.5f32; 100_000]);
+        cases.push(vec![3.5f32; 100]);
+        cases.push(vec![f32::NAN; 70_000]);
+        cases.push(vec![f32::INFINITY; 50]);
+        cases.push((0..80_000).map(|i| if i % 2 == 0 { 1.0 } else { 2.0 }).collect());
+        let (mut n_unconv_big, mut n_conv_big) = (0, 0);
+        for a in &cases {
+            for full in [true, false] {
+                let (want, (iters, conv)) = clip_core_ref(a, full);
+                let got = clip_core(a, full);
+                let n = a.len();
+                assert_eq!(got.mean.to_bits(), want.mean.to_bits(), "mean n={n} full={full}");
+                assert_eq!(got.median.to_bits(), want.median.to_bits(), "median n={n} full={full}");
+                assert_eq!(got.std.to_bits(), want.std.to_bits(), "std n={n} full={full}");
+                if n >= RADIX_MIN && full {
+                    if conv {
+                        n_conv_big += 1;
+                    } else {
+                        assert_eq!(iters, 5);
+                        n_unconv_big += 1;
+                    }
+                }
+            }
+        }
+        // 両方の枝(収束して抜けた・5 回回り切った)を大きい配列で通したこと
+        assert!(n_unconv_big >= 3 && n_conv_big >= 3, "収束しない {n_unconv_big} / 収束 {n_conv_big}");
+    }
+
+    #[test]
+    fn filter_into_reuses_dirty_buffer() {
+        // 書き先に前の値が残っていても(長い・短い・空)、新しく作ったものと同じ
+        let mut r = rng(5);
+        let a: Vec<f32> = (0..300_000).map(|_| r() as f32).collect();
+        let keep = |x: f32| x > 0.3;
+        let want = filter_ordered(&a, keep);
+        for init in [Vec::new(), vec![f32::NAN; 10], vec![7.0f32; 299_999], vec![-1.0f32; 400_000]] {
+            let mut out = init;
+            let counts = count_kept(&a, &keep);
+            filter_into(&a, keep, &counts, &mut out);
+            assert_eq!(out.len(), want.len());
+            assert!(out.iter().zip(&want).all(|(x, y)| x.to_bits() == y.to_bits()));
+        }
+    }
+
+    #[test]
+    fn unmasked_matches_nan_marking() {
+        // 前処理の最後の σ: 前の版はマスクの画素を NaN にしてから NaN でないものを集めていた。
+        // マスクでない位置に NaN が無ければ配列が同じ、あっても σ クリップ(最初に非有限値を順序を保って除く)は同じ
+        let mut r = rng(8);
+        for (n, with_nan) in [(1000usize, false), (300_000, false), (300_000, true), (65_536, true)] {
+            let mut a: Vec<f32> = (0..n).map(|_| ((r() + r() + r() - 1.5) * 20.0) as f32).collect();
+            if with_nan {
+                for (i, v) in a.iter_mut().enumerate() {
+                    if i % 101 == 0 {
+                        *v = f32::NAN;
+                    } else if i % 103 == 0 {
+                        *v = f32::INFINITY;
+                    }
+                }
+            }
+            let mask: Vec<bool> = (0..n).map(|i| (i / 3000) % 4 == 1 || i % 17 == 0).collect();
+            let pairs: Vec<f32> = a.iter().zip(&mask).map(|(&s, &m)| if m { f32::NAN } else { s }).collect();
+            let old = filter_ordered(&pairs, |v| !v.is_nan());
+            for init in [Vec::new(), vec![9.0f32; n]] {
+                let mut new = init;
+                unmasked_into(&a, &mask, &mut new);
+                if !with_nan {
+                    assert_eq!(new.len(), old.len());
+                    assert!(new.iter().zip(&old).all(|(x, y)| x.to_bits() == y.to_bits()));
+                }
+                assert_eq!(sigma_clipped_std(&new).to_bits(), sigma_clipped_std(&old).to_bits(), "n={n}");
+            }
         }
     }
 
