@@ -147,5 +147,8 @@ THIRD-PARTY-NOTICES.md は exe に埋め込んで、［使い方］タブから�
 ## 約束
 
 - 自分で書く `unsafe` は `zahyou-index` の mmap だけ。ほかの crate は `#![forbid(unsafe_code)]`。
+  mmap するのは Windows だけ(使っている間の書き換えを、共有モードで OS が止めてくれるのは Windows だけなので。同じプロセスの
+  ダウンロードも止められる)。
+  ほかの OS では索引の表を開かず、`zahyou-index` も `forbid` になる。
 - 壊れた入力で panic しない(試験で切り詰めたファイル・壊したヘッダー・壊した索引を読ませる)。
 - コメントは日本語。外部のクレートは許容型のライセンスだけ。C のライブラリへの FFI は入れない。

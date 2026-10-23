@@ -554,6 +554,11 @@ mod tests {
     /// 星図データ(index-4113〜4117)と rs/testdata/solver_synth.json の corrupt の星野が無ければ SKIP。
     #[test]
     fn index_open_for_writing_is_not_called_broken() {
+        if !cfg!(windows) {
+            // 共有モードで書き込み中の索引を断るのも、索引の表を開くのも Windows だけ(zahyou-index の map_readonly)
+            eprintln!("SKIP: index_open_for_writing_is_not_called_broken: Windows 以外では索引の表を開かない");
+            return;
+        }
         let idx = std::env::var_os("ZAHYOU_INDEX_DIR")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| std::path::PathBuf::from(r"C:\AstrometryData"));
@@ -616,18 +621,14 @@ mod tests {
             {
                 let ls = lines.lock().unwrap();
                 assert!(!ls.iter().any(|l| l.contains("壊れ")), "{sub}: 「壊れている」と言った: {ls:?}");
-                if cfg!(windows) {
-                    assert!(ls.iter().any(|l| l.contains("今は開けない") && l.contains("index-4116")), "{sub}: 知らせていない: {ls:?}");
-                }
+                assert!(ls.iter().any(|l| l.contains("今は開けない") && l.contains("index-4116")), "{sub}: 知らせていない: {ls:?}");
             }
             assert!(!store.is_broken(cat.files.iter().position(|x| x.name == "index-4116").expect("4116")));
-            if cfg!(windows) {
-                if sub == "five" {
-                    let name = got.expect("ほかの索引で解けるはず");
-                    assert_ne!(name, "index-4116");
-                } else {
-                    assert_eq!(got, None, "開けない索引しか無いので解けないはず");
-                }
+            if sub == "five" {
+                let name = got.expect("ほかの索引で解けるはず");
+                assert_ne!(name, "index-4116");
+            } else {
+                assert_eq!(got, None, "開けない索引しか無いので解けないはず");
             }
             // 閉じたあとの次の試行(同じ Store)では開き直して使う
             drop(writer);

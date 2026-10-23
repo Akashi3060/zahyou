@@ -97,9 +97,14 @@ pub fn sha256_file(p: &Path) -> Option<String> {
 static CATALOG: OnceLock<Option<Arc<Catalog>>> = OnceLock::new();
 
 /// 星図データの目録(1 つの試験の実行ファイルの中で使い回す)。無ければ None。
+/// Windows 以外でも None(zahyou-index が索引の表を開くのは Windows だけなので、星図データを使う試験をしない)。
 pub fn catalog() -> Option<Arc<Catalog>> {
     CATALOG
         .get_or_init(|| {
+            if !cfg!(windows) {
+                eprintln!("SKIP: Windows 以外では索引の表を開かないので、星図データを使う試験はしない");
+                return None;
+            }
             let d = index_dir();
             if !d.is_dir() {
                 return None;
@@ -125,8 +130,11 @@ pub fn restricted_catalog(ids: &[u32]) -> Catalog {
     c
 }
 
-/// 索引のファイル 1 本のパス(無ければ None)。
+/// 索引のファイル 1 本のパス(無ければ None。Windows 以外でも None。[`catalog`] と同じ理由)。
 pub fn index_path(tag: &str) -> Option<PathBuf> {
+    if !cfg!(windows) {
+        return None;
+    }
     let p = index_dir().join(format!("index-{tag}.fits"));
     p.is_file().then_some(p)
 }

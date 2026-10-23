@@ -11,8 +11,22 @@ pub fn index_dir() -> PathBuf {
     std::env::var_os("ZAHYOU_INDEX_DIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\AstrometryData"))
 }
 
-/// 索引 1 本のパス(無ければ None)。
+/// 索引の表を開けない OS か。zahyou-index が mmap するのは Windows だけなので、ほかの OS では星図データを使う試験をしない
+/// (`need` と `index_path` が SKIP の側へ倒す。理由は 1 度だけ出す)。
+pub fn tables_unavailable() -> bool {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    if cfg!(windows) {
+        return false;
+    }
+    ONCE.call_once(|| eprintln!("SKIP: Windows 以外では索引の表を開かないので、星図データを使う試験はしない"));
+    true
+}
+
+/// 索引 1 本のパス(無ければ None。Windows 以外でも None)。
 pub fn index_path(tag: &str) -> Option<PathBuf> {
+    if tables_unavailable() {
+        return None;
+    }
     let p = index_dir().join(format!("index-{tag}.fits"));
     p.is_file().then_some(p)
 }
@@ -69,8 +83,12 @@ pub fn vec3(v: &Value) -> [f64; 3] {
     [a[0], a[1], a[2]]
 }
 
-/// 星図データと基準値の両方があるときだけ値を返す。どちらかが無ければ SKIP と出して None。
+/// 星図データと基準値の両方があるときだけ値を返す。どちらかが無ければ(Windows 以外でも)SKIP と出して None。
 pub fn need(name: &str, json: &str, tags: &[&str]) -> Option<Value> {
+    if tables_unavailable() {
+        skip(name, "Windows 以外では索引の表を開かない");
+        return None;
+    }
     if !index_dir().is_dir() {
         skip(name, &format!("星図データが無い({})", index_dir().display()));
         return None;

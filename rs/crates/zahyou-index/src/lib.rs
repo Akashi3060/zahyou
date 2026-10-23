@@ -9,14 +9,17 @@
 //! - 表の数値はリトルエンディアン(ENDIAN = '04:03:02:01')。ほかの値のファイルは読まない。
 //!   4100 系の等級の表だけは標準の FITS どおりビッグエンディアン。
 //! - データはファイル全体の mmap(読み取り専用)から型付きのビュー(bytemuck の検査つきキャスト)で取り、
-//!   整数のまま探す。実数へ戻すのは要る分だけ(実数 = minval + 整数 / scale)。
+//!   整数のまま探す。実数へ戻すのは要る分だけ(実数 = minval + 整数 / scale)。mmap するのは Windows だけ
+//!   (ほかの OS では表を開かない。理由は `file.rs` の `map_readonly`)。
 //! - kd-tree はファイルに入っている木をそのまま使う(ヒープ順の完全二分木。作り直さない)。
 //! - quad i のコード = コード木のデータ i、quad の星番号 = 星の木のデータの行番号。
 //! - 5200 系のタイル番号は xy 方式の HEALPix(NN = 基本番号·nside² + x·nside + y)。星はタイルの中だけにある。
 //!
-//! unsafe は mmap の 1 か所だけ(`file.rs` の `map_readonly`。SAFETY の説明はそこ)。
+//! unsafe は mmap の 1 か所だけ(`file.rs` の `map_readonly`。SAFETY の説明はそこ)。Windows だけで使うので、
+//! ほかの OS ではこの crate に unsafe は無い(forbid)。
 
-#![deny(unsafe_code)]
+#![cfg_attr(windows, deny(unsafe_code))]
+#![cfg_attr(not(windows), forbid(unsafe_code))]
 
 mod catalog;
 mod code;
