@@ -5,6 +5,9 @@
 //! 残り(下位を 0 にしたもの)が分割位置。左の部分木は x[dim] ≤ 位置、右は x[dim] ≥ 位置(両側とも等号あり)。
 //! 実数 = minval + 整数 / scale(index-format.md 6 節)。
 
+use std::cell::Cell;
+use std::ops::ControlFlow;
+
 use rayon::prelude::*;
 
 use crate::layout::{KdType, TreeLayout};
@@ -12,6 +15,13 @@ use crate::pyfmt::float_repr;
 
 /// 開くときの表の検査を並列にする区切り(u32 で 64 KiB = mmap のページ 16 枚)。
 const CHECK_CHUNK: usize = 16384;
+
+/// 葉の前ふるい(実数に戻す前に、木の単位で距離を見て遠いものを捨てる)を使ってよい木の範囲の表の値。
+/// 前ふるいの余裕の根拠(丸め誤差の上限)はこの範囲を前提にしている(code_far・star_far の説明)。
+/// 本物の索引は minval ≈ −1〜0・scale ≈ 2^31〜2^32(u32)か 2^15〜2^16(u16)で、どれもこの中に入る。
+const PREFILTER_MINVAL_MAX: f64 = 4.0;
+const PREFILTER_SCALE_MIN: f64 = 64.0;
+const PREFILTER_SCALE_MAX: f64 = 68_719_476_736.0; // 2^36
 
 /// 木の整数の型(u16 か u32)。
 pub(crate) trait KdInt: bytemuck::Pod + Send + Sync {
@@ -83,6 +93,14 @@ pub(crate) struct TreeMeta {
     pub lr: (usize, usize),
     pub split: (usize, usize),
     pub data: (usize, usize),
+    /// 葉の前ふるいを使ってよいか(範囲の表が max|minval| ≤ 4、64 ≤ scale ≤ 2^36。[`prefilter_allowed`])。
+    /// 使わない木では、今までどおり葉の全部を実数に戻して判定する(答えはどちらでも同じ)
+    pub prefilter_ok: bool,
+}
+
+/// 範囲の表が、葉の前ふるいの余裕の根拠の前提(code_far・star_far の説明)に入るか。
+pub(crate) fn prefilter_allowed(minval: &[f64], scale: f64) -> bool {
+    minval.iter().all(|m| m.abs() <= PREFILTER_MINVAL_MAX) && (PREFILTER_SCALE_MIN..=PREFILTER_SCALE_MAX).contains(&scale)
 }
 
 /// mmap の上の木 1 本(ビュー)。
@@ -154,6 +172,7 @@ impl TreeMeta {
             lr: span(lay.lr, 4 * nleaves as u64)?,
             split: span(lay.split, ilen * ninterior as u64)?,
             data: span(lay.data, dlen * lay.ndata as u64 * d as u64)?,
+            prefilter_ok: prefilter_allowed(&minval[..d], scale),
         };
         let t = meta.view(bytes)?;
 
@@ -220,6 +239,7 @@ pub(crate) struct Frame<const D: usize> {
 }
 
 /// 木の単位の問い合わせ qt から距離 √r2 以内に届く葉を、左から順に leaf(データの始め, 終わり) で知らせる。
+/// leaf が Break を返したら、そこでたどるのをやめて Break を返す。
 ///
 /// 節点の箱は根の全域から split の位置で狭めていき、箱までの最短距離が √r2 を超えた枝は捨てる
 /// (Python 版 ball_candidates と同じ規則。1 問ずつ深さ優先でたどる)。
@@ -231,12 +251,12 @@ pub(crate) fn ball_visit<S: KdInt, const D: usize>(
     qt: &[f64; D],
     r2: f64,
     stack: &mut Vec<Frame<D>>,
-    mut leaf: impl FnMut(usize, usize),
-) {
+    mut leaf: impl FnMut(usize, usize) -> ControlFlow<()>,
+) -> ControlFlow<()> {
     // f64::max は NaN を無視するので、NaN の問い合わせはどの枝も刈られず木を全部たどってしまう。
     // 答えは必ず空なので(Python 版も NaN で枝が刈られて空)、ここで返す
     if r2.is_nan() || qt.iter().any(|v| v.is_nan()) {
-        return;
+        return ControlFlow::Continue(());
     }
     let mut root = Frame { node: 0, lo: [0.0; D], hi: [meta.full; D], g2: [0.0; D] };
     let mut gs = 0.0;
@@ -246,7 +266,7 @@ pub(crate) fn ball_visit<S: KdInt, const D: usize>(
         gs += root.g2[k];
     }
     if gs > r2 {
-        return;
+        return ControlFlow::Continue(());
     }
     stack.clear();
     stack.push(root);
@@ -265,7 +285,7 @@ pub(crate) fn ball_visit<S: KdInt, const D: usize>(
             };
             let end = last as usize + 1;
             if start <= end {
-                leaf(start, end);
+                leaf(start, end)?;
             }
             continue;
         }
@@ -302,6 +322,7 @@ pub(crate) fn ball_visit<S: KdInt, const D: usize>(
             stack.push(c);
         }
     }
+    ControlFlow::Continue(())
 }
 
 /// コード木: 問い合わせ q(実数)から radius 以内のデータの番号を out に足す(昇順)。
@@ -325,8 +346,8 @@ pub(crate) fn ball_query<S: KdInt, T: KdInt, const D: usize>(
     }
     let rr = radius * radius;
     let start_len = out.len();
-    ball_visit(meta, lr, split, &qt, r_t * r_t, stack, |s, e| {
-        let Some(rows) = data.get(s * D..e * D) else { return };
+    let _ = ball_visit(meta, lr, split, &qt, r_t * r_t, stack, |s, e| {
+        let Some(rows) = data.get(s * D..e * D) else { return ControlFlow::Continue(()) };
         for (i, row) in rows.chunks_exact(D).enumerate() {
             let mut d2 = 0.0;
             for k in 0..D {
@@ -337,6 +358,7 @@ pub(crate) fn ball_query<S: KdInt, T: KdInt, const D: usize>(
                 out.push((s + i) as u32);
             }
         }
+        ControlFlow::Continue(())
     });
     // 葉は左から順なので並んでいるはずだが、念のため
     let mine = &mut out[start_len..];
@@ -345,40 +367,124 @@ pub(crate) fn ball_query<S: KdInt, T: KdInt, const D: usize>(
     }
 }
 
-/// 星の木: 単位ベクトル c(正規化済み)から弦 chord 以内の星の番号を out に足す。
+thread_local! {
+    /// 星の円錐のたどりのスタック(作業スレッドごとに使い回す。円錐は解法の足切りで数千万回引くので、
+    /// 毎回ヒープに取って捨てない)。使う間は取り出して空を置き、終わったら戻す(取り合いも panic も無い)。
+    static CONE_STACK: Cell<Vec<Frame<3>>> = const { Cell::new(Vec::new()) };
+}
+
+/// 星の前ふるい: 実数の判定(正規化して Σ(v − c)² ≤ chord²)で必ず外れる星か。true なら判定せずに捨ててよい。
 ///
-/// 判定は Python 版と同じ(星を実数に戻して長さ 1 に正規化し、Σ(s − c)² ≤ chord²)。
-pub(crate) fn cone_query<S: KdInt, T: KdInt>(
+/// 捨てるのは、木の単位で問い合わせから r_t より遠く(dt2 > r2)、かつ木の単位のノルム² n2 = Σ(row − o)²
+/// (o = 原点の木の単位 = −minval·scale。n2 = scale²·|x|²、x = 実数に戻した星)が |n2 − scale²| ≤ tol = 2·scale の星だけ。
+/// 後者は ||x|² − 1| ≤ 2/scale なので、正規化で星が動く量は scale·||x| − 1| = scale·||x|² − 1| / (|x| + 1) ≤ 2 目盛り以下。
+/// 実数の判定で入る星は、木の単位で chord·scale + 2(正規化で動く分)+ 丸め以内にある。r_t = √((chord·scale)² + 0.75) + 4
+/// には 4 目盛りの余裕があり、丸めは prefilter_allowed の範囲(|minval| ≤ 4、64 ≤ scale ≤ 2^36、整数 < 2^32、
+/// |x| ≥ √(1 − 2/64) なので正規化も安定)では 1e-3 目盛りに届かない(行・qt・o の計算の誤差は
+/// 2^-53 × (2^32 + 2·4·2^36) 程度で 1e-4 目盛り、chord·scale ≤ 2^37 の相対誤差 1e-15 も 1e-4 目盛り)。
+/// だから実数の判定で入る星を捨てることは無く、答えは前ふるいなしと同じ。単位ベクトルでない星(壊れた索引)は
+/// ノルムの条件で捨てずに、今までどおり実数の判定にかける(Python 版も正規化してから判定する)。
+#[inline(always)]
+#[allow(clippy::neg_cmp_op_on_partial_ord)] // NaN は「遠くない」(捨てない)側へ倒す
+fn star_far<T: KdInt>(row: &[T], qt: &[f64; 3], r2: f64, o: &[f64; 3], s2: f64, tol: f64) -> bool {
+    let mut dt2 = 0.0;
+    for k in 0..3 {
+        let t = row[k].to_f64() - qt[k];
+        dt2 += t * t;
+    }
+    if !(dt2 > r2) {
+        return false;
+    }
+    let mut n2 = 0.0;
+    for k in 0..3 {
+        let t = row[k].to_f64() - o[k];
+        n2 += t * t;
+    }
+    (n2 - s2).abs() <= tol
+}
+
+/// 星の円錐の問い合わせ 1 回ぶんの値(葉の前に 1 回だけ計算する。試験も同じ値を使う)。
+struct ConeQuery {
+    /// 正規化済みの中心(実数)
+    c: [f64; 3],
+    /// 中心の木の単位と、枝刈りの半径²
+    qt: [f64; 3],
+    r2: f64,
+    /// 弦の長さ²(実数の判定)
+    cc: f64,
+    /// 前ふるいの値: 原点の木の単位 −minval·scale、scale²、ノルム²の許容 2·scale
+    o: [f64; 3],
+    s2: f64,
+    tol: f64,
+}
+
+impl ConeQuery {
+    #[inline(always)]
+    fn new(meta: &TreeMeta, c: &[f64; 3], chord: f64) -> ConeQuery {
+        let mut qt = [0.0; 3];
+        for k in 0..3 {
+            qt[k] = meta.to_tree(k, c[k]);
+        }
+        // 量子化(3 × 0.25 目盛り²)と、正規化で動く分(|xyz| − 1 ≤ 4e-10 ≒ 0.9 目盛り)を広げる
+        let r_t = ((chord * meta.scale).powi(2) + 0.75).sqrt() + 4.0;
+        ConeQuery {
+            c: *c,
+            qt,
+            r2: r_t * r_t,
+            cc: chord * chord,
+            o: [-meta.minval[0] * meta.scale, -meta.minval[1] * meta.scale, -meta.minval[2] * meta.scale],
+            s2: meta.scale * meta.scale,
+            tol: 2.0 * meta.scale,
+        }
+    }
+
+    /// 実数の判定(Python 版と同じ式・同じ順): 星を実数に戻して正規化し、Σ(v − c)² ≤ chord² なら単位ベクトル。
+    #[inline(always)]
+    fn star_in<T: KdInt>(&self, meta: &TreeMeta, row: &[T]) -> Option<[f64; 3]> {
+        let v = star_unit(meta, row);
+        let mut d2 = 0.0;
+        for (vk, ck) in v.iter().zip(&self.c) {
+            let t = vk - ck;
+            d2 += t * t;
+        }
+        (d2 <= self.cc).then_some(v)
+    }
+}
+
+/// 星の木: 単位ベクトル c(正規化済み)から弦 chord 以内の星を、たどる順(葉の左から = 番号の昇順)に
+/// f(番号, 正規化した単位ベクトル) で知らせる。f が Break を返したらそこでやめて Break を返す。
+///
+/// 判定は Python 版と同じ(星を実数に戻して長さ 1 に正規化し、Σ(s − c)² ≤ chord²)。f に渡す単位ベクトルは
+/// その判定に使った値そのもの(= star_unit。IndexData::star_xyz と同じ値)。prefilter は葉の前ふるい([`star_far`])を
+/// 使うか(本番は meta.prefilter_ok。試験は false でも同じ答えになることを確かめる)。
+#[allow(clippy::too_many_arguments)] // 木の表(mmap のビュー)をそのまま渡すため
+pub(crate) fn cone_visit<S: KdInt, T: KdInt>(
     meta: &TreeMeta,
     lr: &[u32],
     split: &[S],
     data: &[T],
     c: &[f64; 3],
     chord: f64,
-    out: &mut Vec<u32>,
-) {
-    let mut qt = [0.0; 3];
-    for k in 0..3 {
-        qt[k] = meta.to_tree(k, c[k]);
-    }
-    // 量子化(3 × 0.25 目盛り²)と、正規化で動く分(|xyz| − 1 ≤ 4e-10 ≒ 0.9 目盛り)を広げる
-    let r_t = ((chord * meta.scale).powi(2) + 0.75).sqrt() + 4.0;
-    let cc = chord * chord;
-    let mut stack = Vec::with_capacity(2 * meta.levels + 2);
-    ball_visit(meta, lr, split, &qt, r_t * r_t, &mut stack, |s, e| {
-        let Some(rows) = data.get(s * 3..e * 3) else { return };
+    prefilter: bool,
+    mut f: impl FnMut(u32, [f64; 3]) -> ControlFlow<()>,
+) -> ControlFlow<()> {
+    let q = ConeQuery::new(meta, c, chord);
+    let mut stack = CONE_STACK.try_with(Cell::take).unwrap_or_default();
+    let r = ball_visit(meta, lr, split, &q.qt, q.r2, &mut stack, |s, e| {
+        let Some(rows) = data.get(s * 3..e * 3) else { return ControlFlow::Continue(()) };
         for (i, row) in rows.chunks_exact(3).enumerate() {
-            let v = star_unit(meta, row);
-            let mut d2 = 0.0;
-            for k in 0..3 {
-                let t = v[k] - c[k];
-                d2 += t * t;
+            if prefilter && star_far(row, &q.qt, q.r2, &q.o, q.s2, q.tol) {
+                continue;
             }
-            if d2 <= cc {
-                out.push((s + i) as u32);
+            if let Some(v) = q.star_in(meta, row) {
+                f((s + i) as u32, v)?;
             }
         }
+        ControlFlow::Continue(())
     });
+    // スタックを戻す(スレッドの終わりで thread_local が無ければ捨てる)
+    let _ = CONE_STACK.try_with(|cell| cell.set(stack));
+    r
 }
 
 /// 星の整数 3 つ → 長さ 1 に正規化した単位ベクトル(Python 版 star_xyz と同じ演算の順)。
@@ -393,3 +499,121 @@ pub(crate) fn star_unit<T: KdInt>(meta: &TreeMeta, row: &[T]) -> [f64; 3] {
     [v[0] / n, v[1] / n, v[2] / n]
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 試験用の乱数(xorshift。種を決めれば毎回同じ)。
+    pub(crate) struct Rng(pub u64);
+
+    impl Rng {
+        pub fn next(&mut self) -> f64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 >> 11) as f64 / (1u64 << 53) as f64
+        }
+
+        /// 球面上の一様な単位ベクトル。
+        pub fn unit(&mut self) -> [f64; 3] {
+            loop {
+                let v = [self.next() * 2.0 - 1.0, self.next() * 2.0 - 1.0, self.next() * 2.0 - 1.0];
+                let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+                if n > 0.1 && n <= 1.0 {
+                    return [v[0] / n, v[1] / n, v[2] / n];
+                }
+            }
+        }
+    }
+
+    fn norm3(v: [f64; 3]) -> [f64; 3] {
+        let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        [v[0] / n, v[1] / n, v[2] / n]
+    }
+
+    /// 表を持たない、変換の値だけの TreeMeta(前ふるいの式の試験用)。
+    fn meta_with(minval: [f64; 4], scale: f64, d: usize) -> TreeMeta {
+        TreeMeta {
+            ndim: d,
+            levels: 1,
+            ninterior: 0,
+            mask: 0,
+            full: u32::MAX as f64,
+            minval,
+            scale,
+            int_type: KdType::U32,
+            data_type: KdType::U32,
+            lr: (0, 0),
+            split: (0, 0),
+            data: (0, 0),
+            prefilter_ok: prefilter_allowed(&minval[..d], scale),
+        }
+    }
+
+    #[test]
+    fn prefilter_allowed_range() {
+        assert!(prefilter_allowed(&[-1.0, -1.0, -1.0], 2147483647.5));
+        assert!(prefilter_allowed(&[-4.0, 4.0], 64.0));
+        assert!(prefilter_allowed(&[0.0; 4], PREFILTER_SCALE_MAX));
+        assert!(!prefilter_allowed(&[-4.5, 0.0, 0.0], 1e9));
+        assert!(!prefilter_allowed(&[0.0, 0.0, 0.0], 63.0));
+        assert!(!prefilter_allowed(&[0.0, 0.0, 0.0], PREFILTER_SCALE_MAX * 2.0));
+        assert!(!prefilter_allowed(&[f64::NAN, 0.0, 0.0], 1e9));
+    }
+
+    /// 星の前ふるいの余裕: 範囲の端(|minval| ≤ 4、64 ≤ scale ≤ 2^36)と、単位ベクトルから ±1.2 目盛り伸び縮みした星
+    /// (ノルムの条件 2/scale の境目をまたぐ)、円錐の境目(星までの弦 = chord × (1 ± 5e-7))で、実数の判定で入る星を
+    /// star_far が捨てないこと。正規化の動きが 1 目盛りを超えて効く場合(木の単位で chord·scale + 1 より遠いのに入る)も
+    /// 十分な数を通ること(余裕を 1 目盛りに縮めると落とす場合を、ちゃんと試している)。
+    #[test]
+    fn star_prefilter_never_drops_a_star_in_the_cone() {
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+        let (mut accepted, mut tight, mut far_n) = (0usize, 0usize, 0usize);
+        for it in 0..2_000_000 {
+            let scale = 2f64.powf(6.0 + 30.0 * rng.next());
+            let u = rng.unit();
+            let delta = (rng.next() * 2.0 - 1.0) * 1.2 / scale;
+            let mut minval = [0.0; 4];
+            let mut row = [0u32; 3];
+            for k in 0..3 {
+                let x = u[k] * (1.0 + delta);
+                // minval = x − w/scale ≥ −4 になる整数 w(< 2^32)
+                let wmax = ((x + 4.0) * scale).min(u32::MAX as f64);
+                let w = (rng.next() * wmax).floor();
+                row[k] = w as u32;
+                minval[k] = x - w / scale;
+            }
+            if minval.iter().any(|m| m.abs() > PREFILTER_MINVAL_MAX) {
+                continue;
+            }
+            let meta = meta_with(minval, scale, 3);
+            assert!(meta.prefilter_ok);
+            let v = star_unit(&meta, &row);
+            // 弦: 木の単位で 0〜3 目盛り(正規化の動きが効く)か、0〜1e-3。ときどき遠い中心(捨てる側も通す)
+            let chord = if it % 2 == 0 { rng.next() * 3.0 / scale } else { rng.next() * 1e-3 };
+            let w = rng.unit();
+            let wv = w[0] * v[0] + w[1] * v[1] + w[2] * v[2];
+            let t = norm3([w[0] - wv * v[0], w[1] - wv * v[1], w[2] - wv * v[2]]);
+            let off = if it % 7 == 0 { chord * (2.0 + 10.0 * rng.next()) + 10.0 / scale } else { chord * (1.0 + (rng.next() - 0.5) * 1e-6) };
+            let c = norm3([v[0] + t[0] * off, v[1] + t[1] * off, v[2] + t[2] * off]);
+            let q = ConeQuery::new(&meta, &c, chord);
+            let accept = q.star_in(&meta, &row).is_some();
+            let far = star_far(&row, &q.qt, q.r2, &q.o, q.s2, q.tol);
+            assert!(!(accept && far), "scale={scale} minval={minval:?} row={row:?} c={c:?} chord={chord}");
+            if accept {
+                accepted += 1;
+                let mut dt2 = 0.0;
+                for (r, t) in row.iter().zip(&q.qt) {
+                    let d = *r as f64 - t;
+                    dt2 += d * d;
+                }
+                if dt2.sqrt() > chord * scale + 1.0 {
+                    tight += 1;
+                }
+            }
+            far_n += far as usize;
+        }
+        assert!(accepted > 300_000 && tight > 1000 && far_n > 10_000, "入る {accepted}・きわどい {tight}・捨てる {far_n}");
+    }
+}

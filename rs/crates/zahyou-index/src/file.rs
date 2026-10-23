@@ -3,6 +3,7 @@
 use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io;
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -11,7 +12,7 @@ use rayon::prelude::*;
 use zahyou_wcs::{angle_between, normalize, Vec3, ARCSEC_PER_RAD};
 
 use crate::healpix::{healpix_xy_center, healpix_xy_radius};
-use crate::kdtree::{ball_query, cone_query, star_unit, Ints, KdInt, Tree, TreeMeta};
+use crate::kdtree::{ball_query, cone_visit, star_unit, Ints, KdInt, Tree, TreeMeta};
 use crate::layout::{layout_from_source, name_for_check, read_layout, Layout, LayoutError};
 
 /// 索引のエラー。`Display` は画面に出す文(形式の問題は Python 版と同じ文面)。
@@ -507,32 +508,89 @@ impl IndexData {
 
     /// center から角距離 radius_rad 以内の星の番号(昇順)。判定は弦の長さ(正規化した星と中心の差 ≤ 2 sin(r/2))。
     pub fn stars_in_cone(&self, center: Vec3, radius_rad: f64) -> Vec<u32> {
+        self.stars_in_cone_with(center, radius_rad, self.stars.prefilter_ok)
+    }
+
+    /// [`IndexData::stars_in_cone`] の本体(prefilter = 葉の前ふるいを使うか。試験で両方の答えを比べる)。
+    fn stars_in_cone_with(&self, center: Vec3, radius_rad: f64, prefilter: bool) -> Vec<u32> {
+        match self.cone_start(center, radius_rad) {
+            ConeStart::Empty => Vec::new(),
+            ConeStart::All => (0..self.nstars as u32).collect(),
+            ConeStart::Tree { c, chord } => {
+                let mut out = Vec::new();
+                let _ = self.cone_each(&c, chord, prefilter, |id, _| {
+                    out.push(id);
+                    ControlFlow::Continue(())
+                });
+                // 葉は左から順なので並んでいるはずだが、念のため(並んでいれば並べ替えは 1 回の走査で済む)
+                out.sort_unstable();
+                out
+            }
+        }
+    }
+
+    /// center から角距離 radius_rad 以内に、accept(番号) が true になる星があるか。
+    ///
+    /// `stars_in_cone(center, radius_rad).into_iter().any(accept)` と同じ答え(同じ前置き・同じ判定。accept は番号の昇順に
+    /// 呼ぶ)で、見つけた時点でやめ、番号の並びを作らない。accept は副作用の無い判定にすること(途中でやめるので
+    /// 全部の星には呼ばれない)。半径が π 以上なら、木を見ずに 0 … nstars − 1 の全部に accept を回す(stars_in_cone と同じ)。
+    pub fn any_star_in_cone(&self, center: Vec3, radius_rad: f64, mut accept: impl FnMut(u32) -> bool) -> bool {
+        match self.cone_start(center, radius_rad) {
+            ConeStart::Empty => false,
+            ConeStart::All => (0..self.nstars as u32).any(accept),
+            ConeStart::Tree { c, chord } => self
+                .cone_each(&c, chord, self.stars.prefilter_ok, |id, _| {
+                    if accept(id) { ControlFlow::Break(()) } else { ControlFlow::Continue(()) }
+                })
+                .is_break(),
+        }
+    }
+
+    /// 円錐の問い合わせの前置き(stars_in_cone・any_star_in_cone で共通。式も順も Python 版と同じ)。
+    fn cone_start(&self, center: Vec3, radius_rad: f64) -> ConeStart {
         let c = normalize(center);
         let r = radius_rad;
         // 半径が負・NaN、中心が NaN(長さ 0 のベクトルを含む)なら空(Python 版と同じ答え。木をたどらずに返す)
         if r.is_nan() || r < 0.0 || c.iter().any(|v| !v.is_finite()) {
-            return Vec::new();
+            return ConeStart::Empty;
         }
         if r >= std::f64::consts::PI {
-            return (0..self.nstars as u32).collect();
+            return ConeStart::All;
         }
         if let (Some(tc), Some(tr)) = (self.tile_center, self.tile_radius_rad)
             && angle_between(c, tc) > tr + r
         {
-            return Vec::new(); // タイルに届かない
+            return ConeStart::Empty; // タイルに届かない
         }
-        let chord = 2.0 * (r / 2.0).sin();
-        let Some(t) = self.tree(&self.stars) else { return Vec::new() };
-        let mut out = Vec::new();
-        match (t.split, t.data) {
-            (Ints::U16(s), Ints::U16(d)) => cone_query(t.meta, t.lr, s, d, &c, chord, &mut out),
-            (Ints::U16(s), Ints::U32(d)) => cone_query(t.meta, t.lr, s, d, &c, chord, &mut out),
-            (Ints::U32(s), Ints::U16(d)) => cone_query(t.meta, t.lr, s, d, &c, chord, &mut out),
-            (Ints::U32(s), Ints::U32(d)) => cone_query(t.meta, t.lr, s, d, &c, chord, &mut out),
-        }
-        out.sort_unstable();
-        out
+        ConeStart::Tree { c, chord: 2.0 * (r / 2.0).sin() }
     }
+
+    /// 星の木をたどって、弦 chord 以内の星を番号の昇順に f(番号, 単位ベクトル) で知らせる(表が読めなければ何もしない)。
+    fn cone_each(
+        &self,
+        c: &Vec3,
+        chord: f64,
+        prefilter: bool,
+        f: impl FnMut(u32, Vec3) -> ControlFlow<()>,
+    ) -> ControlFlow<()> {
+        let Some(t) = self.tree(&self.stars) else { return ControlFlow::Continue(()) };
+        match (t.split, t.data) {
+            (Ints::U16(s), Ints::U16(d)) => cone_visit(t.meta, t.lr, s, d, c, chord, prefilter, f),
+            (Ints::U16(s), Ints::U32(d)) => cone_visit(t.meta, t.lr, s, d, c, chord, prefilter, f),
+            (Ints::U32(s), Ints::U16(d)) => cone_visit(t.meta, t.lr, s, d, c, chord, prefilter, f),
+            (Ints::U32(s), Ints::U32(d)) => cone_visit(t.meta, t.lr, s, d, c, chord, prefilter, f),
+        }
+    }
+}
+
+/// 円錐の問い合わせの前置きの結果。
+enum ConeStart {
+    /// 答えは空(半径が負・NaN、中心がおかしい、タイルに届かない)
+    Empty,
+    /// 半径が π 以上: 0 … nstars − 1 の全部(木を見ない。Python 版と同じ)
+    All,
+    /// 木をたどる(正規化した中心と弦の長さ)
+    Tree { c: Vec3, chord: f64 },
 }
 
 /// 問い合わせごとの結果(quad の番号の昇順)を、問い合わせの順に返す。
@@ -572,5 +630,208 @@ fn run_ball_typed<S: KdInt, T: KdInt, const D: usize>(
             .par_chunks_exact(D)
             .map_init(|| Vec::with_capacity(cap), |stack, q| one(stack, q))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layout::KdType;
+
+    /// 試験用の乱数(xorshift)。
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> f64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 >> 11) as f64 / (1u64 << 53) as f64
+        }
+
+        fn below(&mut self, n: usize) -> usize {
+            ((self.next() * n as f64) as usize).min(n.saturating_sub(1))
+        }
+
+        fn unit(&mut self) -> Vec3 {
+            loop {
+                let v = [self.next() * 2.0 - 1.0, self.next() * 2.0 - 1.0, self.next() * 2.0 - 1.0];
+                let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+                if n > 0.1 && n <= 1.0 {
+                    return [v[0] / n, v[1] / n, v[2] / n];
+                }
+            }
+        }
+    }
+
+    /// 星図データの索引 1 本(ZAHYOU_INDEX_DIR か C:\AstrometryData。無ければ None で試験を飛ばす。表を開くのは Windows だけ)。
+    fn index(tag: &str) -> Option<IndexFile> {
+        if !cfg!(windows) {
+            return None;
+        }
+        let dir = std::env::var_os("ZAHYOU_INDEX_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\AstrometryData"));
+        let p = dir.join(format!("index-{tag}.fits"));
+        if !p.is_file() {
+            eprintln!("SKIP: {} が無い", p.display());
+            return None;
+        }
+        IndexFile::open(p).ok()
+    }
+
+    /// 星 v から方向 dir へ角距離 r の点。
+    fn point_at(v: Vec3, dir: Vec3, r: f64) -> Vec3 {
+        let wv = dir[0] * v[0] + dir[1] * v[1] + dir[2] * v[2];
+        let t = normalize([dir[0] - wv * v[0], dir[1] - wv * v[1], dir[2] - wv * v[2]]);
+        let (s, c) = r.sin_cos();
+        normalize([v[0] * c + t[0] * s, v[1] * c + t[1] * s, v[2] * c + t[2] * s])
+    }
+
+    /// 円錐 1 回について: 前ふるいあり・なしの stars_in_cone が同じで、any_star_in_cone が stars_in_cone の any と同じ。
+    /// 戻り値は円錐の中の星の数。
+    fn check_cone(d: &IndexData, c: Vec3, r: f64, label: &str) -> usize {
+        let with = d.stars_in_cone_with(c, r, true);
+        let without = d.stars_in_cone_with(c, r, false);
+        assert_eq!(with, without, "{label}: 前ふるいで答えが変わった c={c:?} r={r}");
+        assert_eq!(d.stars_in_cone(c, r), with, "{label}");
+        for m in [1u32, 2, 3, 7] {
+            let p = |id: u32| id % m == m - 1;
+            assert_eq!(d.any_star_in_cone(c, r, p), with.iter().any(|&id| p(id)), "{label}: any m={m} c={c:?} r={r}");
+        }
+        // accept は番号の昇順に呼ばれ、true を返した所でやめる
+        let mut seen = Vec::new();
+        let hit = d.any_star_in_cone(c, r, |id| {
+            seen.push(id);
+            seen.len() == 3
+        });
+        assert_eq!(hit, with.len() >= 3, "{label}");
+        assert_eq!(seen, with[..with.len().min(3)], "{label}: 呼ぶ順");
+        with.len()
+    }
+
+    /// 本物の索引で、乱数の円錐(星のまわり・星がちょうど境目に来る中心・半径 0〜葉の大きさ・端の値)について、
+    /// 前ふるいあり・なしの答えが同じで、any_star_in_cone が stars_in_cone の any と同じ。
+    #[test]
+    fn cone_prefilter_and_any_match_on_real_indexes() {
+        let mut rows = Vec::new();
+        for tag in ["4119", "4115", "4111", "4107", "5206-00", "5202-00"] {
+            let Some(f) = index(tag) else { continue };
+            let d = f.data().unwrap();
+            // 本物の索引は前ふるいの範囲に入る(入らなければ速くならないだけだが、ここで気づけるように)
+            assert!(d.stars.prefilter_ok && d.codes.prefilter_ok, "{tag}: minval={:?} scale={}", d.stars.minval, d.stars.scale);
+            let ns = d.nstars();
+            let n = 25_000;
+            let mut rng = Rng(0xD1B5_4A32_D192_ED03 ^ ns as u64);
+            let queries: Vec<(Vec3, f64)> = (0..n)
+                .map(|k| {
+                    let s = d.star_xyz(rng.below(ns) as u32).unwrap();
+                    // 半径: 0〜2e-3(葉の大きさのあたり)・0〜2e-2・ごく小さい値・0〜5e-3
+                    let r = match k % 4 {
+                        0 => rng.next() * 2e-3,
+                        1 => rng.next() * 2e-2,
+                        2 => rng.next() * 1e-6,
+                        _ => rng.next() * 5e-3,
+                    };
+                    let c = if k % 3 == 0 {
+                        // 星がちょうど境目に来る中心(角距離 r × (1 ± 1e-12 程度))
+                        point_at(s, rng.unit(), r * (1.0 + (rng.next() - 0.5) * 2e-12))
+                    } else {
+                        point_at(s, rng.unit(), rng.next() * r)
+                    };
+                    (c, r)
+                })
+                .collect();
+            let counts: Vec<usize> = queries.into_par_iter().map(|(c, r)| check_cone(&d, c, r, tag)).collect();
+            let found: usize = counts.iter().sum();
+            let nonempty = counts.iter().filter(|&&m| m > 0).count();
+            // 端: 半径 0・ごく小さい・負・NaN・π 以上、中心が長さ 0
+            let s7 = d.star_xyz(7).unwrap();
+            for r in [0.0, 1e-9, -1.0, f64::NAN, std::f64::consts::PI, 4.0] {
+                check_cone(&d, s7, r, tag);
+            }
+            check_cone(&d, [0.0, 0.0, 0.0], 0.1, tag);
+            assert!(!d.any_star_in_cone(s7, f64::NAN, |_| true));
+            assert!(d.any_star_in_cone(s7, std::f64::consts::PI, |id| id == ns as u32 - 1));
+            assert!(nonempty > n / 4, "{tag}: 星の入る円錐が少ない({nonempty}/{n})");
+            rows.push(format!("{tag} {n} 回 {found} 星"));
+        }
+        eprintln!("円錐の前ふるいあり・なし・any が一致: {}", rows.join("、"));
+    }
+
+    /// 星の値を書き換えた(単位ベクトルでない)索引の写しでも、前ふるいあり・なしの答えが同じ。
+    /// 半分の長さにした星は木の単位では遠いが、正規化すると元の向きに戻るので元の向きの円錐に入る
+    /// (ノルムの条件があるので前ふるいが捨てないことを確かめる)。ノルムの許容の境目の前後に伸び縮みした星も混ぜる。
+    #[test]
+    fn cone_prefilter_on_non_unit_stars() {
+        let Some(src) = index("4115") else { return };
+        let d0 = src.data().unwrap();
+        let (off, len) = d0.stars.data;
+        let meta = d0.stars.clone();
+        let ns = d0.nstars();
+        let orig: Vec<Vec3> = (0..ns as u32).map(|i| d0.star_xyz(i).unwrap()).collect();
+        let mut bytes = std::fs::read(&src.path).unwrap();
+        drop(d0);
+        src.close();
+        assert!(off + len <= bytes.len());
+        let full = meta.full;
+        let to_int = |k: usize, x: f64| ((x - meta.minval[k]) * meta.scale).round();
+        let mut changed = Vec::new();
+        for i in (0..ns).step_by(5) {
+            // 1/5 の星を、半分・1.6 倍・ノルムの許容(2 目盛り)の外(+2.5 目盛り)と内(−1.5 目盛り)に伸び縮み
+            let fct = match (i / 5) % 4 {
+                0 => 0.5,
+                1 => 1.6,
+                2 => 1.0 + 2.5 / meta.scale,
+                _ => 1.0 - 1.5 / meta.scale,
+            };
+            let x = orig[i];
+            let ints: Vec<f64> = (0..3).map(|k| to_int(k, x[k] * fct)).collect();
+            if ints.iter().any(|v| !(*v > 0.0 && *v < full)) {
+                continue; // 範囲の表の外に出るものは書き換えない
+            }
+            for (k, v) in ints.iter().enumerate() {
+                match meta.data_type {
+                    KdType::U32 => {
+                        let at = off + (i * 3 + k) * 4;
+                        bytes[at..at + 4].copy_from_slice(&(*v as u32).to_le_bytes());
+                    }
+                    KdType::U16 => {
+                        let at = off + (i * 3 + k) * 2;
+                        bytes[at..at + 2].copy_from_slice(&(*v as u16).to_le_bytes());
+                    }
+                }
+            }
+            changed.push((i, fct));
+        }
+        let nhalf = changed.iter().filter(|c| c.1 == 0.5).count();
+        assert!(changed.len() > 1000 && nhalf > 200, "書き換えた星が少ない({})", changed.len());
+        let dir = std::env::temp_dir().join(format!("zahyou-index-prefilter-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("index-4115.fits");
+        std::fs::write(&p, &bytes).unwrap();
+        let f = IndexFile::open(&p).unwrap();
+        let d = f.data().unwrap();
+        assert!(d.stars.prefilter_ok);
+        let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+        let mut half_found = 0;
+        for &(i, fct) in &changed {
+            let x = orig[i];
+            for r in [1e-6, 1e-4, rng.next() * 3e-3] {
+                check_cone(&d, x, r, "書き換えた 4115");
+            }
+            // 正規化し直した向きは量子化(0.5 目盛り ÷ 半分の長さ)だけずれるので、その数倍の半径で探す
+            if fct == 0.5 && d.stars_in_cone(x, (10.0 / meta.scale).max(1e-6)).contains(&(i as u32)) {
+                half_found += 1;
+            }
+            let c = point_at(x, rng.unit(), rng.next() * 2e-3);
+            check_cone(&d, c, rng.next() * 3e-3, "書き換えた 4115");
+        }
+        assert_eq!(half_found, nhalf, "半分の長さにした星が元の向きの円錐に入らない");
+        drop(d);
+        f.close();
+        let _ = std::fs::remove_dir_all(&dir);
+        eprintln!("星を書き換えた索引({} 星)で前ふるいあり・なしが一致(半分の長さの星 {nhalf} 個が元の向きで見つかった)", changed.len());
     }
 }

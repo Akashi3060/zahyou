@@ -536,7 +536,8 @@ pub(crate) fn quick_pass(field: &Field, sc: &SeriesCtx, params: &Params, h: &Hyp
         let p = field.vxy[t];
         let c = h.pix_to_xyz(p[0], p[1]);
         let rad = 5.0 * s2.sqrt() * h.scale / ARCSEC_PER_RAD;
-        for_tiles(sc, c, rad, |fid, data| Ok(data.stars_in_cone(c, rad).into_iter().any(|sid| !h.is_quad_star(fid, sid))))
+        // stars_in_cone(c, rad).into_iter().any(…) と同じ答え(同じ前置き・同じ判定)。見つけた時点でやめ、並びを作らない
+        for_tiles(sc, c, rad, |fid, data| Ok(data.any_star_in_cone(c, rad, |sid| !h.is_quad_star(fid, sid))))
     })
 }
 
