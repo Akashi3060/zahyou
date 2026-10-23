@@ -268,66 +268,115 @@ pub(crate) fn ball_visit<S: KdInt, const D: usize>(
     if gs > r2 {
         return ControlFlow::Continue(());
     }
+    // 今の節点 f を持ってたどる。子が両方通るときだけ右をスタックに積んで左へ進み、片方だけなら積まずにその子へ進む
+    // (節点ごとに積んで降ろすのをやめる)。左の部分木を全部たどってから右へ進むのは、左右とも積んで左から降ろす形と
+    // 同じなので、葉を知らせる順(左から)も、子の箱と距離の式も今までと同じ(試験 ball_visit_matches_reference)
     stack.clear();
-    stack.push(root);
-    while let Some(f) = stack.pop() {
+    let mut f = root;
+    loop {
         if f.node >= meta.ninterior {
             // 葉(lr は開くときに単調でデータの数の内と確かめてある)
             let k = f.node - meta.ninterior;
-            let Some(&last) = lr.get(k) else { continue };
-            let start = if k == 0 {
-                0
-            } else {
-                match lr.get(k - 1) {
-                    Some(&p) => p as usize + 1,
-                    None => continue,
+            if let Some(&last) = lr.get(k) {
+                let start = if k == 0 { Some(0) } else { lr.get(k - 1).map(|&p| p as usize + 1) };
+                if let Some(start) = start {
+                    let end = last as usize + 1;
+                    if start <= end {
+                        leaf(start, end)?;
+                    }
                 }
-            };
-            let end = last as usize + 1;
-            if start <= end {
-                leaf(start, end)?;
             }
-            continue;
-        }
-        let Some(raw) = split.get(f.node).map(|v| v.to_u64()) else { continue };
-        let dim = (raw & meta.mask) as usize;
-        if dim >= D {
-            continue; // 開くときに確かめてあるので起きない
-        }
-        let val = (raw & !meta.mask) as f64;
-        let q = qt[dim];
-        let mut rest = 0.0;
-        for k in 0..D {
-            if k != dim {
-                rest += f.g2[k];
+        } else if let Some(raw) = split.get(f.node).map(|v| v.to_u64())
+            // 分割次元が次元の外になることは、開くときに確かめてあるので起きない
+            && ((raw & meta.mask) as usize) < D
+        {
+            let dim = (raw & meta.mask) as usize;
+            let val = (raw & !meta.mask) as f64;
+            let q = qt[dim];
+            let mut rest = 0.0;
+            for k in 0..D {
+                if k != dim {
+                    rest += f.g2[k];
+                }
+            }
+            let lo_r = f.lo[dim].max(val);
+            let gr = (lo_r - q).max(q - f.hi[dim]).max(0.0);
+            let go_r = rest + gr * gr <= r2;
+            let hi_l = f.hi[dim].min(val);
+            let gl = (f.lo[dim] - q).max(q - hi_l).max(0.0);
+            let go_l = rest + gl * gl <= r2;
+            if go_r {
+                // 右の子(今の節点から作る)
+                let mut right = f;
+                right.node = 2 * f.node + 2;
+                right.lo[dim] = lo_r;
+                right.g2[dim] = gr * gr;
+                if !go_l {
+                    f = right;
+                    continue;
+                }
+                stack.push(right);
+            }
+            if go_l {
+                // 左の子へ(今の節点を書き換える。右の子は書き換える前に作ってある)
+                f.node = 2 * f.node + 1;
+                f.hi[dim] = hi_l;
+                f.g2[dim] = gl * gl;
+                continue;
             }
         }
-        // 右の子を先に積む(左から順に葉を出すため)
-        let lo_r = f.lo[dim].max(val);
-        let gr = (lo_r - q).max(q - f.hi[dim]).max(0.0);
-        if rest + gr * gr <= r2 {
-            let mut c = f;
-            c.node = 2 * f.node + 2;
-            c.lo[dim] = lo_r;
-            c.g2[dim] = gr * gr;
-            stack.push(c);
-        }
-        let hi_l = f.hi[dim].min(val);
-        let gl = (f.lo[dim] - q).max(q - hi_l).max(0.0);
-        if rest + gl * gl <= r2 {
-            let mut c = f;
-            c.node = 2 * f.node + 1;
-            c.hi[dim] = hi_l;
-            c.g2[dim] = gl * gl;
-            stack.push(c);
+        // 葉か、子がどちらも通らない: 積んでおいた右の子へ
+        match stack.pop() {
+            Some(n) => f = n,
+            None => break,
         }
     }
     ControlFlow::Continue(())
 }
 
+/// コードの実数の判定(Python 版と同じ式・同じ順): 実数 c = minval + 整数/scale、Σ(c − q)² ≤ rr(= radius²)。
+#[inline(always)]
+fn code_in<T: KdInt, const D: usize>(meta: &TreeMeta, row: &[T], q: &[f64; D], rr: f64) -> bool {
+    let mut d2 = 0.0;
+    for k in 0..D {
+        let t = meta.to_real(k, row[k].to_f64()) - q[k];
+        d2 += t * t;
+    }
+    d2 <= rr
+}
+
+/// コードの前ふるいのしきい t² (木の単位)。t = radius·scale·(1 + 1e-12) + 1 目盛り。[`code_far`] の説明。
+#[inline(always)]
+fn code_far_t2(meta: &TreeMeta, radius: f64) -> f64 {
+    let t = radius * meta.scale * (1.0 + 1e-12) + 1.0;
+    t * t
+}
+
+/// コードの前ふるい: 実数の判定([`code_in`])で必ず外れるコードか。true なら判定せずに捨ててよい。
+///
+/// 木の単位(整数のまま)で問い合わせ qt との距離² dt2 = Σ(整数 − qt)² を見て、t2 より遠ければ捨てる。
+/// 余裕の根拠: a = radius·scale とする。実数の判定で入るコードは、正確な値で木の単位の距離 ≤ a(1 + 数 ε) で、
+/// 計算の丸めは prefilter_allowed の範囲(|minval| ≤ 4、scale ≤ 2^36、整数 < 2^32)では 1 成分あたり
+/// 2^-53 × (4·2^32 + 4·2^36) ≈ 3e-5 目盛り + 距離の相対 数 ε(実数に戻す割り算と足し算、qt の引き算と掛け算、
+/// 差と 2 乗の和)にとどまる。しきい t = a(1 + 1e-12) + 1 には相対 1e-12 と 1 目盛りの余裕があり、どちらも
+/// 誤差(相対 1e-15、絶対 1e-4 目盛り)より桁違いに大きいので、入るコードを捨てることは無い(a がどれだけ大きくても、
+/// 0 でも)。a が無限大なら t2 も無限大で何も捨てない。残ったコードの判定は今の式のままなので、答えは前ふるいなしと同じ。
+/// 枝刈りの r_t = √(a² + 0.25D)(1 + 1e-9) + 1e-6 を使わないのは、a が 2 万目盛り前後で r_t − a が 5e-5 目盛りまで
+/// 縮み、壊れた範囲の表では丸めの上限に近づくため(t は r_t より少し大きく、捨てる量がわずかに減るだけ)。
+#[inline(always)]
+fn code_far<T: KdInt, const D: usize>(row: &[T], qt: &[f64; D], t2: f64) -> bool {
+    let mut dt2 = 0.0;
+    for k in 0..D {
+        let t = row[k].to_f64() - qt[k];
+        dt2 += t * t;
+    }
+    dt2 > t2
+}
+
 /// コード木: 問い合わせ q(実数)から radius 以内のデータの番号を out に足す(昇順)。
 ///
-/// 最終判定は Python 版と同じ式・同じ順(実数 c = minval + 整数/scale、Σ(c − q)² ≤ radius²)。
+/// 最終判定は Python 版と同じ式・同じ順(実数 c = minval + 整数/scale、Σ(c − q)² ≤ radius²)。prefilter は
+/// 葉の前ふるい([`code_far`])を使うか(本番は meta.prefilter_ok。試験は false でも同じ答えになることを確かめる)。
 #[allow(clippy::too_many_arguments)] // 木の表(mmap のビュー)と作業用の領域をそのまま渡すため
 pub(crate) fn ball_query<S: KdInt, T: KdInt, const D: usize>(
     meta: &TreeMeta,
@@ -337,6 +386,7 @@ pub(crate) fn ball_query<S: KdInt, T: KdInt, const D: usize>(
     q: &[f64; D],
     radius: f64,
     r_t: f64,
+    prefilter: bool,
     stack: &mut Vec<Frame<D>>,
     out: &mut Vec<u32>,
 ) {
@@ -345,16 +395,16 @@ pub(crate) fn ball_query<S: KdInt, T: KdInt, const D: usize>(
         qt[k] = meta.to_tree(k, q[k]);
     }
     let rr = radius * radius;
+    let t2 = code_far_t2(meta, radius);
     let start_len = out.len();
     let _ = ball_visit(meta, lr, split, &qt, r_t * r_t, stack, |s, e| {
         let Some(rows) = data.get(s * D..e * D) else { return ControlFlow::Continue(()) };
         for (i, row) in rows.chunks_exact(D).enumerate() {
-            let mut d2 = 0.0;
-            for k in 0..D {
-                let t = meta.to_real(k, row[k].to_f64()) - q[k];
-                d2 += t * t;
+            // 候補の 99 % 以上は外れるので、割り算の要る実数の判定の前に木の単位で捨てる
+            if prefilter && code_far(row, &qt, t2) {
+                continue;
             }
-            if d2 <= rr {
+            if code_in(meta, row, q, rr) {
                 out.push((s + i) as u32);
             }
         }
@@ -500,6 +550,82 @@ pub(crate) fn star_unit<T: KdInt>(meta: &TreeMeta, row: &[T]) -> [f64; 3] {
 }
 
 
+/// 変える前の ball_visit(節点ごとに子を積んで降ろす形)。試験で、今の形と葉を知らせる順がまったく同じことを確かめる。
+#[cfg(test)]
+pub(crate) fn ball_visit_ref<S: KdInt, const D: usize>(
+    meta: &TreeMeta,
+    lr: &[u32],
+    split: &[S],
+    qt: &[f64; D],
+    r2: f64,
+    mut leaf: impl FnMut(usize, usize),
+) {
+    if r2.is_nan() || qt.iter().any(|v| v.is_nan()) {
+        return;
+    }
+    let mut root = Frame { node: 0, lo: [0.0; D], hi: [meta.full; D], g2: [0.0; D] };
+    let mut gs = 0.0;
+    for (k, &q) in qt.iter().enumerate() {
+        let g = (root.lo[k] - q).max(q - root.hi[k]).max(0.0);
+        root.g2[k] = g * g;
+        gs += root.g2[k];
+    }
+    if gs > r2 {
+        return;
+    }
+    let mut stack = vec![root];
+    while let Some(f) = stack.pop() {
+        if f.node >= meta.ninterior {
+            let k = f.node - meta.ninterior;
+            let Some(&last) = lr.get(k) else { continue };
+            let start = if k == 0 {
+                0
+            } else {
+                match lr.get(k - 1) {
+                    Some(&p) => p as usize + 1,
+                    None => continue,
+                }
+            };
+            let end = last as usize + 1;
+            if start <= end {
+                leaf(start, end);
+            }
+            continue;
+        }
+        let Some(raw) = split.get(f.node).map(|v| v.to_u64()) else { continue };
+        let dim = (raw & meta.mask) as usize;
+        if dim >= D {
+            continue;
+        }
+        let val = (raw & !meta.mask) as f64;
+        let q = qt[dim];
+        let mut rest = 0.0;
+        for k in 0..D {
+            if k != dim {
+                rest += f.g2[k];
+            }
+        }
+        let lo_r = f.lo[dim].max(val);
+        let gr = (lo_r - q).max(q - f.hi[dim]).max(0.0);
+        if rest + gr * gr <= r2 {
+            let mut c = f;
+            c.node = 2 * f.node + 2;
+            c.lo[dim] = lo_r;
+            c.g2[dim] = gr * gr;
+            stack.push(c);
+        }
+        let hi_l = f.hi[dim].min(val);
+        let gl = (f.lo[dim] - q).max(q - hi_l).max(0.0);
+        if rest + gl * gl <= r2 {
+            let mut c = f;
+            c.node = 2 * f.node + 1;
+            c.hi[dim] = hi_l;
+            c.g2[dim] = gl * gl;
+            stack.push(c);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -615,5 +741,67 @@ mod tests {
             far_n += far as usize;
         }
         assert!(accepted > 300_000 && tight > 1000 && far_n > 10_000, "入る {accepted}・きわどい {tight}・捨てる {far_n}");
+    }
+
+    /// コードの前ふるいの余裕(D 次元): 範囲の端(|minval| ≤ 4、64 ≤ scale ≤ 2^36、整数 < 2^32)と、球の境目
+    /// (コードまでの距離 = radius × (1 ± 1e-12) か、木の単位で 0〜3 目盛りの半径)で、実数の判定で入るコードを
+    /// code_far が捨てないこと。戻り値は (入った数, 木の単位で a = radius·scale より遠いのに入った数, 捨てた数)。
+    fn code_margin<const D: usize>(seed: u64, n: usize) -> (usize, usize, usize) {
+        let mut rng = Rng(seed);
+        let (mut accepted, mut beyond, mut far_n) = (0usize, 0usize, 0usize);
+        for it in 0..n {
+            let scale = 2f64.powf(6.0 + 30.0 * rng.next());
+            let mut minval = [0.0; 4];
+            let mut row = [0u32; D];
+            for k in 0..D {
+                minval[k] = (rng.next() * 2.0 - 1.0) * PREFILTER_MINVAL_MAX;
+                row[k] = (rng.next() * u32::MAX as f64).floor() as u32;
+            }
+            let meta = meta_with(minval, scale, D);
+            assert!(meta.prefilter_ok);
+            let radius = match it % 3 {
+                0 => rng.next() * 3.0 / scale,
+                1 => rng.next() * 0.05,
+                _ => rng.next() * 1e-3,
+            };
+            let mut dir = [0.0; D];
+            let mut nn = 0.0;
+            for v in dir.iter_mut() {
+                *v = rng.next() * 2.0 - 1.0;
+                nn += *v * *v;
+            }
+            let nn = nn.sqrt().max(1e-3);
+            // ほとんどは境目のまわり、ときどき遠く(捨てる側も通す)
+            let off = if it % 5 == 0 { radius * (2.0 + 10.0 * rng.next()) + 10.0 / scale } else { radius * (1.0 + (rng.next() - 0.5) * 2e-12) };
+            let mut q = [0.0; D];
+            let mut qt = [0.0; D];
+            for k in 0..D {
+                q[k] = meta.to_real(k, row[k] as f64) + dir[k] / nn * off;
+                qt[k] = meta.to_tree(k, q[k]);
+            }
+            let accept = code_in(&meta, &row, &q, radius * radius);
+            let far = code_far(&row, &qt, code_far_t2(&meta, radius));
+            assert!(!(accept && far), "D={D} scale={scale} minval={minval:?} row={row:?} q={q:?} radius={radius}");
+            if accept {
+                accepted += 1;
+                let mut dt2 = 0.0;
+                for (r, t) in row.iter().zip(&qt) {
+                    let d = *r as f64 - t;
+                    dt2 += d * d;
+                }
+                beyond += (dt2.sqrt() > radius * scale) as usize;
+            }
+            far_n += far as usize;
+        }
+        (accepted, beyond, far_n)
+    }
+
+    #[test]
+    fn code_prefilter_never_drops_a_code_in_the_ball() {
+        let (a4, b4, f4) = code_margin::<4>(0x853C_49E6_748F_EA9B, 1_000_000);
+        let (a2, b2, f2) = code_margin::<2>(0xDA94_2042_E4DD_58B5, 1_000_000);
+        eprintln!("コードの前ふるい: D=4 入る {a4}・木の単位で a より遠いのに入る {b4}・捨てる {f4}、D=2 {a2}・{b2}・{f2}");
+        // 丸めで木の単位の距離が a を超えたのに入るコード(余裕が要る場合)も、ちゃんと試している
+        assert!(a4 > 200_000 && a2 > 200_000 && b4 > 1000 && b2 > 1000 && f4 > 100_000 && f2 > 100_000);
     }
 }

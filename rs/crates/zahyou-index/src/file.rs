@@ -407,6 +407,11 @@ impl IndexData {
     /// 保存されている木をたどり(作り直さない)、木の単位で量子化の分(D × 0.25 目盛り²)だけ広げて候補を取り、
     /// 最後に実数で判定する。問い合わせが多ければ rayon で並列に探す(結果の順は変わらない)。
     pub fn code_ball(&self, queries: &[f64], radius: f64) -> Result<Vec<(u32, u32)>, IndexError> {
+        self.code_ball_with(queries, radius, self.codes.prefilter_ok)
+    }
+
+    /// [`IndexData::code_ball`] の本体(prefilter = 葉の前ふるいを使うか。試験で両方の答えを比べる)。
+    fn code_ball_with(&self, queries: &[f64], radius: f64, prefilter: bool) -> Result<Vec<(u32, u32)>, IndexError> {
         let d = self.codes.ndim;
         if !queries.len().is_multiple_of(d) {
             return Err(IndexError::Argument(format!(
@@ -423,9 +428,9 @@ impl IndexData {
         }
         let Some(t) = self.tree(&self.codes) else { return Ok(Vec::new()) };
         let per_query = match d {
-            2 => run_ball::<2>(&t, queries, radius),
-            3 => run_ball::<3>(&t, queries, radius),
-            4 => run_ball::<4>(&t, queries, radius),
+            2 => run_ball::<2>(&t, queries, radius, prefilter),
+            3 => run_ball::<3>(&t, queries, radius, prefilter),
+            4 => run_ball::<4>(&t, queries, radius, prefilter),
             _ => Vec::new(),
         };
         let total: usize = per_query.iter().map(Vec::len).sum();
@@ -594,12 +599,12 @@ enum ConeStart {
 }
 
 /// 問い合わせごとの結果(quad の番号の昇順)を、問い合わせの順に返す。
-fn run_ball<const D: usize>(t: &Tree<'_>, queries: &[f64], radius: f64) -> Vec<Vec<u32>> {
+fn run_ball<const D: usize>(t: &Tree<'_>, queries: &[f64], radius: f64, prefilter: bool) -> Vec<Vec<u32>> {
     match (t.split, t.data) {
-        (Ints::U16(s), Ints::U16(d)) => run_ball_typed::<u16, u16, D>(t, s, d, queries, radius),
-        (Ints::U16(s), Ints::U32(d)) => run_ball_typed::<u16, u32, D>(t, s, d, queries, radius),
-        (Ints::U32(s), Ints::U16(d)) => run_ball_typed::<u32, u16, D>(t, s, d, queries, radius),
-        (Ints::U32(s), Ints::U32(d)) => run_ball_typed::<u32, u32, D>(t, s, d, queries, radius),
+        (Ints::U16(s), Ints::U16(d)) => run_ball_typed::<u16, u16, D>(t, s, d, queries, radius, prefilter),
+        (Ints::U16(s), Ints::U32(d)) => run_ball_typed::<u16, u32, D>(t, s, d, queries, radius, prefilter),
+        (Ints::U32(s), Ints::U16(d)) => run_ball_typed::<u32, u16, D>(t, s, d, queries, radius, prefilter),
+        (Ints::U32(s), Ints::U32(d)) => run_ball_typed::<u32, u32, D>(t, s, d, queries, radius, prefilter),
     }
 }
 
@@ -609,6 +614,7 @@ fn run_ball_typed<S: KdInt, T: KdInt, const D: usize>(
     data: &[T],
     queries: &[f64],
     radius: f64,
+    prefilter: bool,
 ) -> Vec<Vec<u32>> {
     let meta = t.meta;
     let lr = t.lr;
@@ -618,7 +624,7 @@ fn run_ball_typed<S: KdInt, T: KdInt, const D: usize>(
         let mut qq = [0.0; D];
         qq.copy_from_slice(q);
         let mut out = Vec::new();
-        ball_query::<S, T, D>(meta, lr, split, data, &qq, radius, r_t, stack, &mut out);
+        ball_query::<S, T, D>(meta, lr, split, data, &qq, radius, r_t, prefilter, stack, &mut out);
         out
     };
     let cap = 2 * meta.levels + 2;
@@ -833,5 +839,112 @@ mod tests {
         f.close();
         let _ = std::fs::remove_dir_all(&dir);
         eprintln!("星を書き換えた索引({} 星)で前ふるいあり・なしが一致(半分の長さの星 {nhalf} 個が元の向きで見つかった)", changed.len());
+    }
+
+    /// 木 1 本で、今の ball_visit と変える前の形(ball_visit_ref)が、同じ問い合わせに同じ葉を同じ順に知らせる。
+    fn visit_same<S: KdInt, const D: usize>(t: &Tree<'_>, split: &[S], rng: &mut Rng, n: usize) -> usize {
+        let meta = t.meta;
+        let mut stack = Vec::new();
+        let mut nleaves = 0;
+        for k in 0..n {
+            let mut qt = [0.0; D];
+            for v in qt.iter_mut() {
+                // 根の箱の中と、少し外
+                *v = (rng.next() * 1.2 - 0.1) * meta.full;
+            }
+            // 半径: 0・葉より小さい・葉のあたり・大きい(木の単位)
+            let r = match k % 4 {
+                0 => 0.0,
+                1 => rng.next() * 1e-4 * meta.full,
+                2 => rng.next() * 1e-2 * meta.full,
+                _ => rng.next() * 0.3 * meta.full,
+            };
+            let mut got = Vec::new();
+            let _ = crate::kdtree::ball_visit(meta, t.lr, split, &qt, r * r, &mut stack, |s, e| {
+                got.push((s, e));
+                ControlFlow::Continue(())
+            });
+            let mut want = Vec::new();
+            crate::kdtree::ball_visit_ref(meta, t.lr, split, &qt, r * r, |s, e| want.push((s, e)));
+            assert_eq!(got, want, "qt={qt:?} r={r}");
+            nleaves += got.len();
+            // 途中でやめる: Break を返した葉までで同じ
+            if want.len() >= 2 {
+                let mut part = Vec::new();
+                let br = crate::kdtree::ball_visit(meta, t.lr, split, &qt, r * r, &mut stack, |s, e| {
+                    part.push((s, e));
+                    if part.len() == 2 { ControlFlow::Break(()) } else { ControlFlow::Continue(()) }
+                });
+                assert!(br.is_break() && part == want[..2]);
+            }
+        }
+        nleaves
+    }
+
+    fn visit_tree<const D: usize>(t: &Tree<'_>, rng: &mut Rng, n: usize) -> usize {
+        match t.split {
+            Ints::U16(s) => visit_same::<u16, D>(t, s, rng, n),
+            Ints::U32(s) => visit_same::<u32, D>(t, s, rng, n),
+        }
+    }
+
+    #[test]
+    fn ball_visit_matches_reference() {
+        let mut rows = Vec::new();
+        for tag in ["4119", "4115", "4111", "4107", "5206-00", "5202-00"] {
+            let Some(f) = index(tag) else { continue };
+            let d = f.data().unwrap();
+            let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ d.nstars() as u64);
+            let ct = d.tree(&d.codes).unwrap();
+            let nc = match d.codes.ndim {
+                2 => visit_tree::<2>(&ct, &mut rng, 2000),
+                4 => visit_tree::<4>(&ct, &mut rng, 2000),
+                k => panic!("{tag}: コードの次元 {k}"),
+            };
+            let st = d.tree(&d.stars).unwrap();
+            let ns = visit_tree::<3>(&st, &mut rng, 2000);
+            rows.push(format!("{tag} 葉 {nc}・{ns}"));
+        }
+        eprintln!("ball_visit が変える前の形と同じ葉を同じ順に知らせた: {}", rows.join("、"));
+    }
+
+    /// 本物の索引 7 本で、半径 0.001〜0.05 と境目のまわりの乱数の問い合わせについて、前ふるいあり・なしの code_ball が全問一致。
+    #[test]
+    fn code_ball_prefilter_matches_on_real_indexes() {
+        let mut rows = Vec::new();
+        for tag in ["4119", "4115", "4111", "4107", "5206-00", "5205-02", "5202-00"] {
+            let Some(f) = index(tag) else { continue };
+            let d = f.data().unwrap();
+            let dim = d.code_dim();
+            let nq = d.nquads();
+            let mut rng = Rng(0xA076_1D64_78BD_642F ^ nq as u64);
+            let mut total = 0usize;
+            for radius in [0.001, 0.003, 0.01, 0.02, 0.05] {
+                let mut qs = Vec::with_capacity(4000 * dim);
+                for k in 0..4000 {
+                    let c = d.code(rng.below(nq) as u32).unwrap();
+                    let mut dir = [0.0; 4];
+                    let mut nn = 0.0;
+                    for v in dir.iter_mut().take(dim) {
+                        *v = rng.next() * 2.0 - 1.0;
+                        nn += *v * *v;
+                    }
+                    let nn = nn.sqrt().max(1e-3);
+                    // 1/2 はコードがちょうど境目に来る問い合わせ(距離 = radius × (1 ± 1e-12))
+                    let off = if k % 2 == 0 { radius * (1.0 + (rng.next() - 0.5) * 2e-12) } else { radius * rng.next() * 1.5 };
+                    for kk in 0..dim {
+                        qs.push(c[kk] + dir[kk] / nn * off);
+                    }
+                }
+                let with = d.code_ball_with(&qs, radius, true).unwrap();
+                let without = d.code_ball_with(&qs, radius, false).unwrap();
+                assert_eq!(with, without, "{tag} r={radius}");
+                assert_eq!(d.code_ball(&qs, radius).unwrap(), with, "{tag} r={radius}");
+                total += with.len();
+            }
+            assert!(total > 10_000, "{tag}: 当たりが少ない({total})");
+            rows.push(format!("{tag}(D={dim})当たり {total}"));
+        }
+        eprintln!("code_ball の前ふるいあり・なしが一致: {}", rows.join("、"));
     }
 }
