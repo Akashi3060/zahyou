@@ -945,7 +945,9 @@ mod tests {
             nmap
         }
         let mut n_grid = 0;
-        for (ny, nx, nbox, seed) in [(100usize, 130usize, 32usize, 1u64), (64, 64, 32, 2), (200, 90, 20, 3), (50, 50, 32, 4)] {
+        for (ny, nx, nbox, seed) in
+            [(100usize, 130usize, 32usize, 1u64), (64, 64, 32, 2), (200, 90, 20, 3), (50, 50, 32, 4)]
+        {
             let sm: Vec<f32> = rand_img(ny, nx, seed, 1000).iter().map(|&v| v * 0.01).collect();
             for masked in [false, true] {
                 let bad: Vec<bool> = (0..ny * nx).map(|i| masked && (i % 13 == 0 || i < 3 * nx)).collect();

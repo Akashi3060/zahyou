@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use crate::filters::{
     median3, median3_at, uniform3_gather_row, uniform3_row, uniform3_strips, zoom_linear, zoom_linear_sub, zoom_out_len,
 };
-use crate::stats::{median_f32, sigma_clipped_std, std_f32, unmasked_into};
+use crate::stats::{median_f32, sigma_clipped_std, std_f32, unmasked};
 use crate::{Image2D, Prep};
 
 /// 背景の粗い升目(`_background` の前半)。
@@ -369,29 +369,27 @@ pub fn preprocess(img: &Image2D, mask_overlay: bool) -> Prep {
 
     let med_data = median_f32(&img.data);
     mask_dead_edges(img, &mut mask, med_data as f64);
-    // 焼き込み文字の判定で使い終えた配列(n 個)は、最後の σ の sub[~mask] の書き先に回す
-    let mut spare: Vec<f32> = Vec::new();
     if mask_overlay {
         let shifted: Vec<f32> = sub.par_iter().map(|&s| s + med_data).collect();
         let k = mask_overlay_bands(&shifted, ny, nx, &mut mask);
         if k > 0 {
             info.push(format!("焼き込みオーバーレイとみられる {k} 画素をマスク"));
         }
-        spare = shifted;
     }
 
     let n_masked = mask.par_iter().filter(|&&m| m).count();
     let s2 = if n_masked == 0 || n_masked == n {
         // σ は sub 全体で測る(全部マスクのときも前の版と同じく sub 全体)
-        drop(spare);
         // kill_hot_pixels が 0 を返すのは何も書き換えなかったときだけ(書いたら書いた数を返す)なので、
         // n_hot == 0 なら sub は最初の σ を測ったときのまま = 同じ配列に同じ決定的な関数で、値も同じ
         if n_hot == 0 { s_first } else { sigma_clipped_std(&sub) as f64 }
     } else {
         // sub[~mask](順序を保つ)。前の版はマスクの画素を NaN にしてから NaN でないものを集めていたので、
-        // マスクでない位置の NaN も落ちていたが、σ クリップは最初に非有限値を順序を保って除くので同じ値になる
-        let mut refv = spare;
-        unmasked_into(&sub, &mask, &mut refv);
+        // マスクでない位置の NaN も落ちていたが、σ クリップは最初に非有限値を順序を保って除くので同じ値になる。
+        // 書き先はちょうどの長さで新しく作る。焼き込み判定で使い終えた shifted(容量 n)を書き先に回すと、容量 n の配列を
+        // 持ったまま σ クリップが配列を作るので、σ クリップの残す配列が焼き込み判定のときより長いと私有メモリの最大が
+        // 増えうる。新しく作れば、ここで生きる配列は前の版の最後の σ と同じ(pairs が無いぶん、集める瞬間は小さい)
+        let refv = unmasked(&sub, &mask);
         sigma_clipped_std(&refv) as f64
     };
     if s2.is_finite() && s2 > 0.0 {
@@ -640,7 +638,8 @@ mod tests {
     #[test]
     fn background_sub_matches_background() {
         // 背景を作ってから引くのと同じ(升が 3 つ未満の平らな背景も)
-        for (ny, nx, seed) in [(100usize, 100usize, 1u64), (192, 192, 2), (300, 517, 3), (1000, 1500, 4), (64, 1300, 5)] {
+        for (ny, nx, seed) in [(100usize, 100usize, 1u64), (192, 192, 2), (300, 517, 3), (1000, 1500, 4), (64, 1300, 5)]
+        {
             let img = test_image(ny, nx, seed, 9, true, false);
             let back = background(&img);
             let want: Vec<f32> = img.data.iter().zip(&back).map(|(&d, &b)| d - b).collect();

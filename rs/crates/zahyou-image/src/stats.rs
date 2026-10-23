@@ -292,9 +292,7 @@ pub fn median_f32(a: &[f32]) -> f32 {
 /// 順序を保ったまま、条件を満たす要素だけを集める(並列)。
 pub(crate) fn filter_ordered<P: Fn(f32) -> bool + Sync>(a: &[f32], keep: P) -> Vec<f32> {
     let counts = count_kept(a, &keep);
-    let mut out = Vec::new();
-    filter_into(a, keep, &counts, &mut out);
-    out
+    filter_with_counts(a, keep, &counts)
 }
 
 /// 区切り CHUNK ごとの、条件を満たす要素の数。
@@ -302,18 +300,8 @@ fn count_kept<P: Fn(f32) -> bool + Sync>(a: &[f32], keep: &P) -> Vec<usize> {
     a.par_chunks(CHUNK).map(|c| c.iter().filter(|&&x| keep(x)).count()).collect()
 }
 
-/// 書き先 out を合計 Σcounts の長さにし、区切りごとの書き場所(長さ counts[i])に分ける。
-/// out の長さが足りていれば切り詰めるだけ(ゼロ埋めも確保もしない)。呼ぶ側が [0, 合計) を全部書く
-/// (区切り i にちょうど counts[i] 個)ので、前の中身は残らない。足りなければ古い配列を先に捨ててから
-/// 新しく確保する(右辺を先に確保すると、一瞬だけ古い配列と新しい配列が両方あり、clip_core では読む側と合わせて 3 本になる)。
-fn split_out<'a>(out: &'a mut Vec<f32>, counts: &[usize]) -> Vec<&'a mut [f32]> {
-    let total: usize = counts.iter().sum();
-    if out.len() >= total {
-        out.truncate(total);
-    } else {
-        drop(std::mem::take(out));
-        *out = vec![0.0f32; total];
-    }
+/// 書き先 out(長さ Σcounts)を、区切りごとの書き場所(長さ counts[i])に分ける。
+fn split_parts<'a>(out: &'a mut [f32], counts: &[usize]) -> Vec<&'a mut [f32]> {
     let mut parts: Vec<&mut [f32]> = Vec::with_capacity(counts.len());
     let mut rest: &mut [f32] = out;
     for &c in counts {
@@ -324,11 +312,11 @@ fn split_out<'a>(out: &'a mut Vec<f32>, counts: &[usize]) -> Vec<&'a mut [f32]> 
     parts
 }
 
-/// `filter_ordered` の書き出し(区切り CHUNK ごとの個数を数え済みのとき)。書き先 out を使い回す(split_out)。
-/// counts は同じ述語 keep で数えたもの(keep は純粋な比較なので、書き出しでも区切り i でちょうど counts[i] 個残る)。
-fn filter_into<P: Fn(f32) -> bool + Sync>(a: &[f32], keep: P, counts: &[usize], out: &mut Vec<f32>) {
-    let parts = split_out(out, counts);
-    a.par_chunks(CHUNK).zip(parts.into_par_iter()).for_each(|(c, o)| {
+/// `filter_ordered` の書き出し(区切り CHUNK ごとの個数を数え済みのとき)。書き先はちょうどの長さで新しく作る。
+fn filter_with_counts<P: Fn(f32) -> bool + Sync>(a: &[f32], keep: P, counts: &[usize]) -> Vec<f32> {
+    let total: usize = counts.iter().sum();
+    let mut out = vec![0.0f32; total];
+    a.par_chunks(CHUNK).zip(split_parts(&mut out, counts).into_par_iter()).for_each(|(c, o)| {
         let mut j = 0;
         for &x in c {
             if keep(x) {
@@ -337,24 +325,29 @@ fn filter_into<P: Fn(f32) -> bool + Sync>(a: &[f32], keep: P, counts: &[usize], 
             }
         }
     });
+    out
 }
 
-/// `a[~mask]`(マスクが偽の要素)を順序を保って out へ書く(並列。out の扱いは filter_into と同じ)。
-/// 前処理の最後の σ で使う。a と mask は同じ長さ(違えば短いほうまで)。
-pub(crate) fn unmasked_into(a: &[f32], mask: &[bool], out: &mut Vec<f32>) {
+/// `a[~mask]`(マスクが偽の要素)を順序を保って集める(並列)。前処理の最後の σ で使う。
+/// a と mask は同じ長さ(違えば短いほうまで)。書き先はちょうどの長さで新しく作る。
+pub(crate) fn unmasked(a: &[f32], mask: &[bool]) -> Vec<f32> {
     let n = a.len().min(mask.len());
     let (a, mask) = (&a[..n], &mask[..n]);
     let counts: Vec<usize> = mask.par_chunks(CHUNK).map(|c| c.iter().filter(|&&m| !m).count()).collect();
-    let parts = split_out(out, &counts);
-    a.par_chunks(CHUNK).zip(mask.par_chunks(CHUNK)).zip(parts.into_par_iter()).for_each(|((c, mc), o)| {
-        let mut j = 0;
-        for (&x, &m) in c.iter().zip(mc) {
-            if !m {
-                o[j] = x;
-                j += 1;
+    let total: usize = counts.iter().sum();
+    let mut out = vec![0.0f32; total];
+    a.par_chunks(CHUNK).zip(mask.par_chunks(CHUNK)).zip(split_parts(&mut out, &counts).into_par_iter()).for_each(
+        |((c, mc), o)| {
+            let mut j = 0;
+            for (&x, &m) in c.iter().zip(mc) {
+                if !m {
+                    o[j] = x;
+                    j += 1;
+                }
             }
-        }
-    });
+        },
+    );
+    out
 }
 
 /// `sigma_clipped_stats(data, sigma=3.0)` の戻り値(mean, median, std)。値は float32。
@@ -502,35 +495,36 @@ fn is_big(n: usize) -> bool {
     (RADIX_MIN..=u32::MAX as usize).contains(&n)
 }
 
+/// 大きい配列の読み(pass_sum_hist・median_std_big)が配列を分ける塊の数(n > 0)。読みの間に同時に生きる
+/// ヒストグラムは (この数 + 2) 本(1 本 65536 × u32 = 256 KiB)。塊の数は長さに単調でない: super_len の切り上げのため、
+/// 長さが 8192 × p(p は塊の目標数 = clamp(n / 65536, 1, 2 × スレッド数))の倍数ちょうどのとき塊が p 個で、
+/// 1 つ長いと 1〜2 個減ることがある(例: 20 スレッドで 655360 個は 10 個、655361 個は 9 個)。
+fn n_parts(n: usize) -> usize {
+    n.div_ceil(super_len(n))
+}
+
 fn clip_core(data: &[f32], full: bool) -> ClipStats {
-    // 残す値の配列は 2 本を交互に使う(今読む側と書く側)。残る個数は回ごとに減るか同じなので、3 回目からは
-    // 2 回前の配列を切り詰めて書き先にでき、新しい確保と初回の書き込みが要らない(split_out)。値・並び・個数は
-    // 書き先の場所に依らない(同じ述語 keep と同じ counts で決まる)。書き出しの瞬間に新旧 2 本あるのは前と同じなので、
-    // メモリの最大は変わらない(違うのは、使い終えた 1 本を関数を出るまで持つことだけ)。
-    let mut bufs: [Vec<f32>; 2] = [Vec::new(), Vec::new()];
-    // 今読む配列: None = data、Some(i) = bufs[i]
-    let mut cur_i: Option<usize> = None;
-    if !data.par_iter().all(|x| x.is_finite()) {
-        let fin = |x: f32| x.is_finite();
-        let counts = count_kept(data, &fin);
-        filter_into(data, fin, &counts, &mut bufs[0]);
-        cur_i = Some(0);
-    }
+    // 残す値の配列は回ごとにちょうどの長さで新しく作り、作り終えてから前の配列を捨てる(2026-10-24 までの版と同じ確保の仕方)。
+    // 同時に生きるのは、書き出しの瞬間の新旧 2 本か、統計の読みの間の 1 本 + ヒストグラム((塊の数 + 2) × 256 KiB、
+    // 20 スレッドで最大 42 本 = 10.5 MiB)のどちらか。使い終えた配列を次の書き先に取っておく形(配列 2 本の使い回し)は、
+    // 3 回目からの統計の読みで配列 2 本とヒストグラムが重なり、私有メモリの最大がヒストグラムの分だけ増えるので採らない。
+    let all_finite = data.par_iter().all(|x| x.is_finite());
+    let mut owned: Option<Vec<f32>> = if all_finite { None } else { Some(filter_ordered(data, |x| x.is_finite())) };
     // 直近に境界を計算した配列の std と、大きい配列ならその回の (中心, 和)。最後に変化が無かったときに使い回す
     let mut last: Option<(f32, Option<(f32, f32)>)> = None;
+    // ループの最後の統計の読みが大きい配列の版だったときの塊の数(clip_finish で最後の読みのメモリを比べる)
+    let mut last_parts: Option<usize> = None;
     for _ in 0..5 {
-        // 書く側は今読む側でないほう(data を読んでいるときは bufs[0])
-        let w = cur_i.map_or(0, |i| 1 - i);
-        let (b0, b1) = bufs.split_at_mut(1);
-        let (rd, wr) = if w == 0 { (&b1[0], &mut b0[0]) } else { (&b0[0], &mut b1[0]) };
-        let cur: &[f32] = if cur_i.is_some() { rd } else { data };
+        let cur: &[f32] = owned.as_deref().unwrap_or(data);
         let size = cur.len();
         // 大きい配列は読む回数を減らした版(値は同じ)。小さい配列はそのまま
         let (cen, sd, sum) = if is_big(size) {
+            last_parts = Some(n_parts(size));
             let (sum, h1) = pass_sum_hist(cur);
             let (c, s) = median_std_big(cur, sum, &h1);
             (c, s, Some(sum))
         } else {
+            last_parts = None;
             (median_finite_f32(cur), std_f32(cur), None)
         };
         let lo = cen - sd * 3.0f32;
@@ -542,24 +536,37 @@ fn clip_core(data: &[f32], full: bool) -> ClipStats {
             last = Some((sd, sum.map(|s| (cen, s))));
             break;
         }
-        filter_into(cur, keep, &counts, wr);
-        cur_i = Some(w);
+        let next = filter_with_counts(cur, keep, &counts);
+        owned = Some(next);
         last = None;
     }
-    let cur: &[f32] = match cur_i {
-        Some(i) => &bufs[i],
-        None => data,
-    };
+    let cur: &[f32] = owned.as_deref().unwrap_or(data);
+    clip_finish(cur, full, last, last_parts)
+}
+
+/// σ クリップの最後の値。cur は最後の配列、last は収束して抜けたときのその回の (std, 大きい配列なら (中心, 和))、
+/// last_parts はループの最後の統計の読みが大きい配列の版だったときの塊の数。
+fn clip_finish(
+    cur: &[f32],
+    full: bool,
+    last: Option<(f32, Option<(f32, f32)>)>,
+    last_parts: Option<usize>,
+) -> ClipStats {
     let n = cur.len();
     match last {
         // 収束して抜けた大きい配列: その回の値がそのまま答え(cur はその回と同じ配列)。
         // median_std_big の中心は median_finite_f32 と、pass_sum_hist の和は sum_f32 とビット一致する
-        // (fused_median_std_matches)。mean_f32 は (sum_f32 as f64 / n as f64) as f32 なので同じ式で作る
-        Some((sd, Some((cen, sum)))) if full => ClipStats { mean: (sum as f64 / n as f64) as f32, median: cen, std: sd },
+        // (fused_median_std_matches)。mean_f32 は (sum_f32 as f64 / n as f64) as f32 なので同じ式で作る。何も確保しない
+        Some((sd, Some((cen, sum)))) if full => {
+            ClipStats { mean: (sum as f64 / n as f64) as f32, median: cen, std: sd }
+        }
         Some((sd, _)) if full => ClipStats { mean: mean_f32(cur), median: median_finite_f32(cur), std: sd },
         Some((sd, _)) => ClipStats { mean: f32::NAN, median: f32::NAN, std: sd },
-        // 5 回で収束しなかった大きい配列: 最後の配列の中央値・std・平均を 2 回の読みで出す(値は上と同じ理由で同じ)
-        None if full && is_big(n) => {
+        // 5 回で収束しなかった大きい配列: 最後の配列の中央値・std・平均を 2 回の読みで出す(値は上と同じ理由で同じ)。
+        // メモリ: ループの最後(5 回目)の読みは、cur より長い 1 つ前の配列とヒストグラム (last_parts + 2) 本を持っていた。
+        // cur の塊の数がそれ以下なら、この読み(cur + (塊の数 + 2) 本)はそれより小さく、前の版の最大を超えない。
+        // 塊の数は長さに単調でない(n_parts)ので、超えるときは前の版と同じ計算にする(値は同じ)
+        None if full && is_big(n) && last_parts.is_some_and(|p| n_parts(n) <= p) => {
             let (sum, h1) = pass_sum_hist(cur);
             let (med, sd) = median_std_big(cur, sum, &h1);
             ClipStats { mean: (sum as f64 / n as f64) as f32, median: med, std: sd }
@@ -615,7 +622,7 @@ mod tests {
         }
     }
 
-    /// 2026-10-24 までの clip_core(回ごとに新しい配列を確保し、最後の平均・中央値・std を別々に計算し直す版)。
+    /// 2026-10-24 までの clip_core(最後の平均・中央値・std を毎回別々に計算し直す版)。
     /// 照合の基準。戻り値の 2 つ目は回った回数と、収束して抜けたか。
     fn clip_core_ref(data: &[f32], full: bool) -> (ClipStats, (usize, bool)) {
         fn filter_ref<P: Fn(f32) -> bool + Sync>(a: &[f32], keep: P, counts: &[usize]) -> Vec<f32> {
@@ -687,8 +694,8 @@ mod tests {
     }
 
     #[test]
-    fn clip_reuse_matches_reference() {
-        // 配列を使い回す clip_core と、最後の値を使い回す枝が、前の版とビット単位で同じ。
+    fn clip_matches_reference() {
+        // 最後の値を使い回す枝(収束して抜けた大きい配列・5 回回り切った大きい配列)を含め、前の版とビット単位で同じ。
         // 5 回で収束しない大小の配列・途中で収束する配列・非有限値混じり・同じ値ばかり・区切りの前後の長さ
         let mut cases: Vec<Vec<f32>> = Vec::new();
         for &n in &[0usize, 1, 2, 7, 100, 8191, 8192, 8193, 32767, 32768, 32769, 65535, 65536, 65537, 200_001] {
@@ -697,7 +704,8 @@ mod tests {
             let g: Vec<f32> = (0..n).map(|_| ((r() + r() + r() + r() - 2.0) * 10.0 + 100.0) as f32).collect();
             cases.push(g.clone());
             // 外れ値入り(7 個に 1 個)
-            cases.push(g.iter().enumerate().map(|(i, &v)| if i % 7 == 0 { v + (i % 5000) as f32 } else { v }).collect());
+            cases
+                .push(g.iter().enumerate().map(|(i, &v)| if i % 7 == 0 { v + (i % 5000) as f32 } else { v }).collect());
             // 非有限値入り
             cases.push(
                 g.iter()
@@ -745,19 +753,30 @@ mod tests {
     }
 
     #[test]
-    fn filter_into_reuses_dirty_buffer() {
-        // 書き先に前の値が残っていても(長い・短い・空)、新しく作ったものと同じ
-        let mut r = rng(5);
-        let a: Vec<f32> = (0..300_000).map(|_| r() as f32).collect();
-        let keep = |x: f32| x > 0.3;
-        let want = filter_ordered(&a, keep);
-        for init in [Vec::new(), vec![f32::NAN; 10], vec![7.0f32; 299_999], vec![-1.0f32; 400_000]] {
-            let mut out = init;
-            let counts = count_kept(&a, &keep);
-            filter_into(&a, keep, &counts, &mut out);
-            assert_eq!(out.len(), want.len());
-            assert!(out.iter().zip(&want).all(|(x, y)| x.to_bits() == y.to_bits()));
+    fn clip_finish_both_paths_match() {
+        // 5 回で収束しなかった大きい配列の最後の計算: 2 回の読み(塊の数が前の読み以下のとき)と、
+        // 前の版と同じ計算(塊が増えるとき)のどちらを通っても、前の版の値とビット単位で同じ
+        let mut r = rng(17);
+        for n in [RADIX_MIN, 65_536, 200_001, 655_360, 655_361, 1_310_720] {
+            let a: Vec<f32> = (0..n).map(|_| ((r() + r() + r() - 1.5) * 7.0 + 30.0) as f32).collect();
+            let want = ClipStats { mean: mean_f32(&a), median: median_finite_f32(&a), std: std_f32(&a) };
+            // last_parts = MAX なら 2 回の読み、Some(0) と None なら前の版と同じ計算
+            for lp in [Some(usize::MAX), Some(0), None] {
+                let got = clip_finish(&a, true, None, lp);
+                assert_eq!(got.mean.to_bits(), want.mean.to_bits(), "mean n={n} {lp:?}");
+                assert_eq!(got.median.to_bits(), want.median.to_bits(), "median n={n} {lp:?}");
+                assert_eq!(got.std.to_bits(), want.std.to_bits(), "std n={n} {lp:?}");
+            }
+            let got = clip_finish(&a, false, None, Some(usize::MAX));
+            assert!(got.mean.is_nan() && got.median.is_nan());
+            assert_eq!(got.std.to_bits(), want.std.to_bits(), "std n={n} full=false");
         }
+        // 塊の数が長さに単調でないこと(clip_finish が比べる理由)。スレッド数を決めて確かめる
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(8).build().expect("rayon のスレッドの束");
+        pool.install(|| {
+            assert_eq!(n_parts(655_360), 10);
+            assert_eq!(n_parts(655_361), 9);
+        });
     }
 
     #[test]
@@ -779,16 +798,17 @@ mod tests {
             let mask: Vec<bool> = (0..n).map(|i| (i / 3000) % 4 == 1 || i % 17 == 0).collect();
             let pairs: Vec<f32> = a.iter().zip(&mask).map(|(&s, &m)| if m { f32::NAN } else { s }).collect();
             let old = filter_ordered(&pairs, |v| !v.is_nan());
-            for init in [Vec::new(), vec![9.0f32; n]] {
-                let mut new = init;
-                unmasked_into(&a, &mask, &mut new);
-                if !with_nan {
-                    assert_eq!(new.len(), old.len());
-                    assert!(new.iter().zip(&old).all(|(x, y)| x.to_bits() == y.to_bits()));
-                }
-                assert_eq!(sigma_clipped_std(&new).to_bits(), sigma_clipped_std(&old).to_bits(), "n={n}");
+            let new = unmasked(&a, &mask);
+            assert_eq!(new.len(), mask.iter().filter(|&&m| !m).count());
+            if !with_nan {
+                assert_eq!(new.len(), old.len());
+                assert!(new.iter().zip(&old).all(|(x, y)| x.to_bits() == y.to_bits()));
             }
+            assert_eq!(sigma_clipped_std(&new).to_bits(), sigma_clipped_std(&old).to_bits(), "n={n}");
         }
+        // 長さが違えば短いほうまで(落ちない)
+        assert_eq!(unmasked(&[1.0, 2.0, 3.0], &[false, true]), vec![1.0]);
+        assert!(unmasked(&[], &[false]).is_empty());
     }
 
     #[test]

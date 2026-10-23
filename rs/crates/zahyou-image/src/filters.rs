@@ -383,7 +383,12 @@ fn zoom_axis(n_in: usize, n_out: usize) -> Vec<(usize, usize, f64, f64)> {
 
 /// zoom の 1 画素: 4 点の重みつきの和を float64 で足して float32 に丸める。zoom_linear と zoom_linear_sub で共通。
 #[inline]
-fn zoom_px(c: &[f32], bx: usize, (y0, y1, wy0, wy1): (usize, usize, f64, f64), (x0, x1, wx0, wx1): (usize, usize, f64, f64)) -> f32 {
+fn zoom_px(
+    c: &[f32],
+    bx: usize,
+    (y0, y1, wy0, wy1): (usize, usize, f64, f64),
+    (x0, x1, wx0, wx1): (usize, usize, f64, f64),
+) -> f32 {
     let mut t = 0.0f64;
     t += c[y0 * bx + x0] as f64 * wy0 * wx0;
     t += c[y0 * bx + x1] as f64 * wy0 * wx1;
@@ -507,7 +512,9 @@ pub(crate) mod tests {
     #[test]
     fn uniform3_matches_reference() {
         // 帯の幅を変え、全面の並べ直しをやめても、前の版とビット単位で同じ(帯の境目をまたぐ幅・1 行・1 列・NaN 入り)
-        for (ny, nx) in [(1usize, 1usize), (1, 700), (700, 1), (2, 3), (37, 300), (5, 257), (64, 256), (90, 1030), (33, 6001)] {
+        for (ny, nx) in
+            [(1usize, 1usize), (1, 700), (700, 1), (2, 3), (37, 300), (5, 257), (64, 256), (90, 1030), (33, 6001)]
+        {
             let mut d = rand_vals(ny * nx, (ny * 7919 + nx) as u64);
             if d.len() > 50 {
                 d[17] = f32::NAN;
