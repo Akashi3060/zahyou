@@ -551,7 +551,33 @@ impl IndexData {
         }
     }
 
-    /// 円錐の問い合わせの前置き(stars_in_cone・any_star_in_cone で共通。式も順も Python 版と同じ)。
+    /// center から角距離 radius_rad 以内の星を、f(番号, 単位ベクトル) で知らせる。
+    ///
+    /// 星の集まりは `stars_in_cone(center, radius_rad)` のうち `star_xyz(番号)` が Some のもので、単位ベクトルは
+    /// star_xyz(番号) とビットまで同じ(判定に使った値をそのまま渡す。同じ整数から同じ式で作るので同じ)。
+    /// 番号を並べ直さずに渡すので、順は木をたどる順(葉の左から)になる。開くときに葉の表が単調と確かめてあるので
+    /// これは番号の昇順だが、昇順が要る呼び手は念のため確かめること。半径が π 以上なら、木を見ずに 0 … nstars − 1 を
+    /// 順に見て、star_xyz が Some の星を渡す。
+    pub fn stars_in_cone_each(&self, center: Vec3, radius_rad: f64, mut f: impl FnMut(u32, Vec3)) {
+        match self.cone_start(center, radius_rad) {
+            ConeStart::Empty => {}
+            ConeStart::All => {
+                for id in 0..self.nstars as u32 {
+                    if let Some(v) = self.star_xyz(id) {
+                        f(id, v);
+                    }
+                }
+            }
+            ConeStart::Tree { c, chord } => {
+                let _ = self.cone_each(&c, chord, self.stars.prefilter_ok, |id, v| {
+                    f(id, v);
+                    ControlFlow::Continue(())
+                });
+            }
+        }
+    }
+
+    /// 円錐の問い合わせの前置き(stars_in_cone・any_star_in_cone・stars_in_cone_each で共通。式も順も Python 版と同じ)。
     fn cone_start(&self, center: Vec3, radius_rad: f64) -> ConeStart {
         let c = normalize(center);
         let r = radius_rad;
@@ -713,6 +739,15 @@ mod tests {
         });
         assert_eq!(hit, with.len() >= 3, "{label}");
         assert_eq!(seen, with[..with.len().min(3)], "{label}: 呼ぶ順");
+        // stars_in_cone_each: 番号は stars_in_cone のうち star_xyz が Some のものを同じ順に、単位ベクトルは star_xyz とビットまで同じ
+        let mut each = Vec::new();
+        d.stars_in_cone_each(c, r, |id, v| each.push((id, v)));
+        let want: Vec<u32> = with.iter().copied().filter(|&id| d.star_xyz(id).is_some()).collect();
+        assert_eq!(each.iter().map(|e| e.0).collect::<Vec<_>>(), want, "{label}: each c={c:?} r={r}");
+        for (id, v) in &each {
+            let w = d.star_xyz(*id).unwrap();
+            assert!((0..3).all(|k| v[k].to_bits() == w[k].to_bits()), "{label}: each の単位ベクトル {id}");
+        }
         with.len()
     }
 
