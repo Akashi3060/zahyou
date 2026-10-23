@@ -859,6 +859,35 @@ mod tests {
     }
 
     #[test]
+    fn fits_interleaved_color_blocks() {
+        // FITS の (H,W,3)(NAXIS1 = 3)を、区切りごとに作業領域を使い回して読む。全体を読んでから合成した値と同じか
+        use crate::array::{LUM_BLOCK, lum_weights, luminance_interleaved};
+        let (h, w, ch) = (700usize, 800usize, 3usize); // 56 万画素 > LUM_BLOCK(区切りが 2 つ、2 つ目は端数)
+        assert!(h * w > LUM_BLOCK);
+        for (k, &(bp, bscale, bzero)) in
+            [(-32i32, 1.0f64, 0.0f64), (16, 1.0, 32768.0), (-64, 1.0, 0.0)].iter().enumerate()
+        {
+            let bpp = (bp.unsigned_abs() / 8) as usize;
+            let bytes = rand_bytes(h * w * ch * bpp, 0xC0FFEE + k as u64);
+            let wt = lum_weights();
+            let mut src = Src::Mem(bytes);
+            let sc = Scaling::new(bp, bscale, bzero, None, false);
+            let mut a =
+                FileArray { src: &mut src, start: 0, shape: vec![h, w, ch], bitpix: bp, sc, scratch: Vec::new() };
+            let mut all = vec![0.0f32; h * w * ch];
+            old_read_f32(&mut a, 0, &mut all).unwrap();
+            let old: Vec<f32> = all.chunks_exact(ch).map(|p| (wt[0] * p[0] + wt[1] * p[1]) + wt[2] * p[2]).collect();
+            for blk in [LUM_BLOCK, 12345] {
+                let new = luminance_interleaved(&mut a, h * w, ch, wt, blk).unwrap();
+                assert!(new.iter().zip(&old).all(|(x, y)| x.to_bits() == y.to_bits()), "BITPIX {bp} 区切り {blk}");
+            }
+            let (d, ny, nx, _) = reduce_to_2d(&mut a, 200).unwrap();
+            assert_eq!((ny, nx), (h, w));
+            assert!(d.iter().zip(&old).all(|(x, y)| x.to_bits() == y.to_bits()), "BITPIX {bp} reduce_to_2d");
+        }
+    }
+
+    #[test]
     fn continue_cards() {
         let raw = vec![
             parse_card(&card("LONGSTR = 'xxxx&'")),
