@@ -5,7 +5,7 @@ Python 基準実装(`dev/solver_core.py` ほか)と同じ答えになるか、�
 満たすか、解けてはいけないものを解かないか、締め切り・中止・壊れた入力・壊れた索引で正しくふるまうかを確かめる。
 
 基準値は `rs/testdata/solver_*.json`(`rs/testdata/gen_solver.py` が Python で作る。入力の星・条件と、Python の
-`sv_solve` の trace の要点)。星図データ(`C:\AstrometryData`)・基準値・画像が無いものは `SKIP` と出して通す。
+`sv_solve` の trace の要点)。星図データ(`C:\AstrometryData`)・基準値・画像が無いものは `SKIP` と出して通す(星図データを使うものは Windows 以外でも。索引の表を開くのは Windows だけ)。
 
 ## 回し方
 

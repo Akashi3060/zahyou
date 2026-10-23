@@ -21,7 +21,7 @@ pub enum IndexError {
     Io(String),
     /// 索引の形式の問題
     Format(String),
-    /// この機械では読めない(ビッグエンディアンの CPU)
+    /// この機械では読めない(ビッグエンディアンの CPU・Windows 以外の OS)
     Unsupported(String),
     /// 呼び出しの引数がおかしい(問い合わせの形など)
     Argument(String),
@@ -218,9 +218,10 @@ impl IndexFile {
 
 /// mmap した索引の表。[`IndexFile::data`] で得る。
 pub struct IndexData {
-    // 共有モードで書き込み・削除を拒否して開いたハンドル。mmap が生きている間は持ち続ける(SAFETY の前提)
-    _file: File,
     mmap: Mmap,
+    // 共有モードで書き込み・削除を拒否して開いたハンドル。mmap が生きている間は持ち続ける(SAFETY の前提)。
+    // フィールドは宣言の順に捨てられるので mmap より後ろに置く(mmap を放してから閉じる)
+    _file: File,
     name: String,
     dimquads: usize,
     nquads: usize,
@@ -240,8 +241,8 @@ impl fmt::Debug for IndexData {
     }
 }
 
-/// 書き込みと削除を拒否する共有モードで開く(Windows)。開いている間、ほかのプロセスは書き換えも
-/// 削除も名前の変更もできず、すでに書き込み用に開いているプロセスがあればこちらが失敗する。
+/// 書き込みと削除を拒否する共有モードで開く(Windows)。開いている間、ほかの open(このプロセスの中の open も含む)は
+/// 書き換えも削除も名前の変更もできず、すでに書き込み用に開いているものがあればこちらが失敗する。
 fn open_deny_write(path: &Path) -> io::Result<File> {
     #[cfg(windows)]
     {
@@ -265,20 +266,34 @@ fn open_error_text(e: &io::Error) -> String {
     }
 }
 
-/// ファイル全体を読み取り専用で mmap する。この crate で unsafe を使うのはここだけ。
+/// ファイル全体を読み取り専用で mmap する(Windows だけ)。この crate で unsafe を使うのはここだけ。
+#[cfg(windows)]
 #[allow(unsafe_code)]
 fn map_readonly(file: &File) -> io::Result<Mmap> {
     // SAFETY: memmap2 の Mmap::map が unsafe なのは、mmap の下のファイルがほかから書き換えられたり
     // 切り詰められたりすると、Rust の &[u8] の不変の約束が破れる(読む値が変わる・範囲の外になる)ためである。
-    // - file は open_deny_write で FILE_SHARE_READ だけを許して開いてあり、そのハンドルは IndexData の _file として
-    //   Mmap と同じ寿命で持ち続ける。Windows はその間、ほかのプロセスが書き込み用に開くこと・削除・名前の変更を
-    //   共有違反で拒否する(開く時点で書き込み中のプロセスがあれば、こちらの open が失敗する)。
-    //   Windows は mmap 中のファイルの切り詰めも拒否する(ERROR_USER_MAPPED_FILE)。
-    // - このプロセスもこのファイルに書き込まない(この crate は読み取り専用の mmap しか作らない)。
+    // - file は open_deny_write で FILE_SHARE_READ だけを許して開いてある。Windows は、この open のハンドル(複製も含む)が
+    //   残っている間、ほかの open が書き込み用に開くこと・削除・名前の変更を共有違反で拒否する。共有モードの照合はプロセスを
+    //   区別しないので、このプロセスの中の別の open も拒否される(開く時点で書き込み用に開いているものがあれば、こちらの open が
+    //   失敗する)。mmap 中のファイルの切り詰めも拒否する(ERROR_USER_MAPPED_FILE)。
+    // - その open のハンドルは mmap より長く持つ。IndexData の _file は mmap より後ろのフィールドなので、mmap を放してから
+    //   閉じる(フィールドは宣言の順に捨てられる)。memmap2 も DuplicateHandle で複製したハンドル(同じ open を指す)を
+    //   Mmap の中に持ち、UnmapViewOfFile の後で閉じる。
+    // - このプロセスの中で索引のファイルを書いたり消したりするのは zahyou-net のダウンロード(落とし直しを含む)で、.part に
+    //   書いてから名前を変える。mmap 中の索引を消したり .part へ移したりしようとしても、上の共有モードで失敗する(削除と
+    //   書き込み用の open は試験 close_releases_file で確かめている。名前の変更も削除と同じアクセスで開くので拒否される)。
+    //   この crate は読み取り専用の mmap しか作らない。
     // - 長さが変わっていないことは呼ぶ側が先に確かめ、表の位置はすべて mmap の長さの内か確かめてから読む。
-    // Windows 以外では OS が書き込みを止めないので、索引ファイルを使用中に書き換えないことが前提になる
-    // (zahyou は Windows の配布物。ダウンロードは .part に書いてから名前を変える)。
+    // 前提は Windows のローカルのディスク(内蔵・外付け)に置いたとき。ネットワーク上の置き場所では、サーバーの種類によっては
+    // サーバーの側やほかの経路からの書き換えまでは止められない(コードでは確かめず、README で NAS を勧めないと書くだけ)。
+    // ほかの OS は書き込みを止めないので mmap しない(IndexData::map が先に断る)。
     unsafe { Mmap::map(file) }
+}
+
+/// Windows 以外では mmap しない(SAFETY の前提を OS が守らせないため)。IndexData::map が先に断るので、ここへは来ない。
+#[cfg(not(windows))]
+fn map_readonly(_file: &File) -> io::Result<Mmap> {
+    Err(io::Error::from(io::ErrorKind::Unsupported))
 }
 
 impl IndexData {
@@ -286,6 +301,12 @@ impl IndexData {
         if cfg!(target_endian = "big") {
             return Err(IndexError::Unsupported(
                 "ビッグエンディアンの CPU では索引を読めません(表はリトルエンディアン)".to_string(),
+            ));
+        }
+        if cfg!(not(windows)) {
+            return Err(IndexError::Unsupported(
+                "Windows 以外では索引を読めません(使っている間にファイルが書き換えられないことを OS が守らないため)"
+                    .to_string(),
             ));
         }
         let lay = f.layout();
@@ -329,8 +350,8 @@ impl IndexData {
         let name = f.name.clone();
         let (dimquads, nquads, nstars) = (lay.dimquads, lay.nquads, lay.nstars);
         Ok(IndexData {
-            _file: file,
             mmap,
+            _file: file,
             name,
             dimquads,
             nquads,

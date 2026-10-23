@@ -2,7 +2,7 @@
 //!
 //! ヘッダーの検査(validate_index_file・IndexFile::open)は通り、表を mmap するとき(IndexFile::data)に
 //! 文つきの Err になること、そのあと探しても panic せず空を返すことを確かめる。
-//! 星図データ(C:\AstrometryData。ZAHYOU_INDEX_DIR で変えられる)が無ければ SKIP と出して通す。
+//! 星図データ(C:\AstrometryData。ZAHYOU_INDEX_DIR で変えられる)が無ければ SKIP と出して通す(Windows 以外でも。表を開くのは Windows だけ)。
 
 mod common;
 

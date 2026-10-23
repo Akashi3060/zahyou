@@ -12,7 +12,7 @@
 **Rust + egui/eframe** にした(4 観点の採点で総合 1 位。速さとメモリ安全・配布で 1 位、GUI では次点の WPF に劣るが
 試作で確かめる。経緯はこの節の末尾)。
 
-- メモリ安全: 自分で書く `unsafe` は索引ファイルの mmap の 1 か所だけ(`zahyou-index`)。ほかの crate は `#![forbid(unsafe_code)]`。
+- メモリ安全: 自分で書く `unsafe` は索引ファイルの mmap の 1 か所だけ(`zahyou-index`。Windows だけで使う。12 節)。ほかの crate は `#![forbid(unsafe_code)]`。
   並列は rayon で、データ競合は型検査(Send/Sync)でコンパイル時に拒否される。
 - 速さの目標(Python 版・WSL 版と同じ機械で比べる):
 
@@ -1042,3 +1042,49 @@ commit は `37adbc4`(正解データ)・`0b394e3`(一時フォルダー)・`bd0e
 
 - 変えていない crate(zahyou-wcs・zahyou-index・zahyou-image・zahyou-plot)の試験と、`--include-ignored` の重い試験は回していない。
   exe の release ビルドはしていない(配る exe は β2 のまま)。
+
+## 12. 2026-10-24 の保守(mmap の安全の前提)
+
+「zahyou の unsafe を無くせるか」を調べた結果は「無くすには mmap をやめるしかない」だった。std に mmap は無く、memmap2 のファイル用の
+作成関数は全部 `unsafe fn`。やめる案は 3 つあり、どれにも代償がある。
+
+- ファイルごと読む: 4′ までのブラインドで RAM 8 GB を超えうる。
+- 必要な所だけ読む: 探索の内側に読み出しが入り、並列が効きにくい。
+- 上限つきの自前キャッシュ: kdtree.rs・file.rs の大半を書き直す。
+
+外しても exe から unsafe は消えない(依存の中に残り、減る依存は memmap2 の 1 個)。そこで **外さず**、次の 3 つを入れた(ユーザーの決定)。
+
+- **SAFETY の書き違いを直した。** 2 か所あった。
+  - `IndexData` は共有モードで開いたハンドル `_file` を「Mmap と同じ寿命で持つ」と書いていた。ところが構造体のフィールドは宣言の順に
+    捨てられるので、`_file` は `mmap` より先に閉じていた。守りが保たれていたのは、memmap2 が DuplicateHandle で複製したハンドル
+    (同じ open を指す)を Mmap の中に持ち、UnmapViewOfFile の後で閉じるため(memmap2-0.9.11 `src/windows.rs` の `MmapInner::new` と `Drop`)。
+    フィールドを `mmap` → `_file` の順に入れ替えて文字どおりにし、複製したハンドルのこともコメントに書いた。
+  - 「このプロセスもこのファイルに書き込まない」は理由になっていなかった。同じ exe の zahyou-net は、落とし直しで索引を消したり `.part` へ
+    移して書き足したりする(`index_dl.rs`・`http.rs`)。それでも mmap 中の索引に書けないのは、共有モードの照合がプロセスを区別しないため
+    (試験 `close_releases_file` は同じプロセスからの削除と書き込み用の open が失敗することを確かめている)。コメントをそう書き直した。
+- **mmap を Windows だけにした。** `map_readonly` は `#[cfg(windows)]`。ほかの OS は使用中の書き換えを止めないので、
+  `IndexData::map` がビッグエンディアンのときと同じ形で `IndexError::Unsupported` を返し、表を開かない(解法では「壊れている」の側に入る)。
+  `zahyou-index` の lint は、Windows では `deny(unsafe_code)`、ほかでは `forbid(unsafe_code)`。Windows での挙動は変わらない。
+  試験も合わせた。星図データを使う試験は、Windows 以外では SKIP する(`zahyou-index` と `zahyou-solver` の `tests/common` と、
+  解法の単体試験 `index_open_for_writing_is_not_called_broken`)。そのうえで、意味の無くなった `if cfg!(windows)` を外した。
+  Windows 以外ではコンパイルして確かめていない(手元に他の OS の標準ライブラリが無い。zahyou は Windows の配布物)。
+- **README に星図データの置き場所の注意を書いた。** 内蔵ディスクに置く、外付けのドライブは解析の途中で抜かない、NAS は勧めない。
+  理由は次の 2 つ。どちらも一般知識で、zahyou では試していない。
+  - mmap したページを読む途中でドライブが外れると、Windows は例外でプロセスを止め、`catch_unwind` では受けられない。
+    まだ開いていない索引なら、開くときの OS のエラーで「今は開けない」と出て、その探索では使わずに続く。
+  - ネットワーク上の置き場所では、サーバーの種類によっては、サーバー側やほかの経路からの書き換えを共有モードで止めきれない。
+  ノートブック版(np.memmap)の節と、「うまくいかないとき」の表にも書いた(閉じるときの行を足し、「今は開けない」の行に外付け・NAS の場合を足した)。
+  wiki(星図データの準備・ノートブック版・困ったとき)も同じに直した。
+
+試験(実測、Core Ultra 7 265K)。cargo の試験は ZAHYOU_CACHE・ZAHYOU_SETTINGS・LOCALAPPDATA を一時のフォルダーへ向け、`ZAHYOU_OFFLINE_TESTS=1`。
+
+| 試験 | 結果 |
+|---|---|
+| `cargo clippy --workspace --all-targets -- -D warnings` | 指摘 0 |
+| `cargo test --workspace -- --skip live` | **271 本通過・失敗 0**(無視 9 本は既定どおり回していない)。1 分 47 秒 |
+| `close_releases_file`(星図データの実物で) | 開いている間は削除・書き込み用に開くことを拒否、`close()` とハンドルを放した後は削除できた |
+| 利用者の `%LOCALAPPDATA%\zahyou` の cache.json・gui.json | sha256 は作業の前後で同じ |
+
+- 次の版へ回したもの(exe か配っている資産が変わるため): アプリの［使い方］タブへの注意の追記。星図データを `\\` で始まるネットワーク上の場所に
+  置いたときに画面で注意を出す処理。マニュアル(v4)の 4.4 節と 8 章の表(`dev/make_manual.py`)。ノートブックのセル C の `INDEX_DIR` の説明
+  (`dev/nb_settings.py`)。

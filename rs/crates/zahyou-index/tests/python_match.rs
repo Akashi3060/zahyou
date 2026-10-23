@@ -1,6 +1,6 @@
 //! Python 基準実装(dev/solver_index.py)の結果(rs/testdata/index_*.json、gen_index.py が作る)との突き合わせ。
 //!
-//! 星図データ(C:\AstrometryData。ZAHYOU_INDEX_DIR で変えられる)か基準値が無ければ SKIP と出して通す。
+//! 星図データ(C:\AstrometryData。ZAHYOU_INDEX_DIR で変えられる)か基準値が無ければ SKIP と出して通す(Windows 以外でも。表を開くのは Windows だけ)。
 
 mod common;
 
@@ -580,21 +580,17 @@ fn close_releases_file() {
     let cone = f.stars_in_cone(f.star_xyz(5), 30f64.to_radians());
     assert!(!hits.is_empty() && !cone.is_empty());
     drop(d);
-    if cfg!(windows) {
-        // 開いている間は消せない・書き込み用に開けない
-        assert!(std::fs::remove_file(&p).is_err(), "開いている間にファイルが消せた");
-        assert!(std::fs::OpenOptions::new().write(true).open(&p).is_err(), "開いている間に書き込み用に開けた");
-    }
+    // 開いている間は消せない・書き込み用に開けない(同じプロセスからでも。表を開くのは Windows だけ)
+    assert!(std::fs::remove_file(&p).is_err(), "開いている間にファイルが消せた");
+    assert!(std::fs::OpenOptions::new().write(true).open(&p).is_err(), "開いている間に書き込み用に開けた");
     f.close();
     assert!(!f.is_open());
     let x = f.star_xyz(0); // 閉じた後に使えばまた開く
     assert!(x[0].is_finite() && f.is_open());
     let held = f.data().unwrap();
     f.close();
-    if cfg!(windows) {
-        // 外にハンドルが残っている間は放されない
-        assert!(std::fs::remove_file(&p).is_err());
-    }
+    // 外にハンドルが残っている間は放されない
+    assert!(std::fs::remove_file(&p).is_err());
     drop(held);
     std::fs::remove_file(&p).expect("close() の後もファイルが消せない");
     let _ = std::fs::remove_dir_all(&tmp);
