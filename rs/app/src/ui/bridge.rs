@@ -146,7 +146,7 @@ pub fn run(p: &pipeline::RunParams, debug_wcs: Option<&Path>, cancel: &AtomicBoo
 /// 解析の結果から図を抜き出して画面の形にする。図は写さずに移す(r.figures は空になる)。
 ///
 /// 以前は `r.figures.iter()` で回して `Arc::new(f.clone())` で図を丸ごと写していた。rgba は幅×高さ×4 バイト
-/// (24 MP で 96 MB、北が上の図は回転の外接矩形で最大 2 倍)で、写す間は元と写しが両方メモリにあった。
+/// (24 MP で 96 MB、北が上の図は回転の外接矩形のぶん大きくなる)で、写す間は元と写しが両方メモリにあった。
 /// 中身は同じ値を移すだけなので、画面の形(figure_to_scene)も保存(save_figure が読む source)もバイト単位で同じ。
 /// 前提: RunResult の numbers()・detail()・status_text() は figures を読まない(pipeline.rs。offsets・summary・
 /// seconds・cancelled・wcs だけ)。r から図を読む処理をこの後に足すと空になっているので、足すならこの前に置く。

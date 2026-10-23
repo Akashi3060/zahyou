@@ -233,7 +233,7 @@ fn screen_scale(w: f64, h: f64) -> f64 {
 struct Trans<'a> {
     wcs: &'a Wcs,
     /// SIP を外した TAN(SIP があるときだけ。遠すぎる点の打ち切りの判定に使う)。旧版は点ごとに `tan_only()` で
-    /// 複製していた(SIP の係数の Vec 4 本の確保と解放)。crval・crpix・cd は同じなので、判定の値も同じ
+    /// 複製していた(SIP の係数の Vec の確保と解放。逆変換も持つ SIP なら 4 本)。crval・crpix・cd は同じなので、判定の値も同じ
     tan: Option<Wcs>,
     /// 画像の大きさ(遠すぎる点の打ち切りに使う)
     lim: f64,
