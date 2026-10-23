@@ -248,8 +248,9 @@ fn finish(
     }
 
     // 星図 (白地に黒い星) は明暗が逆。検出に使う面だけ反転する(表示は元のまま)。
-    // 全部有限なら looks_inverted は `min_max(&data)` をもう一度求めるだけなので、上の lo・hi をそのまま渡す
-    // (同じ関数を同じ配列にかけた値で、ビットまで同じ)。補完した値が ±inf(中央値の和のあふれ)のときだけ元の関数
+    // 全部有限なら looks_inverted は全部有限かを確かめ、`min_max(&data)` をもう一度求めるだけなので、上の lo・hi を
+    // そのまま渡す(上の lo・hi は `min_max(&data)` とビットまで同じ: 補完したときと 0 のときは min_max そのもの、
+    // それ以外は 0 以外の同じ値)。補完した値が ±inf(中央値の和のあふれ)のときだけ元の関数を呼ぶ
     let inverted = if fill_finite { inverted_by(&data.data, lo, hi) } else { looks_inverted(&data) };
     if inverted {
         let mx = hi;
