@@ -296,6 +296,18 @@ pub(crate) fn lum_weights() -> [f32; 3] {
     [c[0] / s, c[1] / s, c[2] / s]
 }
 
+/// 長さ n の、`T::default()`(数なら 0)で埋めた配列。確保できなければ Err(abort しない)。
+///
+/// `resize` で埋めると 1 本のスレッドで全部のページに初めて書く(24 MP の f32 で 96 MB・ページの割り当て約 2.4 万回)。
+/// ここでは予約した領域へ rayon で並列に書く(rayon の Vec への `par_extend` は、長さの分かる反復なら予約済みの
+/// 領域へ添字の順に直接書く。予約が足りているので中で確保し直さない)。中身は `resize` と同じ値。
+pub(crate) fn alloc_filled<T: Clone + Default + Send>(n: usize) -> Result<Vec<T>, String> {
+    let mut v = Vec::new();
+    v.try_reserve_exact(n).map_err(|_| format!("画像が大きすぎてメモリに載りません ({n} 画素)"))?;
+    v.par_extend(rayon::iter::repeat_n(T::default(), n));
+    Ok(v)
+}
+
 /// `_reduce_to_2d(data, max_frames=200)`: 3 次元以上を 2 次元へ。戻り値 (画素, 高さ, 幅, 説明)。
 pub(crate) fn reduce_to_2d(
     src: &mut dyn ArraySource,
@@ -317,12 +329,7 @@ pub(crate) fn reduce_to_2d(
         shape = shape[shape.len() - 3..].to_vec();
     }
     let total: usize = shape.iter().product();
-    let alloc = |n: usize| -> Result<Vec<f32>, String> {
-        let mut v = Vec::new();
-        v.try_reserve_exact(n).map_err(|_| format!("画像が大きすぎてメモリに載りません ({n} 画素)"))?;
-        v.resize(n, 0.0f32);
-        Ok(v)
-    };
+    let alloc = alloc_filled::<f32>;
     match shape.len() {
         2 => {
             let (ny, nx) = (shape[0], shape[1]);

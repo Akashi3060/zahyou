@@ -20,7 +20,7 @@ use flate2::read::MultiGzDecoder;
 use rayon::prelude::*;
 use zahyou_wcs::{Card, CardValue};
 
-use crate::array::{MemArray, Scaling, Typed};
+use crate::array::{MemArray, Scaling, Typed, alloc_filled};
 use crate::fits::{Hdu, Src, get, get_int, get_num, get_str};
 
 /// 展開した画素の数の上限(astropy も ZNAXISn を int32 の範囲に限る)
@@ -786,20 +786,14 @@ pub(crate) fn decompress(src: &mut Src, hdu: &Hdu) -> Result<(MemArray, Vec<Card
         c_zero: find("ZZERO"),
         c_blank: find("ZBLANK"),
     };
-    // 出力の配列(ZBITPIX の型)
-    fn alloc<T: Clone + Default>(n: usize) -> Result<Vec<T>, String> {
-        let mut v = Vec::new();
-        v.try_reserve_exact(n).map_err(|_| format!("画像が大きすぎてメモリに載りません ({n} 画素)"))?;
-        v.resize(n, T::default());
-        Ok(v)
-    }
+    // 出力の配列(ZBITPIX の型)。0 埋めは並列(alloc_filled。値は以前の resize と同じ 0)
     let mut out = match zbitpix {
-        8 => Typed::U8(alloc(total)?),
-        16 => Typed::I16(alloc(total)?),
-        32 => Typed::I32(alloc(total)?),
-        64 => Typed::I64(alloc(total)?),
-        -32 => Typed::F32(alloc(total)?),
-        _ => Typed::F64(alloc(total)?),
+        8 => Typed::U8(alloc_filled(total)?),
+        16 => Typed::I16(alloc_filled(total)?),
+        32 => Typed::I32(alloc_filled(total)?),
+        64 => Typed::I64(alloc_filled(total)?),
+        -32 => Typed::F32(alloc_filled(total)?),
+        _ => Typed::F64(alloc_filled(total)?),
     };
     if total > 0 {
         let nd = shape.len();

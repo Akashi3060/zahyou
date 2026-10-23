@@ -3,7 +3,7 @@
 //! 拡張子が FITS のもの(.fits .fit .fts .fz .fits.gz .fit.gz)は FITS → 画像ファイルの順、それ以外は逆の順で試す
 //! (拡張子と中身が食い違うファイル対策)。読めたら
 //! 1. 2 次元・16 画素以上かを確かめる
-//! 2. 表示用に今の値を写す
+//! 2. 表示用の面は今の配列をそのまま持つ(写さない。検出用の面は 3・4・6 で書き換えるときだけ新しい配列にする)
 //! 3. ベイヤー配列のキーがあれば 3×3 の二項フィルター [1,2,1]⊗[1,2,1]/16 で市松模様を消す(星の位置はずれない)
 //! 4. 非有限値を有限値の中央値で埋める
 //! 5. 一様なら Err
@@ -13,6 +13,7 @@
 //! 16 bit を逆のバイト順で読んで値が化けていた。ここでは画像ファイルとして読めないので FITS として正しく読む。
 
 use std::path::Path;
+use std::sync::Arc;
 
 use rayon::prelude::*;
 use zahyou_wcs::{Card, CardValue};
@@ -123,8 +124,14 @@ pub fn looks_inverted(data: &Image2D) -> bool {
     if v.is_empty() {
         return false;
     }
-    let med = median_finite_f32(v) as f64;
     let (lo, hi) = min_max(v);
+    inverted_by(v, lo, hi)
+}
+
+/// `looks_inverted` の判定の部分。`v` は空でない有限値の並び、`lo`・`hi` は `min_max(v)` の値。
+/// 読み込みでは全部有限で `min_max` も済んでいるので、全部有限かの走査と `min_max` を飛ばしてここだけ呼ぶ。
+fn inverted_by(v: &[f32], lo: f32, hi: f32) -> bool {
+    let med = median_finite_f32(v) as f64;
     let up = hi as f64 - med;
     let down = med - lo as f64;
     down > 0.0 && up <= down * 0.05
@@ -134,6 +141,33 @@ fn min_max(v: &[f32]) -> (f32, f32) {
     v.par_chunks(1 << 16)
         .map(|c| c.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), &x| (a.min(x), b.max(x))))
         .reduce(|| (f32::INFINITY, f32::NEG_INFINITY), |(a, b), (c, d)| (a.min(c), b.max(d)))
+}
+
+/// 非有限値の数と `min_max` を 1 回の走査で(読み込みで全面を 2 回読まないため)。
+/// 最小・最大は、非有限値が 1 つも無いときだけ `min_max(v)` と同じ値になる(NaN・±inf も混ぜて畳むので、
+/// 非有限値があるときの値は使わないこと)。同じ値でもビットが違いうるのは ±0 だけ(0 以外の有限値は、
+/// 等しければビットも同じ)。±0 のどちらを選ぶかは畳み方(ベクトル化の仕方)で変わりうるので、
+/// 呼ぶ側は最小・最大が 0 のときは `min_max` で取り直す。
+fn count_bad_min_max(v: &[f32]) -> (usize, f32, f32) {
+    v.par_chunks(1 << 16)
+        .map(|c| {
+            c.iter().fold((0usize, f32::INFINITY, f32::NEG_INFINITY), |(n, a, b), &x| {
+                (n + usize::from(!x.is_finite()), a.min(x), b.max(x))
+            })
+        })
+        .reduce(|| (0, f32::INFINITY, f32::NEG_INFINITY), |(n, a, b), (m, c, d)| (n + m, a.min(c), b.max(d)))
+}
+
+/// 画素ごとの変換を面にかける。ほかと共有していない(`Arc` が 1 つだけの)面はその場で書き換え、
+/// 表示用の面と共有しているなら、並列の map で新しい配列を作る(`Arc::make_mut` のように直列で写してから
+/// 書き換えると、96 MB の直列の memcpy が残る)。どちらも各画素に同じ `f` をかけるだけなので値は同じ。
+fn map_plane(img: &mut Arc<Image2D>, f: impl Fn(f32) -> f32 + Sync + Send) {
+    if let Some(m) = Arc::get_mut(img) {
+        m.data.par_iter_mut().for_each(|v| *v = f(*v));
+    } else {
+        let data: Vec<f32> = img.data.par_iter().map(|&v| f(v)).collect();
+        *img = Arc::new(Image2D { width: img.width, height: img.height, data });
+    }
 }
 
 /// `load_image_any`: FITS・PNG・JPEG・TIFF・キューブを読み、2 次元の float32 にする。
@@ -157,49 +191,73 @@ pub fn load_image_any(path: impl AsRef<Path>) -> Result<Loaded, LoadError> {
             }
         }
     }
-    let Some((mut data, ny, nx, header, mut notes, flip_y)) = got else {
+    let Some((data, ny, nx, header, notes, flip_y)) = got else {
         return Err(LoadError::Unreadable(first_error.unwrap_or_default()));
     };
+    finish(data, ny, nx, header, notes, flip_y)
+}
+
+/// 読めた画素から `Loaded` を作る(モジュールの説明の 1〜6)。
+///
+/// 表示用の面は読み込んだままの配列をそのまま持ち、検出用の面は書き換えが要るときだけ新しい配列にする
+/// (以前は最初に `data.clone()` で表示用を写していた。値は同じ: 表示用は今も加工前の値)。
+/// - ベイヤー: `binomial3` が新しい配列を返す(表示用はそのまま)
+/// - 非有限値の補完・明暗の反転: `map_plane`(共有中なら並列に新しい配列、単独ならその場で)
+/// - どれも無ければ検出用と表示用は同じ配列
+fn finish(
+    data: Vec<f32>,
+    ny: usize,
+    nx: usize,
+    header: Vec<Card>,
+    mut notes: Vec<String>,
+    flip_y: bool,
+) -> Result<Loaded, LoadError> {
     if data.len() != ny * nx {
         return Err(LoadError::NotTwoDimensional(format!("({ny}, {nx})")));
     }
     if ny.min(nx) < 16 {
         return Err(LoadError::TooSmall { height: ny, width: nx });
     }
-    let display = Image2D { width: nx, height: ny, data: data.clone() };
+    let display = Arc::new(Image2D { width: nx, height: ny, data });
+    let mut data = Arc::clone(&display);
 
     if let Some(pat) = bayer_pattern(&header) {
         // 2x2 の平均 (v6 まで) は窓が片側に寄るので星の位置が +0.5 px ずれていた。対称な 3x3 の二項カーネルならずれない
-        data = binomial3(&data, ny, nx);
+        data = Arc::new(Image2D { width: nx, height: ny, data: binomial3(&display.data, ny, nx) });
         notes.push(format!("ベイヤー配列 ({pat}) を 3x3 の二項フィルターで平滑化"));
     }
 
-    let n_bad = data.par_iter().filter(|v| !v.is_finite()).count();
+    // 非有限値の数と最小・最大を 1 回の走査で。補完が要らないときの最小・最大は `min_max(&data)` と同じ値
+    // (0 以外ならビットも同じ。0 のときは ±0 の選び方を以前と揃えるため `min_max` で取り直す)
+    let (n_bad, mut lo, mut hi) = count_bad_min_max(&data.data);
+    // 補完した値が有限か(有限なら、補完のあとは全部有限で、looks_inverted の全部有限かの走査が要らない)
+    let mut fill_finite = true;
     if n_bad > 0 {
-        let good = filter_ordered(&data, |v| v.is_finite());
+        let good = filter_ordered(&data.data, |v| v.is_finite());
         let fill = if good.is_empty() { 0.0f32 } else { median_finite_f32(&good) };
-        data.par_iter_mut().for_each(|v| {
-            if !v.is_finite() {
-                *v = fill;
-            }
-        });
+        drop(good);
+        map_plane(&mut data, |v| if v.is_finite() { v } else { fill });
         notes.push(format!("非有限値 {n_bad} 画素を中央値で補完"));
+        fill_finite = fill.is_finite();
+        (lo, hi) = min_max(&data.data);
+    } else if lo == 0.0 || hi == 0.0 {
+        (lo, hi) = min_max(&data.data);
     }
-
-    let (lo, hi) = min_max(&data);
     if hi <= lo {
         return Err(LoadError::Uniform);
     }
 
-    let mut img = Image2D { width: nx, height: ny, data };
-    // 星図 (白地に黒い星) は明暗が逆。検出に使う面だけ反転する(表示は元のまま)
-    if looks_inverted(&img) {
+    // 星図 (白地に黒い星) は明暗が逆。検出に使う面だけ反転する(表示は元のまま)。
+    // 全部有限なら looks_inverted は `min_max(&data)` をもう一度求めるだけなので、上の lo・hi をそのまま渡す
+    // (同じ関数を同じ配列にかけた値で、ビットまで同じ)。補完した値が ±inf(中央値の和のあふれ)のときだけ元の関数
+    let inverted = if fill_finite { inverted_by(&data.data, lo, hi) } else { looks_inverted(&data) };
+    if inverted {
         let mx = hi;
-        img.data.par_iter_mut().for_each(|v| *v = mx - *v);
+        map_plane(&mut data, |v| mx - v);
         notes.push("白地に黒い星 (星図) とみて明暗を反転".to_string());
     }
 
-    Ok(Loaded { data: img, display, header, note: notes.join(" / "), flip_y })
+    Ok(Loaded { data, display, header, note: notes.join(" / "), flip_y })
 }
 
 #[cfg(test)]
@@ -228,6 +286,170 @@ mod tests {
         // 最後の CFAIMAGE が空文字なら pat は '' で、XBAYROFF は見ない
         assert_eq!(bayer_pattern(&[h("CFAIMAGE", CardValue::Str("".into())), h("XBAYROFF", CardValue::Int(1))]), None);
         assert_eq!(bayer_pattern(&[]), None);
+    }
+
+    /// 以前の後処理(表示用を最初に `clone` し、検出用をその場で書き換える)。`finish` と値を比べる。
+    fn old_finish(
+        mut data: Vec<f32>,
+        ny: usize,
+        nx: usize,
+        header: &[Card],
+        mut notes: Vec<String>,
+    ) -> Result<(Vec<f32>, Vec<f32>, String), LoadError> {
+        if data.len() != ny * nx {
+            return Err(LoadError::NotTwoDimensional(format!("({ny}, {nx})")));
+        }
+        if ny.min(nx) < 16 {
+            return Err(LoadError::TooSmall { height: ny, width: nx });
+        }
+        let display = data.clone();
+        if let Some(pat) = bayer_pattern(header) {
+            data = binomial3(&data, ny, nx);
+            notes.push(format!("ベイヤー配列 ({pat}) を 3x3 の二項フィルターで平滑化"));
+        }
+        let n_bad = data.par_iter().filter(|v| !v.is_finite()).count();
+        if n_bad > 0 {
+            let good = filter_ordered(&data, |v| v.is_finite());
+            let fill = if good.is_empty() { 0.0f32 } else { median_finite_f32(&good) };
+            data.par_iter_mut().for_each(|v| {
+                if !v.is_finite() {
+                    *v = fill;
+                }
+            });
+            notes.push(format!("非有限値 {n_bad} 画素を中央値で補完"));
+        }
+        let (lo, hi) = min_max(&data);
+        if hi <= lo {
+            return Err(LoadError::Uniform);
+        }
+        let mut img = Image2D { width: nx, height: ny, data };
+        if looks_inverted(&img) {
+            let mx = hi;
+            img.data.par_iter_mut().for_each(|v| *v = mx - *v);
+            notes.push("白地に黒い星 (星図) とみて明暗を反転".to_string());
+        }
+        Ok((img.data, display, notes.join(" / ")))
+    }
+
+    fn bits(v: &[f32]) -> Vec<u32> {
+        v.iter().map(|x| x.to_bits()).collect()
+    }
+
+    /// 決まった擬似乱数(xorshift64*)の [0, 1)
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> f32 {
+            let x = &mut self.0;
+            *x ^= *x >> 12;
+            *x ^= *x << 25;
+            *x ^= *x >> 27;
+            (x.wrapping_mul(0x2545F4914F6CDD1D) >> 40) as f32 / (1u64 << 24) as f32
+        }
+    }
+
+    #[test]
+    fn finish_same_as_before() {
+        let bayer = vec![h("BAYERPAT", CardValue::Str("RGGB".into()))];
+        let (ny, nx) = (70, 90);
+        let n = ny * nx;
+        let mut r = Rng(0x1234_5678_9abc_def1);
+        // 名前・画素・ヘッダー
+        let mut cases: Vec<(&str, Vec<f32>, Vec<Card>)> = Vec::new();
+        let noise: Vec<f32> = (0..n).map(|_| 100.0 + 20.0 * r.next()).collect();
+        cases.push(("ふつう", noise.clone(), vec![]));
+        cases.push(("ベイヤー", noise.clone(), bayer.clone()));
+        let mut nan = noise.clone();
+        for i in (0..n).step_by(37) {
+            nan[i] = if i % 3 == 0 {
+                f32::NAN
+            } else if i % 3 == 1 {
+                f32::INFINITY
+            } else {
+                f32::NEG_INFINITY
+            };
+        }
+        cases.push(("非有限値", nan.clone(), vec![]));
+        cases.push(("ベイヤー+非有限値", nan.clone(), bayer.clone()));
+        // 白地に黒い星(反転する)
+        let mut chart: Vec<f32> = (0..n).map(|_| 250.0 - r.next()).collect();
+        for i in (0..n).step_by(53) {
+            chart[i] = 10.0 * r.next();
+        }
+        cases.push(("反転", chart.clone(), vec![]));
+        cases.push(("ベイヤー+反転", chart.clone(), bayer.clone()));
+        let mut chart_nan = chart.clone();
+        for i in (5..n).step_by(91) {
+            chart_nan[i] = f32::NAN;
+        }
+        cases.push(("非有限値+反転", chart_nan.clone(), vec![]));
+        cases.push(("ベイヤー+非有限値+反転", chart_nan, bayer.clone()));
+        // 最大が 0 で +0 と -0 が混ざる白地(反転の mx の ±0 が以前と同じか)
+        let mut zero: Vec<f32> = (0..n).map(|i| if i % 2 == 0 { 0.0 } else { -0.0 }).collect();
+        for i in (0..n).step_by(41) {
+            zero[i] = -100.0 * (0.5 + r.next());
+        }
+        cases.push(("最大が ±0 の反転", zero.clone(), vec![]));
+        let mut zero_nan = zero.clone();
+        zero_nan[7] = f32::NAN;
+        cases.push(("最大が ±0 の反転+非有限値", zero_nan, vec![]));
+        // 最小が ±0
+        let lowzero: Vec<f32> = (0..n)
+            .map(|i| {
+                if i % 5 == 0 {
+                    -0.0
+                } else if i % 5 == 1 {
+                    0.0
+                } else {
+                    r.next()
+                }
+            })
+            .collect();
+        cases.push(("最小が ±0", lowzero, vec![]));
+        // 補完の中央値があふれて inf になる(大きな値ばかり)
+        let mut huge: Vec<f32> = (0..n).map(|_| 3.0e38 + 1.0e37 * r.next()).collect();
+        huge[0] = f32::NAN;
+        huge[1] = f32::NAN; // 有限値を偶数個にして、中央値を 2 つの和(あふれて inf)にする
+        cases.push(("補完値が inf", huge, vec![]));
+        // 一様・全部非有限・小さすぎ・形が合わない
+        cases.push(("一様", vec![5.0; n], vec![]));
+        cases.push(("全部 NaN", vec![f32::NAN; n], vec![]));
+        cases.push((
+            "非有限値を除くと一様",
+            nan.iter().map(|v| if v.is_finite() { 1.0 } else { *v }).collect(),
+            vec![],
+        ));
+        for (name, data, header) in cases {
+            let old = old_finish(data.clone(), ny, nx, &header, vec!["前".into()]);
+            let new = finish(data, ny, nx, header, vec!["前".into()], true);
+            match (old, new) {
+                (Ok((od, odisp, onote)), Ok(l)) => {
+                    assert_eq!(bits(&od), bits(&l.data.data), "{name}: 検出用の面");
+                    assert_eq!(bits(&odisp), bits(&l.display.data), "{name}: 表示用の面");
+                    assert_eq!(onote, l.note, "{name}: 説明");
+                    assert_eq!((l.data.width, l.data.height, l.display.width, l.display.height), (nx, ny, nx, ny));
+                    assert!(l.flip_y);
+                }
+                (Err(a), Err(b)) => assert_eq!(a, b, "{name}: エラー"),
+                (a, b) => panic!("{name}: 以前 {:?} / 今 {:?}", a.map(|x| x.2), b.map(|x| x.note)),
+            }
+        }
+        assert_eq!(
+            finish(vec![1.0; 15 * 20], 15, 20, vec![], vec![], false).unwrap_err(),
+            LoadError::TooSmall { height: 15, width: 20 }
+        );
+        assert!(matches!(finish(vec![1.0; 10], 16, 16, vec![], vec![], false), Err(LoadError::NotTwoDimensional(_))));
+    }
+
+    #[test]
+    fn plain_image_shares_one_array() {
+        // 加工の無い画像では検出用と表示用が同じ配列(写しを作らない)
+        let d: Vec<f32> = (0..400).map(|i| i as f32).collect();
+        let l = finish(d, 20, 20, vec![], vec![], false).unwrap();
+        assert!(Arc::ptr_eq(&l.data, &l.display));
+        // ベイヤーなら別
+        let d: Vec<f32> = (0..400).map(|i| i as f32).collect();
+        let l = finish(d, 20, 20, vec![h("BAYERPAT", CardValue::Str("RGGB".into()))], vec![], false).unwrap();
+        assert!(!Arc::ptr_eq(&l.data, &l.display));
     }
 
     #[test]

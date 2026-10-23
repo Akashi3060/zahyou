@@ -21,6 +21,8 @@
 
 #![forbid(unsafe_code)]
 
+use std::sync::Arc;
+
 mod array;
 mod deep;
 mod detect;
@@ -74,12 +76,17 @@ impl Image2D {
 }
 
 /// 読み込んだ画像(Python の `SolveInput`)。
+///
+/// `data` と `display` は `Arc` で持つ。ベイヤー・非有限値の補完・明暗の反転のどれも無い画像では、2 つは
+/// 同じ配列を指す(写しを作らない。24 MP で 96 MB の確保と直列の memcpy が無くなる)。`Arc` 越しには `&mut` が
+/// 取れないので、片方を書き換えて他方まで変わる、ということは型で起きない(書き換えるなら `Arc::make_mut` で写す)。
+/// 呼ぶ側は `&loaded.data` を `&Image2D` として渡せる(参照外しの型強制)。
 #[derive(Clone, Debug)]
 pub struct Loaded {
     /// 星の検出に使う面(ベイヤーの平滑化・非有限値の補完・明暗の反転を済ませたもの)
-    pub data: Image2D,
+    pub data: Arc<Image2D>,
     /// 表示用の面(読み込んだままの値。非有限値もそのまま。`data` と同じ幾何)
-    pub display: Image2D,
+    pub display: Arc<Image2D>,
     /// FITS のヘッダー(画像ファイルなら空)。タイル圧縮なら astropy と同じく画像のヘッダーに戻したもの
     pub header: Vec<Card>,
     /// 読み込み方法の説明(Python 版と同じ文。" / " でつなぐ)

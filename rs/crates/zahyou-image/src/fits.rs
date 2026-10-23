@@ -16,7 +16,7 @@ use flate2::read::MultiGzDecoder;
 use rayon::prelude::*;
 use zahyou_wcs::{Card, CardValue};
 
-use crate::array::{ArraySource, Scaling, py_tuple, reduce_to_2d};
+use crate::array::{ArraySource, ScaleKind, Scaling, py_tuple, reduce_to_2d};
 use crate::tile;
 
 pub(crate) const BLOCK: u64 = 2880;
@@ -472,6 +472,9 @@ struct FileArray<'a> {
     shape: Vec<usize>,
     bitpix: i32,
     sc: Scaling,
+    /// ファイルから読んだバイトを置く作業領域(呼ぶたびに作り直さず使い回す。最大 READ_CHUNK 要素ぶん)。
+    /// 小さく区切って何度も読む呼び方(画素ごとに色が並ぶ配列の輝度の合成)で、毎回新しいページを触らないため
+    scratch: Vec<u8>,
 }
 
 /// 一度に読む要素数
@@ -484,18 +487,25 @@ impl FileArray<'_> {
         (self.bitpix.unsigned_abs() / 8) as usize
     }
 
-    fn read_conv<T: Copy + Send + Default>(
+    /// start から out.len() 個を読み、1 要素ぶんのバイト(ビッグエンディアン)に conv をかけて out へ。
+    /// conv は静的に渡す(以前の `&dyn Fn` は 1 画素ごとの間接呼び出しで、インライン化もベクトル化もされなかった)。
+    fn read_conv<T: Copy + Send, F: Fn(&[u8]) -> T + Sync>(
         &mut self,
         start: usize,
         out: &mut [T],
-        conv: &(dyn Fn(&[u8]) -> T + Sync),
+        conv: F,
     ) -> Result<(), String> {
         let bpp = self.bpp();
         let total: usize = self.shape.iter().product();
         if start.checked_add(out.len()).is_none_or(|e| e > total) {
             return Err("配列の範囲外を読もうとしました".into());
         }
-        let mut buf = vec![0u8; out.len().min(READ_CHUNK) * bpp];
+        let need = out.len().min(READ_CHUNK) * bpp;
+        if self.scratch.len() < need {
+            // vec! の 0 埋めは OS の 0 のページをそのまま使う(resize のように直列に 0 を書かない)
+            self.scratch = vec![0u8; need];
+        }
+        let buf = &mut self.scratch;
         for (ci, chunk) in out.chunks_mut(READ_CHUNK).enumerate() {
             let off = self.start + ((start + ci * READ_CHUNK) as u64) * bpp as u64;
             let b = &mut buf[..chunk.len() * bpp];
@@ -536,19 +546,46 @@ impl ArraySource for FileArray<'_> {
 
     fn read_f32(&mut self, start: usize, out: &mut [f32]) -> Result<(), String> {
         let (bp, sc) = (self.bitpix, self.sc.clone());
-        if bp > 0 {
-            self.read_conv(start, out, &|r| sc.int_f32(be_int(r, bp)))
-        } else {
-            self.read_conv(start, out, &|r| sc.float_f32(be_float(r, bp)))
+        // よくある型は、画素ごとの (BITPIX, 型の規則) の分岐を外へ出した専用の閉包にする。
+        // 式は下の一般の閉包(be_int / be_float → Scaling::int_f32 / float_f32)をその型について展開したものと同じ:
+        // - 整数 Raw: `raw as f32`(raw は be_int の i64)
+        // - 16・32 bit の PseudoUnsigned: `Scaling::unsigned` の `(raw + 2^(bits-1)) as u64` を f32 に
+        // - float32 Raw: 一般の閉包では be_float の `f32 as f64` と float_f32 の `as f32` の往復(下の注)
+        // - float64 Raw: `f64 as f32`(CPU の変換命令。一般の閉包と同じ)
+        match (bp, sc.kind) {
+            (8, ScaleKind::Raw) => self.read_conv(start, out, |r| r[0] as i64 as f32),
+            (16, ScaleKind::Raw) => self.read_conv(start, out, |r| i16::from_be_bytes([r[0], r[1]]) as i64 as f32),
+            (16, ScaleKind::PseudoUnsigned) => {
+                self.read_conv(start, out, |r| ((i16::from_be_bytes([r[0], r[1]]) as i64 + 32768) as u64) as f32)
+            }
+            (32, ScaleKind::Raw) => {
+                self.read_conv(start, out, |r| i32::from_be_bytes([r[0], r[1], r[2], r[3]]) as i64 as f32)
+            }
+            (32, ScaleKind::PseudoUnsigned) => self.read_conv(start, out, |r| {
+                ((i32::from_be_bytes([r[0], r[1], r[2], r[3]]) as i64 + 2147483648) as u64) as f32
+            }),
+            // 以前は f32 → f64 → f32 の往復を CPU の変換命令でしていた(`&dyn Fn` の中で型が実行時に決まるので、
+            // 往復が省かれなかった)。往復は NaN 以外と静かな NaN ではビットを変えず、信号の NaN は「静か」のビット
+            // (0x0040_0000)を立てる(2026-10 に以前の版の release で確かめた: 7f800001 → 7fc00001)。
+            // 型が決まった閉包では、コンパイラーが往復を省いてよい(Rust の約束、RFC 3514)ので信号の NaN が
+            // そのまま残る。同じビットにするため、往復の結果を整数で明示的に作る
+            (-32, ScaleKind::Raw) => self.read_conv(start, out, |r| {
+                let b = u32::from_be_bytes([r[0], r[1], r[2], r[3]]);
+                f32::from_bits(if b & 0x7fff_ffff > 0x7f80_0000 { b | 0x0040_0000 } else { b })
+            }),
+            (-64, ScaleKind::Raw) => self
+                .read_conv(start, out, |r| f64::from_be_bytes([r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]]) as f32),
+            _ if bp > 0 => self.read_conv(start, out, |r| sc.int_f32(be_int(r, bp))),
+            _ => self.read_conv(start, out, |r| sc.float_f32(be_float(r, bp))),
         }
     }
 
     fn read_f64(&mut self, start: usize, out: &mut [f64]) -> Result<(), String> {
         let (bp, sc) = (self.bitpix, self.sc.clone());
         if bp > 0 {
-            self.read_conv(start, out, &|r| sc.int_f64(be_int(r, bp)))
+            self.read_conv(start, out, |r| sc.int_f64(be_int(r, bp)))
         } else {
-            self.read_conv(start, out, &|r| sc.float_f64(be_float(r, bp)))
+            self.read_conv(start, out, |r| sc.float_f64(be_float(r, bp)))
         }
     }
 }
@@ -621,7 +658,7 @@ pub(crate) fn load_fits(path: &Path) -> Result<FitsImage, String> {
                 ));
             }
             notes.push(format!("FITS HDU[{}] {} {}", hdu.index, py_tuple(&shape), sc.dtype));
-            let mut arr = FileArray { src: &mut src, start: hdu.data_start, shape, bitpix, sc };
+            let mut arr = FileArray { src: &mut src, start: hdu.data_start, shape, bitpix, sc, scratch: Vec::new() };
             let (d, ny, nx, note) = reduce_to_2d(&mut arr, 200)?;
             (d, ny, nx, note, hdu.cards.clone())
         }
@@ -692,6 +729,133 @@ mod tests {
         let c = parse_card(&card("FLOATD  =                0.0015 / comment / with slash"));
         assert_eq!(c.value, CardValue::Float(0.0015));
         assert_eq!(c.comment, "comment / with slash");
+    }
+
+    /// 以前の読み方(画素ごとに `&dyn Fn`、呼ぶたびに作業領域を作る)。read_conv を静的な呼び出しと
+    /// 型ごとの専用の閉包にしたので、値がビット単位で同じかをこれと比べる。
+    fn old_read_conv<T: Copy + Send + Default>(
+        a: &mut FileArray,
+        start: usize,
+        out: &mut [T],
+        conv: &(dyn Fn(&[u8]) -> T + Sync),
+    ) -> Result<(), String> {
+        let bpp = a.bpp();
+        let total: usize = a.shape.iter().product();
+        if start.checked_add(out.len()).is_none_or(|e| e > total) {
+            return Err("配列の範囲外を読もうとしました".into());
+        }
+        let mut buf = vec![0u8; out.len().min(READ_CHUNK) * bpp];
+        for (ci, chunk) in out.chunks_mut(READ_CHUNK).enumerate() {
+            let off = a.start + ((start + ci * READ_CHUNK) as u64) * bpp as u64;
+            let b = &mut buf[..chunk.len() * bpp];
+            a.src.read_at(off, b)?;
+            chunk.par_chunks_mut(CONV_CHUNK).zip(b.par_chunks(CONV_CHUNK * bpp)).for_each(|(o, raw)| {
+                for (v, r) in o.iter_mut().zip(raw.chunks_exact(bpp)) {
+                    *v = conv(r);
+                }
+            });
+        }
+        Ok(())
+    }
+
+    fn old_read_f32(a: &mut FileArray, start: usize, out: &mut [f32]) -> Result<(), String> {
+        let (bp, sc) = (a.bitpix, a.sc.clone());
+        if bp > 0 {
+            old_read_conv(a, start, out, &|r| sc.int_f32(be_int(r, bp)))
+        } else {
+            old_read_conv(a, start, out, &|r| sc.float_f32(be_float(r, bp)))
+        }
+    }
+
+    fn old_read_f64(a: &mut FileArray, start: usize, out: &mut [f64]) -> Result<(), String> {
+        let (bp, sc) = (a.bitpix, a.sc.clone());
+        if bp > 0 {
+            old_read_conv(a, start, out, &|r| sc.int_f64(be_int(r, bp)))
+        } else {
+            old_read_conv(a, start, out, &|r| sc.float_f64(be_float(r, bp)))
+        }
+    }
+
+    /// 決まった擬似乱数のバイト(xorshift64*)。浮動小数として読むと NaN(静か・信号)・±inf・±0・非正規数も混ざる
+    fn rand_bytes(n: usize, seed: u64) -> Vec<u8> {
+        let mut x = seed | 1;
+        (0..n)
+            .map(|_| {
+                x ^= x >> 12;
+                x ^= x << 25;
+                x ^= x >> 27;
+                (x.wrapping_mul(0x2545F4914F6CDD1D) >> 56) as u8
+            })
+            .collect()
+    }
+
+    #[test]
+    fn read_conv_same_as_dyn() {
+        // (BITPIX, BSCALE, BZERO, BLANK): Raw・PseudoUnsigned・Int8・ToF32・ToF64・Float32Scaled・Float64Scaled
+        let cases: &[(i32, f64, f64, Option<i64>)] = &[
+            (8, 1.0, 0.0, None),
+            (8, 1.0, -128.0, None),
+            (8, 2.5, 10.0, Some(7)),
+            (16, 1.0, 0.0, None),
+            (16, 1.0, 32768.0, None),
+            (16, 0.5, -3.0, Some(-1)),
+            (32, 1.0, 0.0, None),
+            (32, 1.0, 2147483648.0, None),
+            (32, 1.5, 100.0, Some(12345)),
+            (64, 1.0, 0.0, None),
+            (64, 1.0, 9223372036854775808.0, None),
+            (64, 3.0, -1.0, None),
+            (-32, 1.0, 0.0, None),
+            (-32, 2.0, 1.0, None),
+            (-64, 1.0, 0.0, None),
+            (-64, 0.25, 7.0, None),
+        ];
+        // 特別な値を必ず含める(先頭に置く)。float32: +0・-0・静かな NaN・信号の NaN・±inf・非正規数・最大
+        let special32: [u32; 9] =
+            [0, 0x8000_0000, 0x7fc0_0000, 0x7f80_0001, 0x7f80_0000, 0xff80_0000, 1, 0x7f7f_ffff, 0xffc0_0001];
+        for (k, &(bp, bscale, bzero, blank)) in cases.iter().enumerate() {
+            let bpp = (bp.unsigned_abs() / 8) as usize;
+            // 区切り(READ_CHUNK)をまたぐ大きさと、半端な大きさ
+            for &n in &[1000usize, READ_CHUNK + 777] {
+                let mut bytes = rand_bytes(n * bpp, 0x9E37_79B9_7F4A_7C15 ^ (k as u64 * 1000 + n as u64));
+                if bp == -32 {
+                    for (i, v) in special32.iter().enumerate() {
+                        bytes[i * 4..i * 4 + 4].copy_from_slice(&v.to_be_bytes());
+                    }
+                }
+                let sc = Scaling::new(bp, bscale, bzero, blank, false);
+                let mut src = Src::Mem(bytes);
+                let mut a = FileArray { src: &mut src, start: 0, shape: vec![n], bitpix: bp, sc, scratch: Vec::new() };
+                // 小さい読み → 大きい読み → 途中から(作業領域の使い回しと伸ばし直しを通す)
+                for &(start, len) in &[(3usize, 50usize), (0, n), (n / 3, n - n / 3)] {
+                    let mut new = vec![0.0f32; len];
+                    let mut old = vec![0.0f32; len];
+                    a.read_f32(start, &mut new).unwrap();
+                    old_read_f32(&mut a, start, &mut old).unwrap();
+                    for i in 0..len {
+                        assert_eq!(
+                            new[i].to_bits(),
+                            old[i].to_bits(),
+                            "f32 BITPIX {bp} BSCALE {bscale} BZERO {bzero} 添字 {} ({:08x} ≠ {:08x})",
+                            start + i,
+                            new[i].to_bits(),
+                            old[i].to_bits()
+                        );
+                    }
+                    let mut new = vec![0.0f64; len];
+                    let mut old = vec![0.0f64; len];
+                    a.read_f64(start, &mut new).unwrap();
+                    old_read_f64(&mut a, start, &mut old).unwrap();
+                    for i in 0..len {
+                        assert_eq!(new[i].to_bits(), old[i].to_bits(), "f64 BITPIX {bp} 添字 {}", start + i);
+                    }
+                }
+                // 範囲外は今と同じ Err
+                let mut o = vec![0.0f32; 2];
+                assert_eq!(a.read_f32(n - 1, &mut o), old_read_f32(&mut a, n - 1, &mut o));
+                assert!(a.read_f32(n - 1, &mut o).is_err());
+            }
+        }
     }
 
     #[test]
