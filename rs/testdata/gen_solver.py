@@ -12,7 +12,8 @@ dev/ のファイルは読むだけで書き換えない(trace は一時フォ�
   solver_parts.json   部品の値: 星の並べ替え(明るい順 → 一様化、検証の星の並び)、newpoint の quad 作り
                       (足した星ごとの quad の並び)、画像側のコードと正準化・鏡像の形(sv_code_variants)、
                       AB の範囲、検証の積み上げ(1 対 1 の付け替えを含む sv_verify_core)、一致の重み、F 分布の点、
-                      HEALPix の 1 辺、4 点の当てはめ(束)、検証の対数オッズ(sv_verify_wcs。真の WCS・乱数の WCS・
+                      HEALPix の 1 辺、解の判定(sv_accept_logodds・sv_tuneup_accepted)、
+                      4 点の当てはめ(束)、検証の対数オッズ(sv_verify_wcs。真の WCS・乱数の WCS・
                       回転・鏡像、quad あり・なし。索引が要る)
   solver_synth.json   合成星野(dev/test_solver_synth.py の場合から代表。星は solver_synth.py が種で作る)と、
                       Python の sv_solve の結果(解いた索引・quad の 4 点・対数オッズ・一致数・最終の WCS・試した quad の数・
@@ -329,6 +330,17 @@ def gen_parts(sw, si, sc, ss, catalog):
     out["f_upper"] = [dict(d1=d1, d2=d2, z=sc.SV_SIP_F_Z, f=sc.sv_f_upper(d1, d2))
                       for d1, d2 in ((6, 12), (6, 30), (14, 40), (24, 100), (14, 2), (1, 1))]
     out["healpix_side_rad"] = [dict(nside=n, side=sc.sv_healpix_side_rad(n)) for n in (1, 2, 8, 10, 16, 64)]
+
+    # (f2) 解の判定: 試した仮説の数で上げた受け入れの値と、tune-up の一致の増え(既定の値・切ったとき・起点を変えたとき)
+    nhyps = [0, 1, 8192, 99999, 100000, 100001, 123457, 2671113, 16187319, 20229488, 10**12]
+    out["accept"] = [dict(accept_hyps0=h0, nhyp=n, logodds=sc.sv_accept_logodds(sc.SvParams(accept_hyps0=h0), n))
+                     for h0 in (1e5, 1e6, 1.0, 0.0, -1.0) for n in nhyps]
+    out["tuneup_accepted"] = [
+        dict(tune_min_gain=g, tune_gain_hyps0=h0, nhyp=n, before=b, after=a,
+             ok=sc.sv_tuneup_accepted(sc.SvParams(tune_min_gain=g, tune_gain_hyps0=h0), n, b, a))
+        for g, h0 in ((1, 1e5), (2, 1e5), (0, 1e5), (1, 0.0), (1, 1e6))
+        for n in (1, 4553, 100000, 100001, 2671113, 16187319)
+        for b, a in ((5, 5), (4, 4), (5, 6), (4, 9), (24, 24), (20, 40), (7, 6), (0, 0))]
 
     # (g) 4 点の当てはめを束で(sv_fit_similarity_many)
     r = np.random.default_rng(106)

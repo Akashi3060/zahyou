@@ -957,6 +957,44 @@ def case_19_check_interval_hint():
     return ok, f"解なし、{t1 - t0:.1f} 秒、cancel() {len(calls)} 回・間隔の最大 {gaps.max():.3f} 秒"
 
 
+def case_20_accept_rule():
+    """解の判定(設計書 3.7 節の 6): 試した仮説が accept_hyps0(1e5)個までは ln 1e9、超えたら ln 1e9 + ln(N / 1e5)。
+    試した仮説が tune_gain_hyps0(1e5)個を超えてから tune-up で上がった仮説は、改良後の一致数が 4 点の検証の一致数 +
+    tune_min_gain(1)以上のときだけ解。2026-10-24 に見つけた誤った解(tcase_dense の仮説 16,187,319 個目の 22.77・
+    一致 5 → 5、4100 系だけの実写の 2,671,113 個目の 22.23・一致 4 → 4)は、どちらの条件でも解にならない。
+    星 8 個の 3I_00010 の正しい解(仮説 4,553 個目、tune-up で 21.9・一致 4 → 4)は解のまま。値を切る指定(0・無限大)も効く。"""
+    p = sc.SvParams()
+    solve = p.logodds_solve
+    bad = []
+    if (p.tune_min_gain, p.tune_gain_hyps0, p.accept_hyps0) != (1, 1e5, 1e5):
+        bad.append(f"既定の値 {p.tune_min_gain}・{p.tune_gain_hyps0}・{p.accept_hyps0}")
+    for n in (0, 1, 8192, 100000):
+        if sc.sv_accept_logodds(p, n) != solve:
+            bad.append(f"{n} 個で {sc.sv_accept_logodds(p, n)} ≠ ln 1e9")
+    for n in (100001, 2671113, 16187319):
+        want = solve + math.log(n / 1e5)
+        if abs(sc.sv_accept_logodds(p, n) - want) > 1e-12:
+            bad.append(f"{n} 個で {sc.sv_accept_logodds(p, n)} ≠ {want}")
+    for n, lo, nm in ((16187319, 22.773709888689385, 5), (2671113, 22.232375123308053, 4)):
+        if not lo < sc.sv_accept_logodds(p, n):
+            bad.append(f"仮説 {n} 個目の誤った解 {lo} が受け入れの値に届く")
+        if sc.sv_tuneup_accepted(p, n, nm, nm):
+            bad.append(f"仮説 {n} 個目の一致 {nm} → {nm} の tune-up を解にする")
+    if not sc.sv_tuneup_accepted(p, 4553, 4, 4):
+        bad.append("仮説 4,553 個目の 3I_00010(一致 4 → 4)の tune-up を解にしない")
+    n = 2671113
+    if not (sc.sv_tuneup_accepted(p, n, 4, 5) and sc.sv_tuneup_accepted(p, n, 20, 40)
+            and not sc.sv_tuneup_accepted(p, n, 7, 6) and sc.sv_tuneup_accepted(p, 100000, 7, 6)):
+        bad.append("一致の増えの判定")
+    off = sc.SvParams(tune_min_gain=0, accept_hyps0=math.inf)
+    if not (sc.sv_tuneup_accepted(off, n, 5, 5) and sc.sv_accept_logodds(off, 10**12) == solve
+            and sc.sv_tuneup_accepted(sc.SvParams(tune_gain_hyps0=math.inf), 10**12, 5, 5)):
+        bad.append("切る指定(tune_min_gain=0・tune_gain_hyps0=inf・accept_hyps0=inf)が効かない")
+    return not bad, (f"1,619 万個目は {sc.sv_accept_logodds(p, 16187319):.2f}、267 万個目は "
+                     f"{sc.sv_accept_logodds(p, 2671113):.2f}、1e5 個を超えてからの一致が増えない tune-up は解にしない"
+                     if not bad else "NG: " + "; ".join(bad))
+
+
 UNIT = [
     ("01 星の並べ替え(明るい順 → 一様化)", case_01_order, ()),
     ("02 newpoint の quad 作り = 総当たり(4 星・3 星)", case_02_newpoint, ()),
@@ -978,6 +1016,7 @@ UNIT = [
     ("17 中身の壊れた索引を外して解く", case_17_corrupt_index, (4113, 4114, 4115, 4116, 4117)),
     ("18 スケールを 1 つの値で・おかしいヒントは ValueError", case_18_scale_point_hint_values, (5206,)),
     ("19 ヒントありの照合でも cancel() の間隔 0.2 秒以内", case_19_check_interval_hint, (4107,)),
+    ("20 解の判定(試した数で上げる値・tune-up の一致の増え)", case_20_accept_rule, ()),
 ]
 
 

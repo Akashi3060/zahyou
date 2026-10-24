@@ -8,6 +8,7 @@
 //! - 4 点の当てはめ: `sv_fit_similarity_many` の 1 組ぶん(3.6 節)
 //! - 検証の積み上げ: `sv_verify_core` の 1 仮説ぶん(最近傍は Python と同じく単精度の距離で選ぶ。3.7 節)
 //! - 一致の重み・F 分布の点・HEALPix の 1 辺: `sv_logodds_weight`・`sv_f_upper`・`sv_healpix_side_rad`
+//! - 解の判定: `sv_accept_logodds`・`sv_tuneup_accepted`(3.7 節の 6)
 //!
 //! 座標の約束は zahyou-wcs と同じ(画素は 0 始まり、x = 列、y = 行。CD は度/px)。
 
@@ -818,6 +819,36 @@ pub fn f_upper(d1: f64, d2: f64, z: f64) -> f64 {
 /// HEALPix の 1 辺の目安(ラジアン)= √(4π / 12) / nside。
 pub fn healpix_side_rad(nside: u32) -> f64 {
     (4.0 * std::f64::consts::PI / 12.0).sqrt() / nside as f64
+}
+
+// ------------------------------------------------------------------ 解の判定 ---
+
+/// この探索で nhyp 個の仮説を試したところで、解とみなす対数オッズ(Python の `sv_accept_logodds`。設計書 3.7 節の 6)。
+///
+/// nhyp が accept_hyps0 以下なら logodds_solve、超えたら logodds_solve + ln(nhyp / accept_hyps0)。
+/// 偶然の仮説の尤度比が K を超える見込みは 1 つあたり 1/K 以下なので、k 個目に 1e9·k/1e5 を求めれば、
+/// 探索全体の誤った解の見込みは試した数によらず 1e−4·(1 + ln(N/1e5)) 以下に収まる(固定の 1e9 なら N/1e9)。
+pub fn accept_logodds(p: &Params, nhyp: u64) -> f64 {
+    let n = nhyp as f64;
+    if p.accept_hyps0 > 0.0 && n > p.accept_hyps0 {
+        p.logodds_solve + (n / p.accept_hyps0).ln()
+    } else {
+        p.logodds_solve
+    }
+}
+
+/// この探索で nhyp 個の仮説を試したところで、tune-up(1 次の改良で検証し直す)で solve に届いた仮説を解にしてよいか
+/// (Python の `sv_tuneup_accepted`)。
+///
+/// 改良は検証に使ったのと同じ星に WCS を当て直すので、それだけでオッズが上がる(偶然の仮説で 4〜8.5)。
+/// 本物の仮説なら改良で新しい星が並ぶので、nhyp が tune_gain_hyps0 を超えたら、改良後の一致数が 4 点の検証の一致数より
+/// tune_min_gain 以上多いことを求める。それまでは求めない: 星の少ない画像の本物の解は、星が全部一致済みで増えようがない
+/// (星 8 個の 3I_00010 は仮説 4,553 個目に tune-up で 21.9・一致 4 → 4 で解ける)。誤った解が出るのは何百万個も試したあと。
+pub fn tuneup_accepted(p: &Params, nhyp: u64, nmatch_before: usize, nmatch_after: usize) -> bool {
+    if !(p.tune_min_gain > 0 && (nhyp as f64) > p.tune_gain_hyps0) {
+        return true;
+    }
+    nmatch_after >= nmatch_before.saturating_add(p.tune_min_gain)
 }
 
 #[cfg(test)]

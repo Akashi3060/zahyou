@@ -66,7 +66,7 @@ python build_nb.py               # 直下の zahyou_engine.py・zahyou_v7.ipynb 
 #                                    試験用の dev/zahyou.ipynb・dev/zahyou_engine.py を書く
 python test_solver_wcs.py        # solver_wcs:   TAN の往復・当てはめ・FITS ヘッダー
 python test_solver_index.py      # solver_index: 索引の読み込み・kd-tree の探索・ファイルの検査
-python test_solver_core.py       # solver_core:  quad 作り・コード・照合・検証・改良
+python test_solver_core.py       # solver_core:  quad 作り・コード・照合・検証・改良・解の判定
 python test_solver_synth.py      # 合成星野をブラインドとヒントで解く
 python test_solver_real.py       # 実写を解いて、v6 で求めた正解と比べる
 python test_solver_real.py --engine --both   # 同じことを、組み立てた直下の zahyou_engine.py と sv_solve 直接で

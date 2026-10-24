@@ -16,8 +16,8 @@ use crate::clock::{Abort, Clock};
 use crate::field::Field;
 use crate::lsq::{LSQ_MAX_SHIFTS, fit_wcs_lsq, normalize3, wrms};
 use crate::parts::{
-    CodeVariants, SIP_F_Z, code_variants, f_upper, field_codes, fit_similarity_quad, logodds_weight, quad_ab_range,
-    quad_geometry, quads_newest_into,
+    CodeVariants, SIP_F_Z, accept_logodds, code_variants, f_upper, field_codes, fit_similarity_quad, logodds_weight,
+    quad_ab_range, quad_geometry, quads_newest_into, tuneup_accepted,
 };
 use crate::pyfmt::{fmt_g, fmt_int};
 use crate::verify::{Hyp, Proj, Refs, SeriesCtx, Store, VerifyOut, quick_pass, series_cone, verify_one};
@@ -664,6 +664,8 @@ fn match_file(
 
 /// 仮説を newpoint の順に VERIFY_STEP 個ずつ検証し、solve 以上の最初の仮説(なければ tune-up で上がった最初のもの)を
 /// 改良して返す(Python の `_sv_verify_and_pick`)。区切りの中は並列に検証し、選ぶのは順に。
+/// 改良した後の対数オッズが accept_logodds(試した数で上げた値)に届かないもの、試した仮説が多くなってから tune-up で
+/// 上がったのに改良で一致が増えないもの(tuneup_accepted)は解にしない(設計書 3.7 節の 6)。
 #[allow(clippy::too_many_arguments)]
 fn verify_and_pick(
     field: &Field,
@@ -724,13 +726,16 @@ fn verify_and_pick(
                 });
             }
         }
+        // 解とみなす値は、この区切りの終わりまでに試した仮説の数で上げる(区切りの中は同じ値。Python も同じ数え方)
+        let accept = accept_logodds(params, st.hyps);
         for (i, r) in res.iter().enumerate() {
             if !(r.best >= tune) {
                 continue;
             }
             let h = part[i];
             let name = sc.store.file(sc.files[h.fid]).name.clone();
-            if r.best < solve {
+            let tuned = r.best < solve;
+            if tuned {
                 // tune-up: 1 次で改良して検証し直す
                 let (_, r1) = refine(field, sc, params, h, 1, false, clock)?;
                 st.tuneups.push((name.clone(), r.best, r1.best));
@@ -747,7 +752,12 @@ fn verify_and_pick(
                 }
                 other => other?,
             };
-            if !(res1.best >= solve) {
+            if !(res1.best >= accept) {
+                continue;
+            }
+            // 試した仮説が多くなってから tune-up で上がった仮説は、改良で一致が増えたときだけ解にする
+            // (同じ星への当て直しだけで上がったものは偶然)
+            if tuned && !tuneup_accepted(params, st.hyps, r.nmatch, res1.nmatch) {
                 continue;
             }
             return Ok(Some(Found {

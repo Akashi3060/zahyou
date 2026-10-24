@@ -6,6 +6,7 @@
 //!   それが総当たり(AB の長さが範囲内、内側の星が AB を直径とする円の中)と一致すること
 //! - 画像側のコード(sv_field_codes)と照合に投げる形(sv_code_variants。正準化の境界の近く・鏡像・parity 3 通り)
 //! - quad の AB の範囲(sv_quad_ab_range)・一致の重み・F 分布の点・HEALPix の 1 辺
+//! - 解の判定(sv_accept_logodds・sv_tuneup_accepted)と、既定の値で 2026-10-24 の誤った解 2 件が解にならないこと
 //! - 4 点の当てはめ(sv_fit_similarity_many の 1 組ずつ)
 //! - 検証の積み上げ(sv_verify_core。1 対 1 の付け替え・偽物・打ち切りを含む 60 仮説)
 //! - 検証の対数オッズ(sv_verify_wcs → zahyou_solver::verify_wcs。合成星野で真の WCS・乱数・回転・鏡像・ずらしたもの。
@@ -19,8 +20,8 @@ mod common;
 
 use common::*;
 use zahyou_solver::parts::{
-    code_variants, f_upper, field_codes, field_order, fit_similarity_quad, healpix_side_rad, logodds_weight, order_stars,
-    quad_ab_range, quad_geometry, quads_newest, verify_core,
+    accept_logodds, code_variants, f_upper, field_codes, field_order, fit_similarity_quad, healpix_side_rad,
+    logodds_weight, order_stars, quad_ab_range, quad_geometry, quads_newest, tuneup_accepted, verify_core,
 };
 use zahyou_solver::{Params, Parity};
 
@@ -233,6 +234,69 @@ fn small_formulas_match_python() {
         }
     }
     assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+/// 解の判定(設計書 3.7 節の 6): 試した仮説の数で上げた受け入れの値(sv_accept_logodds)と、tune-up の一致の増え
+/// (sv_tuneup_accepted)が Python と同じ。既定の値で、tcase_dense と 4100 系の実写で出ていた誤った解
+/// (2026-10-24 の調べ。仮説 16,187,319 個目の 22.77 と 2,671,113 個目の 22.23、どちらも tune-up で一致が増えない)は
+/// どちらの条件でも解にならず、星 8 個の 3I_00010 の正しい解(仮説 4,553 個目、tune-up で一致 4 → 4)は解のまま。
+#[test]
+fn accept_rule_matches_python() {
+    let Some(d) = parts() else { return };
+    let mut bad = Vec::new();
+    for r in d["accept"].as_array().unwrap() {
+        let p = Params { accept_hyps0: r["accept_hyps0"].as_f64().unwrap(), ..Params::default() };
+        let n = r["nhyp"].as_u64().unwrap();
+        let want = r["logodds"].as_f64().unwrap();
+        let got = accept_logodds(&p, n);
+        // ln は Python(MSVC)と Rust(MinGW)で同じ C の関数を通るが、念のため 2 ulp まで許す
+        if got != want && (got - want).abs() > 2.0 * f64::EPSILON * want.abs() {
+            bad.push(format!("accept_logodds(accept_hyps0 = {}, {n}) = {got} ≠ Python {want}", p.accept_hyps0));
+        }
+    }
+    for r in d["tuneup_accepted"].as_array().unwrap() {
+        let p = Params {
+            tune_min_gain: r["tune_min_gain"].as_u64().unwrap() as usize,
+            tune_gain_hyps0: r["tune_gain_hyps0"].as_f64().unwrap(),
+            ..Params::default()
+        };
+        let n = r["nhyp"].as_u64().unwrap();
+        let (b, a) = (r["before"].as_u64().unwrap() as usize, r["after"].as_u64().unwrap() as usize);
+        let want = r["ok"].as_bool().unwrap();
+        if tuneup_accepted(&p, n, b, a) != want {
+            bad.push(format!(
+                "tuneup_accepted(tune_min_gain = {}, tune_gain_hyps0 = {}, {n} 個, {b} → {a}) ≠ Python {want}",
+                p.tune_min_gain, p.tune_gain_hyps0
+            ));
+        }
+    }
+    let p = Params::default();
+    assert_eq!((p.tune_min_gain, p.tune_gain_hyps0, p.accept_hyps0), (1, 1e5, 1e5), "既定の値");
+    assert_eq!(accept_logodds(&p, 100_000).to_bits(), p.logodds_solve.to_bits(), "1e5 個までは今までと同じ値");
+    for (n, lo, nm) in [(16_187_319u64, 22.773709888689385, 5usize), (2_671_113, 22.232375123308053, 4)] {
+        let need = accept_logodds(&p, n);
+        if lo >= need {
+            bad.push(format!("仮説 {n} 個目の誤った解 {lo} が受け入れの値 {need} に届いてしまう"));
+        }
+        if tuneup_accepted(&p, n, nm, nm) {
+            bad.push(format!("仮説 {n} 個目の、一致が {nm} → {nm} で増えない tune-up を解にしてしまう"));
+        }
+    }
+    if !tuneup_accepted(&p, 4_553, 4, 4) {
+        bad.push("仮説 4,553 個目の 3I_00010(星 8 個、一致 4 → 4)の tune-up を解にしない".into());
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+    row(
+        "PASS",
+        "accept_rule",
+        &format!(
+            "Python と同じ(受け入れの値 {} 通り・tune-up の判定 {} 通り)。1,619 万個目は {:.2}、267 万個目は {:.2}",
+            d["accept"].as_array().unwrap().len(),
+            d["tuneup_accepted"].as_array().unwrap().len(),
+            accept_logodds(&p, 16_187_319),
+            accept_logodds(&p, 2_671_113)
+        ),
+    );
 }
 
 #[test]
