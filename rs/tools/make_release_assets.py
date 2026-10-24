@@ -6,7 +6,7 @@
 そろえるもの(v6 の Release に合わせる。名前は版から決まる):
 
     zahyou.exe                Rust 版の release ビルド(--exe。名前は必ず zahyou.exe = 更新の確認がこの名前で探す)
-    zahyou_v7.ipynb           ノートブック版(リポジトリ直下の zahyou_v7.ipynb。名前は版から決める。β版なら zahyou_v7_beta.ipynb
+    zahyou_v8.ipynb           ノートブック版(リポジトリ直下の zahyou_v<大きな版>.ipynb。名前は版から決める。β版なら zahyou_v8_beta.ipynb
                               = v6 と紛れないよう版の名前で)。セル A はエンジンを「同じフォルダーの zahyou_engine.py」で探すので、
                               ノートブックの名前を変えても動く
     zahyou_engine.py          ノートブック版の解析エンジン(リポジトリ直下のもの)
@@ -18,7 +18,8 @@
 検査(1 つでも落ちたら、何も書かずに終了コード 1):
 
     version   exe の版情報(FileVersion・ProductVersion・数の版・プレリリースの印)と `--engine-check` の version= が、
-              rs/Cargo.toml の [workspace.package] version と一致する
+              rs/Cargo.toml の [workspace.package] version と一致する(FileVersion はその版のまま、ProductVersion と
+              version= は版名 = 末尾の 0 を省いた形。8.0.0 → v8。rs/app/build.rs の version_label と同じ決まり)
     paths     exe に、建てた人のホームフォルダーのパス(USERPROFILE。例 C:\\Users\\<名前>)が 1 か所も無い。
               区切り \\ と /・MSYS の /c/…・大文字小文字・UTF-8 と UTF-16 のどれでも数える。依存のパニック位置情報は、
               手順書 4 節の --remap-path-prefix を付けずに建てると、CARGO_HOME の下のパスのまま残る
@@ -27,7 +28,8 @@
     manual    dev/make_manual.py を一時フォルダーで組み直したものが、リポジトリの PDF とバイト単位で同じ
               (make_manual.py は作成日時などを固定して組むので、同じ中身なら同じバイトになる)
     notebook  dev/build_nb.py を一時フォルダーへ走らせた出力と比べて、直下の zahyou_engine.py が同じで、
-              zahyou_v7.ipynb のセルの並びと中身が同じ(出力の例はリポジトリのものを残して配る)
+              zahyou_v<大きな版>.ipynb のセルの並びと中身が同じ(出力の例はリポジトリのものを残して配る)。
+              NB_VERSION が版名と同じ
 
 `--skip <検査>` で検査を飛ばせる(試しのとき用。飛ばした検査は最後に「確かめていない」と出る)。
 出力先は、空か無いフォルダーで、リポジトリの外に限る(直下に .gitignore が無いので、誤って commit しないように)。
@@ -57,7 +59,6 @@ from pathlib import Path
 RS_DIR = Path(__file__).resolve().parents[1]
 REPO_DIR = RS_DIR.parent
 DEV_DIR = REPO_DIR / "dev"
-REPO_NOTEBOOK = REPO_DIR / "zahyou_v7.ipynb"  # 配るノートブックの元(dev/build_nb.py の ROOT_NB)
 MSYS_BIN = Path(r"C:\msys64\ucrt64\bin")
 
 CHECKS = ("version", "paths", "notices", "manual", "notebook")
@@ -80,6 +81,26 @@ def split_version(version: str) -> tuple[tuple[int, int, int], str]:
     if not m:
         raise ValueError(f"版の書き方が違います: {version!r}")
     return (int(m[1]), int(m[2]), int(m[3])), m[4] or ""
+
+
+def version_label(version: str) -> str:
+    """画面に出す版名(rs/app/build.rs の version_label と同じ決まり)。"v" + 大きな版、中か小が 0 でなければ ".中"、
+    小が 0 でなければ ".小"、プレリリースがあれば "-" + プレリリース。8.0.0 → v8、8.0.0-beta.1 → v8-beta.1、7.1.0 → v7.1"""
+    (major, minor, patch), pre = split_version(version)
+    s = f"v{major}"
+    if minor or patch:
+        s += f".{minor}"
+    if patch:
+        s += f".{patch}"
+    if pre:
+        s += f"-{pre}"
+    return s
+
+
+def notebook_repo_path(version: str) -> Path:
+    """配るノートブックの元(直下の zahyou_v<大きな版>.ipynb。dev/build_nb.py の ROOT_NB と同じ名前)"""
+    (major, _, _), _ = split_version(version)
+    return REPO_DIR / f"zahyou_v{major}.ipynb"
 
 
 def notebook_asset_name(version: str) -> str:
@@ -172,8 +193,9 @@ def check_version(exe: Path, version: str) -> list[str]:
     strings = pe_version_strings(data)
     if strings.get("FileVersion") != version:
         problems.append(f"exe の FileVersion が {strings.get('FileVersion')!r}(Cargo の版は {version!r})")
-    if strings.get("ProductVersion") != f"v{version}":
-        problems.append(f"exe の ProductVersion が {strings.get('ProductVersion')!r}(期待は 'v{version}')")
+    label = version_label(version)
+    if strings.get("ProductVersion") != label:
+        problems.append(f"exe の ProductVersion が {strings.get('ProductVersion')!r}(期待は {label!r})")
     if strings.get("OriginalFilename") not in (None, "zahyou.exe"):
         problems.append(f"exe の OriginalFilename が {strings.get('OriginalFilename')!r}")
     core, pre = split_version(version)
@@ -186,8 +208,8 @@ def check_version(exe: Path, version: str) -> list[str]:
         if fixed["prerelease"] != bool(pre):
             problems.append(f"exe のプレリリースの印が {fixed['prerelease']}(版 {version})")
     got = engine_check_version(exe)
-    if got != f"v{version}":
-        problems.append(f"--engine-check の version= が {got!r}(期待は 'v{version}')")
+    if got != label:
+        problems.append(f"--engine-check の version= が {got!r}(期待は {label!r})")
     return problems
 
 
@@ -334,8 +356,9 @@ def notebook_version(engine_text: str) -> str | None:
 
 def check_notebook_version(engine: Path, version: str) -> list[str]:
     got = notebook_version(_norm(engine.read_text(encoding="utf-8")))
-    if got != f"v{version}":
-        return [f"{engine.name} の NB_VERSION が {got!r}(期待は 'v{version}'。dev/nb_main.py を直して python dev/build_nb.py)"]
+    label = version_label(version)
+    if got != label:
+        return [f"{engine.name} の NB_VERSION が {got!r}(期待は {label!r}。dev/nb_main.py を直して python dev/build_nb.py)"]
     return []
 
 
@@ -347,7 +370,7 @@ def check_notebook(work: Path, version: str) -> list[str]:
     if r.returncode != 0 or not out_nb.exists():
         return ["build_nb.py が動きません: " + " / ".join((r.stdout + r.stderr).strip().splitlines()[-3:])]
     return (compare_engines(work / "zahyou_engine.py", REPO_DIR / "zahyou_engine.py")
-            + compare_notebooks(out_nb, REPO_NOTEBOOK)
+            + compare_notebooks(out_nb, notebook_repo_path(version))
             + check_notebook_version(REPO_DIR / "zahyou_engine.py", version))
 
 
@@ -370,7 +393,7 @@ def is_text_asset(name: str) -> bool:
 def plan_assets(exe: Path, version: str, manual_ver: str) -> Plan:
     p = Plan()
     p.files["zahyou.exe"] = exe
-    p.files[notebook_asset_name(version)] = REPO_NOTEBOOK
+    p.files[notebook_asset_name(version)] = notebook_repo_path(version)
     p.files["zahyou_engine.py"] = REPO_DIR / "zahyou_engine.py"
     p.files[f"zahyou-manual-{manual_ver}.pdf"] = manual_repo_path(manual_ver)
     p.files["LICENSE.txt"] = REPO_DIR / "LICENSE"

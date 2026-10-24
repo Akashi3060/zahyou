@@ -33,10 +33,11 @@ use ui::app::{Options, TopTab, ZahyouApp};
 use ui::cli::{arg_value, has};
 use ui::settings::ResultTab;
 
-/// 画面に出す版名。パッケージの版(rs/Cargo.toml)に "v" を付けたもの(例: "v7.0.0-beta.1")。
+/// 画面に出す版名。パッケージの版(rs/Cargo.toml)に "v" を付け、末尾の 0 の部分を省いたもの(build.rs の `version_label`。
+/// 例: 8.0.0 → "v8"、8.0.0-beta.1 → "v8-beta.1")。版名は v7・v8 のような整数の形で、GitHub のタグ名と同じ。
 /// "-dev" で終わる試作版は更新の確認をしない。"-beta.N" などのプレリリースは、GitHub のプレリリースも含めて
-/// 同じ大きな版(v7)の新しいものを探す(zahyou_net::update)。
-pub const APP_VER: &str = concat!("v", env!("CARGO_PKG_VERSION"));
+/// 同じ大きな版(v8)の新しいものを探す(zahyou_net::update)。
+pub const APP_VER: &str = env!("ZAHYOU_VERSION_LABEL");
 
 static START: OnceLock<Instant> = OnceLock::new();
 
@@ -46,7 +47,7 @@ pub fn prerelease_suffix() -> String {
     zahyou_net::update::prerelease_label(APP_VER).map(|l| format!(" ({l})")).unwrap_or_default()
 }
 
-/// 窓の題(例「zahyou v7.0.0-beta.1 (β版) — 天体画像から目標への向きを求める」)
+/// 窓の題(例「zahyou v8 — 天体画像から目標への向きを求める」、β版なら「zahyou v8-beta.1 (β版) — …」)
 pub fn window_title() -> String {
     format!("zahyou {APP_VER}{} — 天体画像から目標への向きを求める", prerelease_suffix())
 }
