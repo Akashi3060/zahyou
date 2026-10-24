@@ -5218,7 +5218,7 @@ def _sanity_ok(wcs, shape):
 # ログの見出しの版。exe と同じ版名にする(rs/Cargo.toml の [workspace.package] version に "v" を付け、末尾の 0 の部分を
 # 省いたもの。8.0.0 → "v8"、β版は "v8-beta.1" の形。rs/app/build.rs の version_label と同じ決まり)。
 # 食い違うと rs/tools/make_release_assets.py の notebook の検査と、試験 version_in_docs_matches_cargo が止める。
-NB_VERSION = "v7"
+NB_VERSION = "v8"
 
 
 def run():

@@ -1,11 +1,13 @@
-# dev/ — zahyou_v7.ipynb の材料とテスト
+# dev/ — zahyou_v8.ipynb の材料とテスト
 
-`zahyou_v7.ipynb` はここのファイルから **生成** している。ノートブックを直接編集すると
+`zahyou_v8.ipynb` はここのファイルから **生成** している。ノートブックを直接編集すると
 次の生成で上書きされるので、直すときはこちらを直すこと。
+ノートブックの名前の数は exe の大きな版で、`build_nb.py` が `rs/Cargo.toml` の版から決める（8.0.0 → `zahyou_v8.ipynb`。
+版を上げたら直下のノートブックを `git mv` で改名する。[../docs/release-v7.md](../docs/release-v7.md) の 2 節）。
 
 `build_nb.py` は **2 つの成果物**を書き出す（引数なしで走らせると、リポジトリ直下の 2 つを書き換える）。
 
-* `zahyou_v7.ipynb` … markdown + 3 つの短いセル（合計 90 行ほど）。直下のものは**セルの中身だけを id ごとに
+* `zahyou_v8.ipynb` … markdown + 3 つの短いセル（合計 90 行ほど）。直下のものは**セルの中身だけを id ごとに
   差し替え**、出力の例は残す
 * `zahyou_engine.py` … 解析の中身（オフライン解析の自前のエンジンを含む）。セル A がこれを読み込む。
   `test_solver_real.py --engine` も直下のこれを使う（exe は Rust で書き直したもので、これを読まない）
@@ -62,7 +64,7 @@ exe と同じ版。版を上げるときの直し方は [../docs/release-v7.md](
 ## 試験
 
 ```
-python build_nb.py               # 直下の zahyou_engine.py・zahyou_v7.ipynb (セルの中身だけ) と、
+python build_nb.py               # 直下の zahyou_engine.py・zahyou_v8.ipynb (セルの中身だけ) と、
 #                                    試験用の dev/zahyou.ipynb・dev/zahyou_engine.py を書く
 python test_solver_wcs.py        # solver_wcs:   TAN の往復・当てはめ・FITS ヘッダー
 python test_solver_index.py      # solver_index: 索引の読み込み・kd-tree の探索・ファイルの検査
@@ -171,13 +173,16 @@ python make_index_zips.py 5204 5203 5202 --out C:\AstrometryData\dist
 python make_manual.py                 # ../天体画像解析プログラム「zahyou」導入・運用マニュアルv4.pdf
 ```
 
-マニュアル v4 は v7（デスクトップ版は Rust の exe）の本文。v6（WSL を使う版）の v3 の PDF は
+マニュアル v4 は、v7 から（デスクトップ版が Rust の exe になってから）の本文。v8 でも版は v4 のままで、中身だけを直した
+（解析の時間・メモリの数字は v7 の exe で測ったもの）。v6（WSL を使う版）の v3 の PDF は
 7.0.0 の準備でリポジトリから消した（commit `0b73d36`(旧タグ v7.0.0-beta.2)の木に残っている。配布ページも v4 に差し替える。
 [../docs/release-v7.md](../docs/release-v7.md) の 8 節）。
 作成日時などを固定して組む（ReportLab の `invariant`）ので、同じ `make_manual.py` とフォントからは同じバイトの PDF になる。
 `make_manual.py` を直したら PDF も組み直して一緒に commit する（`rs/tools/make_release_assets.py` の manual の検査が、
-組み直したものとリポジトリの PDF をバイト単位で比べる）。表紙と 9.1 に版の文字があるので、版を上げたら直す
-（release-v7.md の 2 節。直し忘れは試験 `version_in_docs_matches_cargo` が見つける）。
+組み直したものとリポジトリの PDF をバイト単位で比べる）。版の文字（冒頭の説明・表紙の表・9.1 の「ウィンドウの題」）と
+ノートブックの名前（4.3・4.5・9.1・付録 B）があるので、版を上げたら直す（release-v7.md の 2 節の 5）。
+試験 `version_in_docs_matches_cargo` が `make_manual.py` で見つけるのは β の版の文字だけなので、正式版どうしの版上げ（7 → 8）の直し忘れは
+release-v7.md の 2 節の 5 にある grep で探す（「v7 から」のような事実の記述は残す）。
 
 | ファイル | 中身 |
 |---|---|
@@ -205,4 +210,4 @@ v6 と試作版の Python の exe（PyInstaller）用の表示（リポジトリ
 
 ---
 
-必要なければ `dev/` ごと消してよい（`zahyou_v7.ipynb` と `zahyou_engine.py` だけで動く）。
+必要なければ `dev/` ごと消してよい（`zahyou_v8.ipynb` と `zahyou_engine.py` だけで動く）。

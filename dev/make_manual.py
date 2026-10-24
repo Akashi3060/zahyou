@@ -1,7 +1,9 @@
 """
 天体画像解析プログラム「zahyou」導入・運用マニュアル v4 を PDF で作る。
-(v4 = zahyou v7(正式版 7.0.0)。デスクトップ版は Rust の exe、オフライン解析は zahyou の中のエンジン。
- 2026-10-16 の決定(API キーの欄・DirectX 12 を既定)を入れ、2026-10-18 に β版の本文から正式版の本文に書き直した)
+(v4 = zahyou v8(Cargo の版 8.0.0、画面の版名「v8」)。デスクトップ版は Rust の exe、オフライン解析は zahyou の中のエンジン。
+ v4 は zahyou v7(正式版 7.0.0)のときに作った版で、2026-10-16 の決定(API キーの欄・DirectX 12 を既定)を入れ、
+ 2026-10-18 に β版の本文から正式版の本文に書き直した。2026-10-24 に v8 向けに中身を直した(マニュアルの版は v4 のまま)。
+ 解析の時間・メモリの数字は v7 の exe で測ったもの。exe の大きさと起動の時間は v8 の exe で測り直す)
 
   python make_manual.py [出力先.pdf]
 
@@ -198,15 +200,18 @@ def build(out_path):
                   ms.ParagraphStyle("clead2", parent=st.body, fontSize=10,
                                     leading=17, alignment=1, textColor=MUTED)))
     add(Spacer(1, 20 * mm))
+    # exe の大きさと起動の時間は v8 の exe で測り直し、README の「起動と大きさ」・3.2 の起動の文と同じ値にそろえる(docs/release-v7.md 2 節)
     ext(table([
-        ["v4（zahyou v7）で変わったこと", ""],
+        ["v4（zahyou v8）で変わったこと", ""],
         ["オフライン解析", "zahyou の中のエンジンで解きます。"
-         "<b>WSL も astrometry.net も要りません</b>（要るのは星図データだけ）"],
+         "<b>WSL も astrometry.net も要りません</b>（要るのは星図データだけ）。"
+         "v8 では、一致する星の少ない誤った解を出しにくくしました"],
         ["解析の速さ", "オフラインで 1 枚 0.1 〜 0.4 秒"
-         "（0.5 〜 4 メガ画素の実写。v6 の WSL 版は約 4 秒）"],
+         "（0.5 〜 4 メガ画素の実写を v7 の exe で測った値。v8 はこれより速くなりました。"
+         "v6 の WSL 版は約 4 秒）"],
         ["exe", "約 13 MB・窓が出るまで 1 秒ほど（v6 は 102 MB・約 4 秒）"],
         ["対応する画角", "4′ 〜 2000′（焦点距離およそ 4800 mm まで。v6 と同じ）"],
-        ["版", "v7.0.0。v6 の［使い方］タブの「更新を確認」→「更新する」で入れ替わります（9.1）"],
+        ["版", "v8。v6 と v7 の［使い方］タブの「更新を確認」→「更新する」で入れ替わります（9.1）"],
     ], st, widths=[42 * mm, CONTENT_W - 42 * mm]))
     add(Spacer(1, 16 * mm))
     add(Paragraph(f"{VERSION}　{DATE}", ms.ParagraphStyle(
@@ -472,7 +477,7 @@ def build(out_path):
                   "FITS 以外の画像ではここでオンライン解析が失敗していました。"
                   "画像ファイルまで送っていたのは、photutils を入れずに動かした v6 のノートブック版です。", st.body))
     # 2026-10-16 の 3 回目の決定: 公開しない指定(publicly_visible = n)を付けて送る。それでも第三者に見られうると書く
-    add(Paragraph("v7 は 1 も 2 も「公開しない」の指定（publicly_visible = n）を付けて送ります。"
+    add(Paragraph("v7 からは 1 も 2 も「公開しない」の指定（publicly_visible = n）を付けて送ります。"
                   "<b>ただし、nova.astrometry.net に送ったものは第三者に見られることがあります</b>。"
                   "2026-10-18 に実際に送って、ログインしていない第三者の立場で確かめると、"
                   "nova のトップ・画像の一覧と詳細ページには出ませんでしたが、"
@@ -590,8 +595,8 @@ def build(out_path):
     ], st, widths=[30 * mm, CONTENT_W - 30 * mm]))
     ext(callout("確かめた PC は 2 台です", [
         "<b>ノート PC（Core i7-1360P・RAM 16 GB・SSD 1 TB）</b>で、軽快に動くことを確かめました。",
-        "この版の数字は、すべて <b>Core Ultra 7 265K（20 スレッド）・Windows 11</b> の"
-        "デスクトップ PC で測ったものです（GPU は NVIDIA GeForce RTX 3060 と内蔵の Intel Graphics の"
+        "このマニュアルの数字は、すべて <b>Core Ultra 7 265K（20 スレッド）・Windows 11</b> の"
+        "デスクトップ PC で測ったものです（解析の時間とメモリは、断りの無いものは v7 の exe で測りました。GPU は NVIDIA GeForce RTX 3060 と内蔵の Intel Graphics の"
         "両方で描いて確かめました）。描き方の切り替え（DirectX 12 → OpenGL → ソフトウェア描画）は、"
         "わざと開けなくして確かめてあります。",
         "<b>RAM 8 GB の PC では、まだ確かめていません。</b>"
@@ -617,7 +622,7 @@ def build(out_path):
     add(KeepTogether(h2("メモリと描画（実測）", st, "3.1") + [
         Paragraph("zahyou だけが使う分（私有）と working set（合計）です。合成の FITS を開いて"
                   "図を拡大・移動させる物差しで、3 回の中央値を取りました"
-                  "（GPU は NVIDIA GeForce RTX 3060）。", st.small)] + table([
+                  "（GPU は NVIDIA GeForce RTX 3060。v7 の exe で測った値です）。", st.small)] + table([
         ["", "DirectX 12（既定）", "OpenGL"],
         ["画面を出しただけ（起動から 3 秒）", "248 / 175 MB", "131 / 128 MB"],
         ["24 メガ画素（6000 x 4000）の図を表示中", "529 / 324 MB", "457 / 310 MB"],
@@ -629,6 +634,8 @@ def build(out_path):
         "（61 メガ画素の表示中で 948 MB）。",
         "図の拡大・移動のフレームの間隔は、中央値で画面の書き換え 1 回分（75 Hz で 13.3 ミリ秒）でした"
         "（24・61 メガ画素、DirectX 12・OpenGL・内蔵 GPU とも）。",
+        "v8 では、24 メガ画素の画像を読み込んで図を用意するあいだの私有の最大が、"
+        "583 MB から 430 〜 491 MB に減りました（docs/rust-port.md の 13.4 節。上の表とは物差しが違います）。",
         "解析そのもののメモリ（Python のエンジンとの比べ）は docs/rust-port.md の 7.3 節にあります"
         "（描き方を今の形にする前の値です）。",
     ], st))
@@ -636,10 +643,11 @@ def build(out_path):
     ext(h2("解析にかかる時間（実測）", st, "3.2"))
     add(Paragraph("画像の読み込みから図までの時間です。焦点距離も手がかりも入れず、"
                   "星図データは 4′〜2000′ の全部（253 ファイル）を置いた状態で測りました。"
-                  "Python の図の時間は、図を作るまで（画面に描く・PNG にするのは含みません）。",
+                  "Python の図の時間は、図を作るまで（画面に描く・PNG にするのは含みません）。"
+                  "exe の列は v7 の exe で測った値で、v8 の exe では測り直していません。",
                   st.small))
     ext(table([
-        ["画像", "exe", "Python"],
+        ["画像", "exe（v7）", "Python"],
         ["968 x 548 の動画の 1 コマ・目標あり", "0.12 秒", "2.13 秒"],
         ["同・目標なし", "0.09 秒", "0.69 秒"],
         ["1608 x 1104 の 16 bit FITS・目標なし", "0.11 秒", "1.54 秒"],
@@ -650,6 +658,12 @@ def build(out_path):
         ["焦点距離の書き違い（2500 mm と入力、実際は 818 mm）",
          "26.3 秒", "132.4 秒"],
     ], st, widths=[92 * mm, 28 * mm, CONTENT_W - 120 * mm], align=[None, "c", "c"]))
+    add(Paragraph("v8 はこれより速くなっています（24 メガ画素の照合を除く処理全体で 0.95 秒 → 0.73 秒、"
+                  "解くのが難しい場面の照合で 1.5 〜 1.6 倍。測り方は docs/rust-port.md の 13.4 節で、"
+                  "上の表とは物差しが違います）。", st.body))
+    # 起動の時間は v8 の exe で測り直す。今の 0.37〜0.40 / 0.20〜0.21 秒は β1 の exe で 2026-10-16 に測った値
+    # (docs/rust-port.md 10.6 節)で、README の「起動と大きさ」(v7 の exe で 10-18 に測った 0.38〜0.39 / 0.44〜0.46 秒)と
+    # 食い違っている。測り直したら、README の表・この文・表紙の「1 秒ほど」を同じ実測値にそろえる
     add(Paragraph("起動は、最初の描画まで <b>0.37 〜 0.40 秒</b>（DirectX 12、3 回）・"
                   "0.20 〜 0.21 秒（OpenGL、3 回）でした（v6 は窓が出るまで約 4 秒）。"
                   "解析の時間はβ版で測り直しても差がありませんでした。"
@@ -671,7 +685,7 @@ def build(out_path):
                   "index-5202 と 5203（4′〜8′）です。"
                   "4′ まで要らなければ、容量は一桁下がります。", st.body))
     add(Paragraph("v6 の exe は起動のたびに 232 MB を一時展開していましたが、"
-                  "v7 の exe は展開せずにそのまま動きます。"
+                  "v7 からの exe は展開せずにそのまま動きます。"
                   "デスクトップ版の［準備］タブから入れる場合は、"
                   "必要なファイルを直接落とすので<b>zip の置き場所は要りません</b>。"
                   "配布ページの zip から入れるときは、"
@@ -726,11 +740,11 @@ def build(out_path):
 
     ext(h2("ノートブックと必要なライブラリ", st, "4.3"))
     ext(steps([
-        "<b>zahyou_v7.ipynb</b> と <b>zahyou_engine.py</b> の 2 つ"
+        "<b>zahyou_v8.ipynb</b> と <b>zahyou_engine.py</b> の 2 つ"
         "（GitHub の Releases か配布ページにあります。付録 B）を、"
         "分かりやすい場所（デスクトップに作った zahyou フォルダーなど）に"
         "<b>そろえて</b>置きます。片方だけでは動きません。",
-        "<b>zahyou_v7.ipynb</b> を右クリック →「プログラムから開く」→ VS Code を選びます。",
+        "<b>zahyou_v8.ipynb</b> を右クリック →「プログラムから開く」→ VS Code を選びます。",
         "画面右上の「カーネルの選択」を押し、<b>Python 環境</b> →"
         "先ほど入れた Python を選びます。",
         "いちばん上の <b>セル A</b> の中の <b>!pip install</b> で始まる行の "
@@ -782,7 +796,7 @@ def build(out_path):
                   "同じフォルダーをそのまま使えます。", st.small))
 
     ext(h2("動作確認", st, "4.5"))
-    add(Paragraph("VS Code で zahyou_v7.ipynb を開き、セル A → セル B → セル C の順に"
+    add(Paragraph("VS Code で zahyou_v8.ipynb を開き、セル A → セル B → セル C の順に"
                   "実行します。手元のテスト画像で結果の図が 2 枚出れば導入完了です。",
                   st.body))
     add(Paragraph("オフライン解析だけを試したいときは、セル C の "
@@ -1106,30 +1120,35 @@ def build(out_path):
     add(Paragraph("設定（目標・焦点距離・配色・API キー）も、覚えた座標や画素スケールも"
                   "そのまま引き継がれます。<b>星図データもそのままで構いません</b>。"
                   "v6 で方法を「オフライン (WSL) のみ」にしていたら、"
-                  "v7 でも「オフラインのみ」として読みます"
+                  "v8 でも「オフラインのみ」として読みます"
                   "（設定ファイルには v6 と同じ書き方で書くので、v6 に戻しても方法は変わりません）。"
                   "v6 で WSL に入れた astrometry.net はもう使いません（消し方は 9.2）。",
                   st.body))
-    ext(callout("v6 から入れ替える", [
-        "<b>v6 の［使い方］タブの「更新を確認」→「更新する」で、v7 に入れ替わります。</b>",
-        "v6 の exe は zahyou.exe.bak（約 102 MB）として横に残ります。"
-        "v7 はこれを消さないので、v7 が動いたら消してかまいません。",
-        "設定・覚えた座標・星図データは、そのまま使えます（WSL の astrometry.net が要らなくなることは上に書いたとおりです）。",
-        "<b>v6 に戻すとき</b>は、v6 の zahyou.exe（zahyou.exe.bak を zahyou.exe に名前を戻したもの）を"
-        "置くだけです。設定はそのまま使えます。"
+    # v6 の更新係も v7 の更新係も、GitHub の latest の zahyou.exe を落として入れ替える。
+    # v6 の exe は .bak として残り、v7 の exe は .old になって v8 の起動で消える(zahyou-net の cleanup_old_versions)
+    ext(callout("v6・v7 から入れ替える", [
+        "<b>v6 と v7 の［使い方］タブの「更新を確認」→「更新する」で、どちらも v8 に入れ替わります</b>"
+        "（v6 からも、じかに v8 になります）。設定・覚えた座標・星図データは、そのまま使えます。",
+        "v7 の exe は、入れ替えのあいだだけ zahyou.exe.old として残り、v8 を起動したときに消えます。"
+        "v6 の exe は zahyou.exe.bak（約 102 MB）として残ります。"
+        "v8 はこれを消さないので、v8 が動いたら消してかまいません。",
+        "<b>前の版に戻すとき</b>は、v7 なら GitHub の Releases の v7 から zahyou.exe を落として上書きし、"
+        "v6 なら zahyou.exe.bak を zahyou.exe に名前を戻して置くだけです。設定はそのまま使えます。"
         "API キーの欄の値は v6 では使わず、v6 で設定を保存すると消えます"
-        "（次に v7 を開くと既定のキーに戻ります）。",
-        "<b>β版（v7.0.0-beta.N）を使っていた方</b>は、β版の「更新を確認」で正式版が出ます。",
+        "（次に v8 を開くと既定のキーに戻ります）。",
+        "<b>β版（v7.0.0-beta.N）</b>の「更新を確認」では v7 が出ます（大きな版が同じものだけを探すため）。"
+        "v7 にしてから、もう一度「更新を確認」→「更新する」で v8 になります。",
     ], st, kind="note"))
     add(Paragraph("いま使っている版は、<b>ウィンドウの題</b>で分かります"
-                  "（「zahyou v7.0.0 — …」）。", st.body))
+                  "（「zahyou v8 — …」。v7 の exe は「zahyou v7.0.0 — …」と出ます）。", st.body))
     ext(callout("ノートブック版は 2 つとも入れ替えてください", [
-        "<b>zahyou_v7.ipynb</b> と <b>zahyou_engine.py</b> は組で動きます。"
+        "<b>zahyou_v8.ipynb</b> と <b>zahyou_engine.py</b> は組で動きます。"
         "片方だけ新しくすると、設定の名前が食い違って動かなくなることがあります。",
         "入れ替えたあとは、ノートブックを開き直して"
         "<b>セル A からやり直して</b>ください"
         "（開いたままだと、古いエンジンが読み込まれたまま残ります）。",
-        "v6 のノートブック（zahyou_v6.ipynb）やβ版のノートブック（zahyou_v7_beta.ipynb）から移るときは、<b>zahyou_v7.ipynb</b> を開いてください（古いノートブックは消してかまいません）。",
+        "前のノートブック（v7 の zahyou_v7.ipynb・v6 の zahyou_v6.ipynb・β版の zahyou_v7_beta.ipynb）から"
+        "移るときは、<b>zahyou_v8.ipynb</b> を開いてください（古いノートブックは消してかまいません）。",
     ], st))
 
     ext(h2("やめる（消す）", st, "9.2"))
@@ -1170,7 +1189,7 @@ def build(out_path):
         "出ています。",
     ], st, kind="note"))
 
-    add(Paragraph("v6 で WSL に入れた解析エンジン（astrometry.net）は、v7 では使いません。"
+    add(Paragraph("v6 で WSL に入れた解析エンジン（astrometry.net）は、v7 からは使いません。"
                   "残しておいても害はありません。片付けるなら、Ubuntu のターミナルで"
                   "<b>どちらか一方</b>を打ちます。", st.body))
     add(Paragraph("(1) astrometry.net を消す（設定ファイルも一緒に消え、"
@@ -1223,7 +1242,7 @@ def build(out_path):
         ["プレートソルブ", "写真から空の位置を割り出すこと。このプログラムの中心機能です。"],
         ["index ファイル", "星の並びのパターンを収めた星図データ。照合に使います。"],
         ["WSL", "Windows の中で Linux を動かすしくみ。"
-         "v6 まではオフライン解析に使っていました（v7 では要りません）。"],
+         "v6 まではオフライン解析に使っていました（v7 からは要りません）。"],
         ["API キー", "nova.astrometry.net に問い合わせるときの合言葉。"
          "［解析］タブの欄に、初めから作者のキーが入っています。"
          "nova.astrometry.net に登録すると、自分のキーが自分のページで見られます。"],
@@ -1235,7 +1254,7 @@ def build(out_path):
     ext(bullets([
         "GitHub の Releases（最新版）："
         "https://github.com/Akashi3060/zahyou/releases/latest<br/>"
-        "付けているもの: zahyou.exe（デスクトップ版）・zahyou_v7.ipynb と zahyou_engine.py"
+        "付けているもの: zahyou.exe（デスクトップ版）・zahyou_v8.ipynb と zahyou_engine.py"
         "（ノートブック版）・zahyou-manual-v4.pdf（このマニュアル）・LICENSE.txt・"
         "THIRD-PARTY-NOTICES.md（exe に入っているライブラリの一覧）・SHA256SUMS.txt（全部の SHA256）",
         "ソース：https://github.com/Akashi3060/zahyou",

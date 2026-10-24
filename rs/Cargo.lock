@@ -4000,7 +4000,7 @@ dependencies = [
 
 [[package]]
 name = "zahyou"
-version = "7.0.0"
+version = "8.0.0"
 dependencies = [
  "eframe",
  "image",
@@ -4021,7 +4021,7 @@ dependencies = [
 
 [[package]]
 name = "zahyou-image"
-version = "7.0.0"
+version = "8.0.0"
 dependencies = [
  "flate2",
  "image",
@@ -4033,7 +4033,7 @@ dependencies = [
 
 [[package]]
 name = "zahyou-index"
-version = "7.0.0"
+version = "8.0.0"
 dependencies = [
  "bytemuck",
  "memmap2",
@@ -4046,7 +4046,7 @@ dependencies = [
 
 [[package]]
 name = "zahyou-net"
-version = "7.0.0"
+version = "8.0.0"
 dependencies = [
  "fs4",
  "serde_json",
@@ -4057,7 +4057,7 @@ dependencies = [
 
 [[package]]
 name = "zahyou-plot"
-version = "7.0.0"
+version = "8.0.0"
 dependencies = [
  "ab_glyph",
  "rayon",
@@ -4069,7 +4069,7 @@ dependencies = [
 
 [[package]]
 name = "zahyou-solver"
-version = "7.0.0"
+version = "8.0.0"
 dependencies = [
  "rayon",
  "serde_json",
@@ -4081,7 +4081,7 @@ dependencies = [
 
 [[package]]
 name = "zahyou-wcs"
-version = "7.0.0"
+version = "8.0.0"
 dependencies = [
  "serde_json",
 ]
