@@ -4,6 +4,8 @@
 //! 現れた順に番号)、領域ごとに重心・光量・伸びを測る。しきい値は 12σ から下げていき、
 //! min_sources 個そろったところで止める。
 
+use std::borrow::Cow;
+
 use rayon::prelude::*;
 
 use crate::filters::gaussian1;
@@ -198,7 +200,12 @@ pub fn detect_raw(sub: &Image2D, mask: &[bool], sigma: f64, opts: &DetectOpts) -
     if n == 0 || sub.data.len() != n || mask.len() != n {
         return (Vec::new(), None);
     }
-    let work: Vec<f32> = sub.data.par_iter().zip(mask.par_iter()).map(|(&s, &m)| if m { 0.0 } else { s }).collect();
+    // マスクの画素を 0 にした画像。マスクが空なら sub そのもの(写さない。`if m {0} else {s}` は m が全部偽なら s のビットのまま)
+    let work: Cow<[f32]> = if !mask.par_iter().any(|&m| m) {
+        Cow::Borrowed(&sub.data)
+    } else {
+        Cow::Owned(sub.data.par_iter().zip(mask.par_iter()).map(|(&s, &m)| if m { 0.0 } else { s }).collect())
+    };
     let smooth = gaussian1(&work, ny, nx);
     let smooth_sigma = sigma / 2.0; // 平滑化でノイズが下がる分
 

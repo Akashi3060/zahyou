@@ -16,8 +16,8 @@ use crate::clock::{Abort, Clock};
 use crate::field::Field;
 use crate::lsq::{LSQ_MAX_SHIFTS, fit_wcs_lsq, normalize3, wrms};
 use crate::parts::{
-    CodeVariants, SIP_F_Z, code_variants, f_upper, field_codes, fit_similarity_quad, logodds_weight, quad_ab_range,
-    quad_geometry, quads_newest_into,
+    CodeVariants, SIP_F_Z, accept_logodds, code_variants, f_upper, field_codes, fit_similarity_quad, logodds_weight,
+    quad_ab_range, quad_geometry, quads_newest_into, tuneup_accepted,
 };
 use crate::pyfmt::{fmt_g, fmt_int};
 use crate::verify::{Hyp, Proj, Refs, SeriesCtx, Store, VerifyOut, quick_pass, series_cone, verify_one};
@@ -465,21 +465,25 @@ fn finish_series(
 ) -> Result<Option<Found>, Abort> {
     let sc = SeriesCtx::new(store, iid, members[0].file);
     // 当たりの数は索引の順に足す。Python は 1 本ずつ照合するので、問題が起きた索引より前の分だけが数えられる
-    let mut all: Vec<Hyp> = Vec::new();
+    let mut per_file: Vec<Vec<Hyp>> = Vec::with_capacity(results.len());
     for r in results {
         match r {
             Ok((hy, nhit)) => {
                 st.hits += nhit;
                 st.flushes[fl].hits += nhit;
-                all.extend(hy);
+                per_file.push(hy);
             }
             Err(e) => return Err(clock.prefer_cancel(e)),
         }
     }
+    // 同じ系列のタイルの仮説をつなぎ、newpoint の順(quad の行の順。同じ行は索引の順)に並べる。
+    // 仮説(約 270 バイト)を 1 本につないで並べ替えると、写しと並べ替えの作業領域が大きい(しかも並列の外)ので、
+    // 参照(8 バイト)を並べる。参照の列は今までの連結と同じ順(索引の順、その中は索引の中の順)に作り、同じ鍵 row で
+    // 安定に並べるので、並びは仮説そのものを並べたときと完全に同じ
+    let mut all: Vec<&Hyp> = per_file.iter().flatten().collect();
     if all.is_empty() {
         return Ok(None);
     }
-    // 同じ系列のタイルの仮説をつなぎ、newpoint の順(quad の行の順。同じ行は索引の順)に並べる
     all.sort_by_key(|h| h.row);
     verify_and_pick(field, &sc, params, &all, clock, log, st, fl)
 }
@@ -660,12 +664,14 @@ fn match_file(
 
 /// 仮説を newpoint の順に VERIFY_STEP 個ずつ検証し、solve 以上の最初の仮説(なければ tune-up で上がった最初のもの)を
 /// 改良して返す(Python の `_sv_verify_and_pick`)。区切りの中は並列に検証し、選ぶのは順に。
+/// 改良した後の対数オッズが accept_logodds(試した数で上げた値)に届かないもの、試した仮説が多くなってから tune-up で
+/// 上がったのに改良で一致が増えないもの(tuneup_accepted)は解にしない(設計書 3.7 節の 6)。
 #[allow(clippy::too_many_arguments)]
 fn verify_and_pick(
     field: &Field,
     sc: &SeriesCtx,
     params: &Params,
-    hyps: &[Hyp],
+    hyps: &[&Hyp],
     clock: Clock,
     log: &dyn Fn(&str),
     st: &mut SearchState,
@@ -675,9 +681,15 @@ fn verify_and_pick(
     let tune = params.logodds_tune;
     for part in hyps.chunks(VERIFY_STEP) {
         let m = part.len();
+        // 区切りごとに全部の検証の終わりを待つので、終わりぎわに残る仕事を小さくする: 仕事は 16〜31 仮説にそろえる
+        // (with_max_len が無いと、rayon は分ける回数をスレッドの数から半分ずつ減らすので、盗まれない部分の仕事は
+        // 20 スレッドで 8192 / 32 = 256 仮説、8 スレッドで 512 仮説になる)。collect は並びを保つので、
+        // 結果の順も選ぶ仮説も分け方によらない。Err は今までと同じく、並列で先に出たものを返す(種類は締め切り・中止・
+        // 壊れた索引・開けない索引で、同時に起きたときにどれになるかが決まっていないのは分け方によらず前から同じ)
         let res: Vec<VerifyOut> = part
             .par_iter()
             .with_min_len(16)
+            .with_max_len(16)
             .map(|h| -> Result<VerifyOut, Abort> {
                 clock.check()?;
                 if !quick_pass(field, sc, params, h, 1.0)? {
@@ -714,13 +726,16 @@ fn verify_and_pick(
                 });
             }
         }
+        // 解とみなす値は、この区切りの終わりまでに試した仮説の数で上げる(区切りの中は同じ値。Python も同じ数え方)
+        let accept = accept_logodds(params, st.hyps);
         for (i, r) in res.iter().enumerate() {
             if !(r.best >= tune) {
                 continue;
             }
-            let h = &part[i];
+            let h = part[i];
             let name = sc.store.file(sc.files[h.fid]).name.clone();
-            if r.best < solve {
+            let tuned = r.best < solve;
+            if tuned {
                 // tune-up: 1 次で改良して検証し直す
                 let (_, r1) = refine(field, sc, params, h, 1, false, clock)?;
                 st.tuneups.push((name.clone(), r.best, r1.best));
@@ -730,14 +745,20 @@ fn verify_and_pick(
             }
             let (wcs, res1) = match refine(field, sc, params, h, params.tweak_order, true, clock) {
                 Err(Abort::TimeUp) => {
-                    // solve を超えた仮説がある(解は見つかっている)ので、締め切りを過ぎても改良は最後まで済ませる
-                    // (中止の合図はそのまま見る)。ここで止めると、解けている画像が「解けず」になる
-                    log("締め切りを過ぎましたが、解が見つかっているので改良を済ませます");
+                    // solve を超えた仮説があるので、締め切りを過ぎても改良は最後まで済ませる(中止の合図はそのまま見る)。
+                    // ここで止めると、解けている画像が「解けず」になる。解として返すかは、改良の後の判定(試した数で上げる値・
+                    // tune-up の一致の増え)で決まるので、ログは「解が見つかった」と言い切らない
+                    log("締め切りを過ぎましたが、solve を超えた候補があるので改良を済ませます");
                     refine(field, sc, params, h, params.tweak_order, true, clock.without_deadline())?
                 }
                 other => other?,
             };
-            if !(res1.best >= solve) {
+            if !(res1.best >= accept) {
+                continue;
+            }
+            // 試した仮説が多くなってから tune-up で上がった仮説は、改良で一致が増えたときだけ解にする
+            // (同じ星への当て直しだけで上がったものは偶然)
+            if tuned && !tuneup_accepted(params, st.hyps, r.nmatch, res1.nmatch) {
                 continue;
             }
             return Ok(Some(Found {

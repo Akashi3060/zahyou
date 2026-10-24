@@ -1538,14 +1538,18 @@ class SvParams:
     logodds_solve = math.log(1e9)         # これ以上で解(Lang et al. の効用から)
     logodds_tune = math.log(1e6)          # これ以上・solve 未満なら 1 次で改良して検証し直す
     logodds_bail = math.log(1e-100)       # 検証の打ち切り
+    tune_min_gain = 1                     # tune-up で上がった仮説を解にするのに要る、改良での一致の増え(0 なら確かめない)
+    tune_gain_hyps0 = 1e5                 # 一致の増えを求めるのは、試した仮説の数がこれを超えてから(無限大なら求めない)
+    accept_hyps0 = 1e5                    # 試した仮説の数 N がこれを超えたら、解とみなす値を solve + ln(N / これ) に上げる
     parity = "both"                       # "both" / "normal"(配列座標で det CD < 0)/ "mirror"(det CD > 0)
     max_quad_stars = 60                   # quad 作りに使う星(並べ替えた順)の上限
     max_verify_stars = 300                # 検証に使う星の上限
     quad_min_frac = 0.1                   # quad の AB の最小 = 0.1 × 短辺
     uniformize_boxes = 10                 # 探索の前の並べ替え(画面全体に散らす)
     tweak_order = 2                       # 改良の SIP の次数(星が足りなければ下げる)
-    FIELDS = ("codetol", "distractor", "verify_pix", "logodds_solve", "logodds_tune", "logodds_bail", "parity",
-              "max_quad_stars", "max_verify_stars", "quad_min_frac", "uniformize_boxes", "tweak_order")
+    FIELDS = ("codetol", "distractor", "verify_pix", "logodds_solve", "logodds_tune", "logodds_bail", "tune_min_gain",
+              "tune_gain_hyps0", "accept_hyps0", "parity", "max_quad_stars", "max_verify_stars", "quad_min_frac",
+              "uniformize_boxes", "tweak_order")
 
     def __init__(self, **kw):
         for k, v in kw.items():
@@ -1913,6 +1917,41 @@ def sv_logodds_weight(lo):
     with np.errstate(over="ignore"):
         w = 1.0 / (1.0 + np.exp(-np.clip(lo, -700.0, 40.0)))
     return np.where(lo > 40.0, 1.0, np.where(lo < -700.0, 0.0, w))
+
+
+def sv_accept_logodds(p, nhyp):
+    """この探索で nhyp 個の仮説を試したところで、解とみなす対数オッズ(3.7 節の 6)。
+
+    nhyp が accept_hyps0 以下なら logodds_solve、超えたら logodds_solve + ln(nhyp / accept_hyps0)。
+    考え方: 偶然の仮説の尤度比が K を超える見込みは 1 つあたり 1/K 以下なので、当て直す前の尤度比に k 個目で 1e9·k/1e5 を
+    求めれば、探索全体の見込みは 1e−4·(1 + ln(N/1e5)) 以下になる。ただし実装はこの値を最後の改良(一致した星への当て直し)
+    の後の対数オッズと比べ、tune-up を通らない仮説の入口は固定の logodds_solve のままなので、厳密な上限ではない(その経路で
+    保証されるのは固定の 1e9 と同じ N/1e9 まで)。当て直しの上げ幅が ln(N/1e5) より小さい偶然の解を止める目安で、
+    tune-up 経由の偶然の解は sv_tuneup_accepted が受け持つ。
+    代償: 対数オッズ L の本物の解でも、初めて出るのが N > accept_hyps0·e^(L − logodds_solve) 個目なら捨てる
+    (L = 24 で 2.7e6、26.9 で 4.8e7)。N は探索 1 回で全部の系列にまたがって数えるので、星図データが多いほど・速いほど
+    同じ締め切りの中で基準が厳しくなる(実測の正しい解に L < 50 かつ N > 1e5 は無い。docs/rust-port.md 14.6)。
+    """
+    n = float(nhyp)
+    h0 = float(p.accept_hyps0)
+    if h0 > 0.0 and n > h0:
+        return float(p.logodds_solve) + math.log(n / h0)
+    return float(p.logodds_solve)
+
+
+def sv_tuneup_accepted(p, nhyp, nmatch_before, nmatch_after):
+    """この探索で nhyp 個の仮説を試したところで、tune-up(1 次の改良で検証し直す)で solve に届いた仮説を解にしてよいか。
+
+    改良は検証に使ったのと同じ星に WCS を当て直すので、それだけでオッズが上がる(偶然の仮説で 4〜8.5)。
+    本物の仮説なら改良で新しい星が並ぶので、nhyp が tune_gain_hyps0 を超えたら、改良後の一致数が 4 点の検証の一致数より
+    tune_min_gain 以上多いことを求める。それまでは求めない: 星の少ない画像の本物の解は、星が全部一致済みで増えようがない
+    (星 8 個の 3I_00010 は仮説 4,553 個目に tune-up で 21.9・一致 4 → 4 で解ける)。誤った解が出るのは何百万個も試したあと。
+    代償: tune_gain_hyps0 を超えてから tune-up で上がり、一致が増えない本物の候補も捨てる(実測では s-30d-r3 の 1 候補。
+    別の仮説で先に解けていて結果は変わらない)。
+    """
+    if not (int(p.tune_min_gain) > 0 and float(nhyp) > float(p.tune_gain_hyps0)):
+        return True
+    return int(nmatch_after) >= int(nmatch_before) + int(p.tune_min_gain)
 
 
 def _sv_chunks(sizes, per, limit):
@@ -3063,7 +3102,9 @@ def _sv_hyp_concat(hys):
 def _sv_verify_and_pick(field, catalog, f, hy, clock, log, p, st, fl):
     """仮説の束を newpoint の順に SV_VERIFY_STEP 個ずつ検証し、solve 以上の最初の仮説(なければ tune-up で
     上がった最初のもの)を改良して返す。区切りごとに選ぶので、解が見つかればそこで止まる(後ろの仮説は検証しない)。
-    区切りは順に進むので、選ばれる仮説は束全体を検証してから選んだときと同じ。"""
+    区切りは順に進むので、選ばれる仮説は束全体を検証してから選んだときと同じ。
+    改良した後の対数オッズが sv_accept_logodds(試した数で上げた値)に届かないもの、試した仮説が多くなってから
+    tune-up で上がったのに改良で一致が増えないもの(sv_tuneup_accepted)は解にしない(設計書 3.7 節の 6)。"""
     n = hy["n"]
     fs = catalog.series[f.indexid]
     solve = float(p.logodds_solve)
@@ -3089,9 +3130,12 @@ def _sv_verify_and_pick(field, catalog, f, hy, clock, log, p, st, fl):
                                       quick_rejected=bool(quick[i]),
                                       logodds=round(float(best[i]), 4) if np.isfinite(best[i]) else None,
                                       nmatch=int(nmatch[i])))
+        # 解とみなす値は、この区切りの終わりまでに試した仮説の数で上げる(区切りの中は同じ値)
+        accept = sv_accept_logodds(p, st["hyps"])
         for i in np.nonzero(best >= tune)[0]:
             hy1 = _sv_hyp_take(part, slice(i, i + 1))
-            if best[i] < solve:
+            tuned = bool(best[i] < solve)
+            if tuned:
                 # tune-up: 1 次で改良して検証し直す
                 _, r1 = _sv_refine(field, catalog, f, hy1, 1, clock=clock, final=False)
                 st.setdefault("tuneups", []).append(dict(index=fs[int(part["fid"][i])].name,
@@ -3102,14 +3146,19 @@ def _sv_verify_and_pick(field, catalog, f, hy, clock, log, p, st, fl):
             try:
                 wcs, res1 = _sv_refine(field, catalog, f, hy1, p.tweak_order, clock=clock)
             except _SvTimeUp:
-                # solve を超えた仮説がある(解は見つかっている)ので、締め切りを過ぎても改良は最後まで済ませる
-                # (数十 ms。中止の合図はそのまま見る)。ここで None を返すと、解けている画像が「解けず」になる
+                # solve を超えた仮説があるので、締め切りを過ぎても改良は最後まで済ませる(数十 ms。中止の合図はそのまま見る)。
+                # ここで None を返すと、解けている画像が「解けず」になる。解として返すかは、改良の後の判定(試した数で上げる値・
+                # tune-up の一致の増え)で決まるので、ログは「解が見つかった」と言い切らない
                 if log:
-                    log("締め切りを過ぎましたが、解が見つかっているので改良を済ませます")
+                    log("締め切りを過ぎましたが、solve を超えた候補があるので改良を済ませます")
                 wcs, res1 = _sv_refine(field, catalog, f, hy1, p.tweak_order,
                                        clock=_SvClock(None, clock.cancel))
             lo = float(res1["best"][0])
-            if not (lo >= solve):
+            if not (lo >= accept):
+                continue
+            # 試した仮説が多くなってから tune-up で上がった仮説は、改良で一致が増えたときだけ解にする
+            # (同じ星への当て直しだけで上がったものは偶然)
+            if tuned and not sv_tuneup_accepted(p, st["hyps"], int(nmatch[i]), int(res1["nmatch"][0])):
                 continue
             return SvSolution(
                 wcs=wcs, logodds=lo, nmatch=int(res1["nmatch"][0]), ndistract=int(res1["ndistract"][0]),

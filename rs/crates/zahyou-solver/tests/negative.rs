@@ -10,6 +10,8 @@
 //!
 //! 締め切り 30 秒の --ignored では、Python が 15 秒の締め切りで止まった画像でも Rust は quad を試し尽くすことが多い
 //! (そのときは「締め切りとの差」が負になる)。
+//! - 解の判定の条件(設計書 3.7 節の 6): tcase_dense の深い検出の星は、tune-up の一致の増えと試した数の値上げのどちらかが
+//!   あれば最後まで探して解なし、両方を外すと前と同じ誤った解(仮説 16,187,319 個目)に届くか(negative_dense_accept_rule)
 //!
 //! ```text
 //! cargo test -p zahyou-solver --test negative -- --nocapture             短い締め切り(8 秒)で代表だけ
@@ -151,6 +153,104 @@ fn negative_synth_quick() {
 #[ignore]
 fn negative_synth_all() {
     synth_random(&["rand60", "rand300", "rand_hint"], neg_deadline(30.0), "negative_synth_all");
+}
+
+/// tune-up と試した数の条件(設計書 3.7 節の 6)を外すと出る誤った解。
+///
+/// tcase_dense(dev/tcase/dense.fits。乱数の密な星野)の深い検出の星 400 個は、全天ブラインドで仮説 16,187,319 個目に
+/// index-4112(三角形の索引)の誤った解に届いていた。4 点の検証は対数オッズ 18.7・一致 5 で、tune-up(同じ星への当て直し)で
+/// 22.773709888689385 に上がり、ln(1e9) = 20.72 を超えた。一致は 5 のままだった(2026-10-24 に見つけた。それまでは
+/// 締め切り 30 秒に届かない機械の速さに隠れていた)。
+const DENSE_FALSE_INDEX: &str = "index-4112";
+const DENSE_FALSE_LOGODDS_BITS: u64 = 4627103447142662977; // 22.773709888689385
+const DENSE_FALSE_NMATCH: usize = 5;
+const DENSE_FALSE_HYPS: u64 = 16_187_319;
+
+/// tcase_dense の深い検出の星を、Python の試行と同じ条件(全天ブラインド・試行のスケールの範囲)で。
+fn dense_deep_request() -> Option<SolveRequest> {
+    let doc = load_testdata("solver_real.json")?;
+    let img = doc["images"].as_array()?.iter().find(|i| i["name"].as_str() == Some("tcase_dense"))?.clone();
+    if img.get("skipped").is_some_and(|v| !v.is_null()) {
+        return None;
+    }
+    let att = img["attempts"].as_array().and_then(|a| a.iter().find(|a| a["stars"].as_str() == Some("deep")).cloned());
+    Some(SolveRequest {
+        stars: stars_xyf(img.get("stars_deep").filter(|v| !v.is_null())?),
+        width: img["width"].as_u64()? as usize,
+        height: img["height"].as_u64()? as usize,
+        scale_lo: att.as_ref().and_then(|a| a["scale_lo"].as_f64()),
+        scale_hi: att.as_ref().and_then(|a| a["scale_hi"].as_f64()),
+        hint: att.as_ref().and_then(|a| hint_of(&a["hint"])),
+    })
+}
+
+/// 解の判定の 2 つの条件が、それぞれ単独でも tcase_dense の誤った解を止め、両方を外すと前と同じ誤った解に届くか。
+///
+/// 条件ごとに締め切りまで(既定 180 秒。この機械では約 28 秒で quad を試し尽くす)探し、仮説 16,187,319 個目を
+/// 越えたところまで試したことも確かめる(越える前に締め切りが来たら、確かめられなかったとして失敗にする)。
+/// 両方を外したときは、系列・対数オッズのビット・一致の数・仮説の番号まで前と同じ誤った解になる
+/// (探す順が変わっていないことと、止めているのがこの 2 つの条件であることの確かめ)。
+#[test]
+#[ignore]
+fn negative_dense_accept_rule() {
+    let label = "negative_dense_accept_rule";
+    let Some(cat) = catalog() else {
+        skip(label, "星図データが無い");
+        return;
+    };
+    let Some(req) = dense_deep_request() else {
+        skip(label, "solver_real.json に tcase_dense の深い星が無い");
+        return;
+    };
+    let deadline = neg_deadline(180.0);
+    let _g = heavy();
+    let mut bad = Vec::new();
+    let d = Params::default();
+    let cases = [
+        ("既定(両方の条件)", d.clone(), false),
+        ("tune-up の一致の増えだけ", Params { accept_hyps0: f64::INFINITY, ..d.clone() }, false),
+        ("試した数の値上げだけ", Params { tune_min_gain: 0, ..d.clone() }, false),
+        ("両方を外す", Params { tune_min_gain: 0, accept_hyps0: f64::INFINITY, ..d.clone() }, true),
+    ];
+    for (what, p, expect_false) in cases {
+        let buf = LogBuf::default();
+        let (r, dt, trace) = solve_traced(&req, &cat, &p, deadline, &buf);
+        let tried = trace.as_ref().and_then(|t| t["hypotheses"].as_u64()).unwrap_or(0);
+        let label = format!("tcase_dense stars_deep {what}(締め切り {deadline} 秒)");
+        let r = r.map(|o| o.map(|x| x.solution));
+        if expect_false {
+            let m = match &r {
+                Ok(Some(s)) => {
+                    let same = s.index_name == DENSE_FALSE_INDEX
+                        && s.logodds.to_bits() == DENSE_FALSE_LOGODDS_BITS
+                        && s.nmatch == DENSE_FALSE_NMATCH
+                        && s.hypotheses == DENSE_FALSE_HYPS;
+                    let m = format!("{} 対数オッズ {}・一致 {}・仮説 {} 個目、{dt:.2} 秒", s.index_name, s.logodds, s.nmatch, s.hypotheses);
+                    if same {
+                        row("PASS", &label, &format!("前と同じ誤った解: {m}"));
+                        continue;
+                    }
+                    format!("前と違う解 {m}")
+                }
+                other => format!("前の誤った解に届かない({other:?}、仮説 {tried} 個、{dt:.2} 秒)"),
+            };
+            row("FAIL", &label, &m);
+            bad.push(format!("{label}: {m}"));
+            continue;
+        }
+        match r {
+            Ok(None) if tried > DENSE_FALSE_HYPS => {
+                row("PASS", &label, &format!("解なし(仮説 {tried} 個を試した、{dt:.2} 秒)  ログ: {}", buf.tail(1)));
+            }
+            Ok(None) => {
+                let m = format!("仮説 {tried} 個で締め切り({dt:.2} 秒)。{DENSE_FALSE_HYPS} 個目まで届かず確かめられない");
+                row("FAIL", &label, &m);
+                bad.push(format!("{label}: {m}"));
+            }
+            other => judge(&label, other, dt, deadline, &buf.tail(1), &mut bad),
+        }
+    }
+    assert!(bad.is_empty(), "{} 件:\n{}", bad.len(), bad.join("\n"));
 }
 
 /// 実写の陰性: 検出の星(solver_real.json)でブラインド。

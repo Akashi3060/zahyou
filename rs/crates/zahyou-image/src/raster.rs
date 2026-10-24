@@ -15,6 +15,7 @@ use std::io::Cursor;
 use image::codecs::jpeg::JpegDecoder;
 use image::codecs::png::PngDecoder;
 use image::{DynamicImage, ImageDecoder};
+use rayon::prelude::*;
 use tiff::ColorType as TiffColor;
 use tiff::decoder::{Decoder as TiffDecoder, DecodingResult, Limits as TiffLimits};
 use tiff::tags::Tag;
@@ -61,7 +62,15 @@ fn err<E: std::fmt::Display>(e: E) -> String {
 // ----------------------------------------------------------- 向き ---
 
 /// Pillow の `exif_transpose` の変換(EXIF の Orientation 2..8)。値の並びだけを入れ替える。
-fn transpose<T: Copy>(v: &[T], w: usize, h: usize, ch: usize, orient: u8) -> (Vec<T>, usize, usize) {
+/// 出力の行ごとに並列(以前は 1 画素ずつ直列に `extend_from_slice` していた。値を写すだけなので結果は同じ)。
+/// 出力は全部の画素に 1 回ずつ書くので、最初の `T::default()` は残らない。
+fn transpose<T: Copy + Default + Send + Sync>(
+    v: &[T],
+    w: usize,
+    h: usize,
+    ch: usize,
+    orient: u8,
+) -> (Vec<T>, usize, usize) {
     // 新しい画像の (x, y) が元のどこから来るか。戻り値は (新しい幅, 新しい高さ)
     let (nw, nh) = if matches!(orient, 5..=8) { (h, w) } else { (w, h) };
     let src = |x: usize, y: usize| -> (usize, usize) {
@@ -76,15 +85,27 @@ fn transpose<T: Copy>(v: &[T], w: usize, h: usize, ch: usize, orient: u8) -> (Ve
             _ => (x, y),
         }
     };
-    let mut out = Vec::with_capacity(v.len());
-    for y in 0..nh {
-        for x in 0..nw {
-            let (sx, sy) = src(x, y);
-            let s = (sy * w + sx) * ch;
-            out.extend_from_slice(&v[s..s + ch]);
-        }
+    let row = nw * ch;
+    // 数の型の 0 は OS の 0 のページをそのまま使う(直列に 0 を書かない)。書き込みは下の並列の中
+    let mut out = vec![T::default(); row * nh];
+    if row > 0 {
+        out.par_chunks_mut(row).enumerate().for_each(|(y, o)| {
+            for x in 0..nw {
+                let (sx, sy) = src(x, y);
+                let s = (sy * w + sx) * ch;
+                o[x * ch..x * ch + ch].copy_from_slice(&v[s..s + ch]);
+            }
+        });
     }
     (out, nw, nh)
+}
+
+/// 8 bit の RGBA → RGB(A を捨てる)。並列に写すだけ(以前は直列の `flat_map` → `collect` で、伸ばし直しの
+/// 写しも入っていた。値は同じ)。4 の倍数でない端数は以前の `chunks_exact(4)` と同じく捨てる。
+fn rgba8_to_rgb(v: &[u8]) -> Vec<u8> {
+    let mut out = vec![0u8; v.len() / 4 * 3];
+    out.par_chunks_exact_mut(3).zip(v.par_chunks_exact(4)).for_each(|(o, p)| o.copy_from_slice(&p[..3]));
+    out
 }
 
 impl Pil {
@@ -159,9 +180,7 @@ fn from_dynamic(img: DynamicImage, mode: &str) -> Result<Pix, String> {
             Pix::Rgb(b.into_raw().chunks_exact(2).flat_map(|p| [(p[0] >> 8) as u8; 3]).collect())
         }
         DynamicImage::ImageRgb8(b) => Pix::Rgb(b.into_raw()),
-        DynamicImage::ImageRgba8(b) => {
-            Pix::Rgb(b.into_raw().chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect())
-        }
+        DynamicImage::ImageRgba8(b) => Pix::Rgb(rgba8_to_rgb(&b.into_raw())),
         DynamicImage::ImageRgb16(b) => Pix::Rgb(b.into_raw().iter().map(|&v| (v >> 8) as u8).collect()),
         DynamicImage::ImageRgba16(b) => Pix::Rgb(
             b.into_raw()
@@ -293,9 +312,7 @@ fn load_tiff(bytes: &[u8]) -> Result<(Pil, u8), String> {
         (TiffColor::RGB(16), DecodingResult::U16(v)) => {
             ("RGB".into(), Pix::Rgb(v.iter().map(|&x| (x >> 8) as u8).collect()))
         }
-        (TiffColor::RGBA(8), DecodingResult::U8(v)) => {
-            ("RGBA".into(), Pix::Rgb(v.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect()))
-        }
+        (TiffColor::RGBA(8), DecodingResult::U8(v)) => ("RGBA".into(), Pix::Rgb(rgba8_to_rgb(&v))),
         (TiffColor::RGBA(16), DecodingResult::U16(v)) => (
             "RGBA".into(),
             Pix::Rgb(
@@ -392,5 +409,60 @@ mod tests {
         assert_eq!(t(7), (vec![5, 2, 4, 1, 3, 0], 2, 3));
         // ROTATE_90(反時計回り): 右上 2 が左上へ
         assert_eq!(t(8), (vec![2, 5, 1, 4, 0, 3], 2, 3));
+    }
+
+    /// 以前の直列の並べ替え
+    fn old_transpose<T: Copy>(v: &[T], w: usize, h: usize, ch: usize, orient: u8) -> (Vec<T>, usize, usize) {
+        let (nw, nh) = if matches!(orient, 5..=8) { (h, w) } else { (w, h) };
+        let src = |x: usize, y: usize| -> (usize, usize) {
+            match orient {
+                2 => (w - 1 - x, y),
+                3 => (w - 1 - x, h - 1 - y),
+                4 => (x, h - 1 - y),
+                5 => (y, x),
+                6 => (y, h - 1 - x),
+                7 => (w - 1 - y, h - 1 - x),
+                8 => (w - 1 - y, x),
+                _ => (x, y),
+            }
+        };
+        let mut out = Vec::with_capacity(v.len());
+        for y in 0..nh {
+            for x in 0..nw {
+                let (sx, sy) = src(x, y);
+                let s = (sy * w + sx) * ch;
+                out.extend_from_slice(&v[s..s + ch]);
+            }
+        }
+        (out, nw, nh)
+    }
+
+    #[test]
+    fn parallel_transpose_same_as_serial() {
+        for &(w, h) in &[(1usize, 1usize), (1, 7), (9, 1), (13, 8), (64, 33)] {
+            for &ch in &[1usize, 3] {
+                let v: Vec<u8> = (0..w * h * ch).map(|i| (i * 37 % 251) as u8).collect();
+                let f: Vec<f32> = (0..w * h * ch).map(|i| i as f32 * 0.5 - 3.0).collect();
+                for o in 1..=8u8 {
+                    let (a, aw, ah) = transpose(&v, w, h, ch, o);
+                    assert_eq!((a, aw, ah), old_transpose(&v, w, h, ch, o), "u8 {w}x{h}x{ch} 向き {o}");
+                    let (a, _, _) = transpose(&f, w, h, ch, o);
+                    let (b, _, _) = old_transpose(&f, w, h, ch, o);
+                    assert!(a.iter().zip(&b).all(|(x, y)| x.to_bits() == y.to_bits()) && a.len() == b.len());
+                }
+            }
+        }
+        // 空の画像でも panic しない
+        assert_eq!(transpose::<u8>(&[], 0, 5, 3, 6), (vec![], 5, 0));
+        assert_eq!(transpose::<u8>(&[], 4, 0, 1, 2), (vec![], 4, 0));
+    }
+
+    #[test]
+    fn rgba_to_rgb_same_as_serial() {
+        for n in [0usize, 1, 4, 7, 4 * 1000 + 3] {
+            let v: Vec<u8> = (0..n).map(|i| (i * 91 % 256) as u8).collect();
+            let old: Vec<u8> = v.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+            assert_eq!(rgba8_to_rgb(&v), old, "{n}");
+        }
     }
 }

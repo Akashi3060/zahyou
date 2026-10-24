@@ -55,6 +55,7 @@ fn params_dict(p: &Params) -> Value {
         "logodds_solve": num(p.logodds_solve), "logodds_tune": num(p.logodds_tune), "logodds_bail": num(p.logodds_bail),
         "parity": p.parity.name(), "max_quad_stars": p.max_quad_stars, "max_verify_stars": p.max_verify_stars,
         "quad_min_frac": num(p.quad_min_frac), "uniformize_boxes": p.uniformize_boxes, "tweak_order": p.tweak_order,
+        "tune_min_gain": p.tune_min_gain, "tune_gain_hyps0": num(p.tune_gain_hyps0), "accept_hyps0": num(p.accept_hyps0),
     })
 }
 

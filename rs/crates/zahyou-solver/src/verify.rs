@@ -137,7 +137,7 @@ impl<'s, 'a> SeriesCtx<'s, 'a> {
 // ------------------------------------------------------------------ 参照星 ---
 
 /// 円錐検索で集めた参照星(系列の全タイルから。タイルの順、タイルの中は星の番号の順)。
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug, PartialEq)]
 pub(crate) struct Refs {
     pub fid: Vec<u32>,
     pub sid: Vec<u32>,
@@ -145,10 +145,62 @@ pub(crate) struct Refs {
     pub sweep: Vec<u8>,
 }
 
+/// 参照星の並びの最初の大きさ(検証の円錐には数百個の星が入るので、伸びるたびの取り直しを減らす)。
+const REFS_CAP: usize = 256;
+
+impl Refs {
+    fn with_capacity(n: usize) -> Refs {
+        Refs { fid: Vec::with_capacity(n), sid: Vec::with_capacity(n), xyz: Vec::with_capacity(n), sweep: Vec::with_capacity(n) }
+    }
+
+    /// start から後ろ(1 つのタイルの分)を、星の番号の昇順に並べる(4 本とも同じ並べ方で)。
+    /// 木をたどる順は番号の昇順なので、正常な索引では確かめるだけで並べ替えは起きない。
+    fn sort_tail(&mut self, start: usize) {
+        if self.sid[start..].is_sorted() {
+            return;
+        }
+        // 1 つのタイルの中で番号は重ならない(葉の範囲は互いに重ならない)ので、並べ方は 1 つに決まる
+        let mut idx: Vec<usize> = (start..self.sid.len()).collect();
+        idx.sort_by_key(|&i| self.sid[i]);
+        let fid: Vec<u32> = idx.iter().map(|&i| self.fid[i]).collect();
+        let sid: Vec<u32> = idx.iter().map(|&i| self.sid[i]).collect();
+        let xyz: Vec<Vec3> = idx.iter().map(|&i| self.xyz[i]).collect();
+        let sweep: Vec<u8> = idx.iter().map(|&i| self.sweep[i]).collect();
+        self.fid[start..].copy_from_slice(&fid);
+        self.sid[start..].copy_from_slice(&sid);
+        self.xyz[start..].copy_from_slice(&xyz);
+        self.sweep[start..].copy_from_slice(&sweep);
+    }
+}
+
 /// 系列の全タイルから、中心 c(単位ベクトル)の半径 r(ラジアン)の円の中の星を集める(Python の `_sv_series_cone`)。
 ///
 /// タイルは「中心どうしの内積 ≥ cos(min(外接半径 + r + 1e-9, π))」で選ぶ(Python と同じ)。判定は stars_in_cone と同じ。
+/// 星の単位ベクトルは、円錐の判定に使った値をそのまま受け取る(star_xyz で引き直さない。同じ整数から同じ式で作るので
+/// ビットまで同じ)。集まる星・順・値は、stars_in_cone の番号ごとに star_xyz と sweep を引いていた形と同じ
+/// (試験 series_cone_matches_reference)。
 pub(crate) fn series_cone(sc: &SeriesCtx, c: Vec3, r: f64) -> Result<Refs, Abort> {
+    let mut out = Refs::with_capacity(REFS_CAP);
+    for_tiles(sc, c, r, |fid, data| {
+        let start = out.sid.len();
+        data.stars_in_cone_each(c, r, |id, v| {
+            // sweep の表の外の星は飛ばす(今までと同じ)
+            if let Some(sw) = data.sweep(id) {
+                out.fid.push(fid as u32);
+                out.sid.push(id);
+                out.xyz.push(v);
+                out.sweep.push(sw);
+            }
+        });
+        out.sort_tail(start);
+        Ok(false)
+    })?;
+    Ok(out)
+}
+
+/// 変える前の series_cone(stars_in_cone の番号ごとに star_xyz と sweep を引く)。試験で今の形と比べる。
+#[cfg(test)]
+fn series_cone_ref(sc: &SeriesCtx, c: Vec3, r: f64) -> Result<Refs, Abort> {
     let mut out = Refs::default();
     for_tiles(sc, c, r, |fid, data| {
         for id in data.stars_in_cone(c, r) {
@@ -468,7 +520,10 @@ pub(crate) fn verify_one(
         }
         sel.push((refs.sweep[k], refs.fid[k], refs.sid[k], k, rx, ry));
     }
-    sel.sort_by(|a, b| (a.0, a.1, a.2).cmp(&(b.0, b.1, b.2)));
+    // sweep・タイル・番号の順(今までは (sweep, タイル, 番号) で安定に並べていた)。sel は k(refs の中の位置)の昇順に
+    // 積んであるので、安定な並べ替えで同じ鍵の間に残る順は k の昇順。k を 4 つめの鍵に足した不安定な並べ替えは、
+    // k が重ならない(全順序になる)ので同じ順になり、作業領域を取らない
+    sel.sort_unstable_by_key(|e| (e.0, e.1, e.2, e.3));
     let nr0 = sel.len() as f64;
     // 2・3. 位置の分散と関連半径(RoR)
     let pix2 = pix2_of(params, sc.rep, h.scale);
@@ -536,7 +591,8 @@ pub(crate) fn quick_pass(field: &Field, sc: &SeriesCtx, params: &Params, h: &Hyp
         let p = field.vxy[t];
         let c = h.pix_to_xyz(p[0], p[1]);
         let rad = 5.0 * s2.sqrt() * h.scale / ARCSEC_PER_RAD;
-        for_tiles(sc, c, rad, |fid, data| Ok(data.stars_in_cone(c, rad).into_iter().any(|sid| !h.is_quad_star(fid, sid))))
+        // stars_in_cone(c, rad).into_iter().any(…) と同じ答え(同じ前置き・同じ判定)。見つけた時点でやめ、並びを作らない
+        for_tiles(sc, c, rad, |fid, data| Ok(data.any_star_in_cone(c, rad, |sid| !h.is_quad_star(fid, sid))))
     })
 }
 
@@ -571,5 +627,78 @@ mod tests {
         // r が NaN・負なら式どおり(NaN は届かない)
         assert!(!tile_reaches(0.9, 0.1, 0.1f64.cos(), f64::NAN));
         assert_eq!(tile_reaches(0.995, 0.1, 0.1f64.cos(), -0.05), 0.995 >= (0.1f64 - 0.05 + 1e-9).cos());
+    }
+
+    /// 参照星の並べ替え: (sweep, タイル, 番号) の安定な並べ替えと、k を足した不安定な並べ替えが同じ順
+    /// (鍵が重なる場合も。sel は k の昇順に積む)。
+    #[test]
+    fn sel_sort_matches_stable_sort() {
+        let mut s = 0x9E3779B97F4A7C15u64;
+        let mut rnd = |n: u64| {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            s % n
+        };
+        for _ in 0..20_000 {
+            let n = rnd(400) as usize;
+            let sel: Vec<(u8, u32, u32, usize, f64, f64)> =
+                (0..n).map(|k| (rnd(4) as u8, rnd(3) as u32, rnd(6) as u32, k, k as f64 * 0.5, 1.0)).collect();
+            let mut a = sel.clone();
+            a.sort_by(|a, b| (a.0, a.1, a.2).cmp(&(b.0, b.1, b.2)));
+            let mut b = sel;
+            b.sort_unstable_by_key(|e| (e.0, e.1, e.2, e.3));
+            assert_eq!(a, b);
+        }
+    }
+
+    /// 今の series_cone が、変える前の形(stars_in_cone の番号ごとに star_xyz と sweep を引く)と、集める星・順・
+    /// 単位ベクトルのビット・sweep まで同じ(星図データの系列 5202・5206・4107・4115 の乱数の円。半径 π 以上も)。
+    #[test]
+    fn series_cone_matches_reference() {
+        let dir = std::env::var_os("ZAHYOU_INDEX_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(r"C:\AstrometryData"));
+        if !cfg!(windows) || !dir.is_dir() {
+            eprintln!("SKIP series_cone_matches_reference: 星図データが無い");
+            return;
+        }
+        let cat = Catalog::scan(&dir);
+        let store = Store::new(&cat);
+        let mut s = 0x2545F4914F6CDD1Du64;
+        let mut rnd = || {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            (s >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let mut rows = Vec::new();
+        for (iid, n, rmax) in [(5202u32, 150, 0.02), (5206, 150, 0.1), (4107, 150, 0.03), (4115, 100, 0.5)] {
+            let Some(files) = cat.series.get(&iid) else { continue };
+            let sc = SeriesCtx::new(&store, iid, files[0]);
+            let mut nstars = 0usize;
+            for k in 0..n {
+                let c = loop {
+                    let v = [rnd() * 2.0 - 1.0, rnd() * 2.0 - 1.0, rnd() * 2.0 - 1.0];
+                    let m = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+                    if m > 0.1 && m <= 1.0 {
+                        break [v[0] / m, v[1] / m, v[2] / m];
+                    }
+                };
+                // 小さい星図(4115)だけ、π 以上の半径(木を見ずに全部)も
+                let r = if iid == 4115 && k % 10 == 0 { std::f64::consts::PI + rnd() } else { rnd() * rmax };
+                let got = series_cone(&sc, c, r).unwrap();
+                let want = series_cone_ref(&sc, c, r).unwrap();
+                assert_eq!((&got.fid, &got.sid, &got.sweep), (&want.fid, &want.sid, &want.sweep), "{iid} c={c:?} r={r}");
+                assert!(
+                    got.xyz.iter().zip(&want.xyz).all(|(a, b)| (0..3).all(|j| a[j].to_bits() == b[j].to_bits())),
+                    "{iid} c={c:?} r={r}"
+                );
+                nstars += got.sid.len();
+            }
+            rows.push(format!("{iid} {n} 回 {nstars} 星"));
+        }
+        cat.close();
+        eprintln!("series_cone が変える前の形と一致: {}", rows.join("、"));
     }
 }

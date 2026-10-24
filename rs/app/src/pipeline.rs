@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-use zahyou_image::{DetectOpts, Loaded, Prep, Source};
+use zahyou_image::{DetectOpts, Image2D, Loaded, Prep, Source};
 use zahyou_index::Catalog;
 use zahyou_solver::{Control, OfflineOutcome, OfflineRequest, OfflineStop, Params, SolveError};
 use zahyou_wcs::{Card, CardValue, Wcs};
@@ -495,6 +495,15 @@ impl<'a> Runner<'a> {
         // 覚えられなくても解析は続ける(Python 版も書き込みの失敗を握りつぶす)
         let _ = scale::remember_scale(&loaded.header, nx, ny, summary.scale, &self.cache_file);
 
+        // 図を描く前に、もう使わない大きな配列を放す(24 MP なら前処理の sub 96 MB・mask 24 MB と、検出用の面 96 MB)。
+        // 図の段は一時の確保がいちばん多い所なので、私有メモリの最大が下がる。ここから先に要るのは表示用の面と
+        // 上下反転・検出した星・WCS・目標だけ。`let Loaded { display, .. } = loaded` のような部分 move では、
+        // 残り(検出用の面)が run() の終わりまで生きるので、検出用の面は名前で受けて drop する
+        // (加工の無い画像では表示用と同じ配列なので、参照が 1 つ減るだけで解放はされない)
+        drop(prep);
+        let Loaded { data, display, flip_y, .. } = loaded;
+        drop(data);
+
         // ------------------------------------------------------------ 描画 ---
         if self.cancelled(true) {
             return self.res;
@@ -504,7 +513,7 @@ impl<'a> Runner<'a> {
         let Some(target) = target else {
             self.log("\n⚠️ 目標の座標が無いので、矢印は描きません。");
             self.log("   オフラインで天体名を使いたいときは、一度オンラインで実行して座標を覚えさせるか、INPUT_MODE='COORDS' にしてください。");
-            self.figure(|| draw_original(&wcs, &loaded, shown, None));
+            self.figure(|| draw_original(&wcs, &display, flip_y, shown, None));
             self.res.wcs = Some(wcs);
             return self.res;
         };
@@ -532,14 +541,14 @@ impl<'a> Runner<'a> {
             _ => self.log("\n  目標は画面の外です。矢印の向きへ動かしてください。"),
         }
 
-        self.figure(|| draw_original(&wcs, &loaded, shown, Some(target)));
+        self.figure(|| draw_original(&wcs, &display, flip_y, shown, Some(target)));
         if self.cancelled(true) {
             // 北が上の図の描き直しは重い
             return self.res;
         }
         let offsets = report_offsets((summary.center_ra, summary.center_dec), target, self.log_fn);
         self.res.offsets = Some(offsets.clone());
-        self.figure(|| draw_north_up(&wcs, &loaded, target));
+        self.figure(|| draw_north_up(&wcs, &display, target));
         self.res.wcs = Some(wcs);
         self.res
     }
@@ -875,19 +884,22 @@ pub fn north_up_title(o: &Offsets) -> String {
 
 /// 図 1「撮影時の向き」(Python の `plot_original`)。zahyou-plot を呼ぶのはこの関数と [`draw_north_up`] だけ。
 /// 目標が None なら中心の × だけ(Python の draw_arrow=False)。`sources` が None なら検出した星を描かない。
+/// `img` は表示用の面(`Loaded::display`)、`flip_y` は `Loaded::flip_y`(run() は図の前に `Loaded` を分けて
+/// 検出用の面を放すので、要る 2 つだけを受ける)。
 fn draw_original(
     wcs: &Wcs,
-    loaded: &Loaded,
+    img: &Image2D,
+    flip_y: bool,
     sources: Option<&[Source]>,
     target: Option<(f64, f64)>,
 ) -> Result<zahyou_plot::Figure, String> {
-    zahyou_plot::figure_original(&loaded.display, wcs, sources.unwrap_or(&[]), target, loaded.flip_y, sources.is_some())
+    zahyou_plot::figure_original(img, wcs, sources.unwrap_or(&[]), target, flip_y, sources.is_some())
         .map_err(|e| e.to_string())
 }
 
-/// 図 2「北が上・東が左」(Python の `plot_north_up`。画像を描き直すので重い)。
-fn draw_north_up(wcs: &Wcs, loaded: &Loaded, target: (f64, f64)) -> Result<zahyou_plot::Figure, String> {
-    zahyou_plot::figure_north_up(&loaded.display, wcs, Some(target)).map_err(|e| e.to_string())
+/// 図 2「北が上・東が左」(Python の `plot_north_up`。画像を描き直すので重い)。`img` は表示用の面。
+fn draw_north_up(wcs: &Wcs, img: &Image2D, target: (f64, f64)) -> Result<zahyou_plot::Figure, String> {
+    zahyou_plot::figure_north_up(img, wcs, Some(target)).map_err(|e| e.to_string())
 }
 
 // ================================================================== 星図データ ===

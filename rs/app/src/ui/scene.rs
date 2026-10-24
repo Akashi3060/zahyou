@@ -98,22 +98,25 @@ pub type Regrid = Arc<dyn Fn([f64; 4]) -> Option<GridSet> + Send + Sync>;
 pub struct Pyramid {
     pub width: usize,
     pub height: usize,
-    /// 段 k は 2^k 分の 1。行 0 = 画像の y=0 の行(画面の上下は figure.rs が決める)
-    pub levels: Vec<ColorImage>,
+    /// 段 k は 2^k 分の 1。行 0 = 画像の y=0 の行(画面の上下は figure.rs が決める)。
+    /// Arc で持つのは、テクスチャに上げるとき(figure.rs の upload_level)に写さずに egui へ渡すため
+    /// (egui の ImageData は Arc<ColorImage> をそのまま受け取り、egui-wgpu は画素を借りて GPU へ書く)。
+    /// 段を書き換える所は無いので、Pyramid の Clone が浅くなっても困らない。
+    pub levels: Vec<Arc<ColorImage>>,
 }
 
 impl Pyramid {
     /// 原寸の画像から縮小の段を作る(長辺が 256 px を切るまで)。透明(NaN の画素)は平均から外す。
     pub fn build(base: ColorImage) -> Pyramid {
         let [w, h] = base.size;
-        let mut levels = vec![base];
+        let mut levels = vec![Arc::new(base)];
         loop {
             let last = levels.last().map(|l| l.size).unwrap_or([0, 0]);
             if last[0].max(last[1]) <= 256 || last[0] < 2 || last[1] < 2 {
                 break;
             }
             let next = half(levels.last().expect("段は 1 つ以上ある"));
-            levels.push(next);
+            levels.push(Arc::new(next));
         }
         Pyramid { width: w, height: h, levels }
     }
@@ -210,11 +213,25 @@ impl Scene {
 }
 
 /// RGBA(straight alpha、行 0 = 画像の y=0)から ColorImage を作る。大きさが合わなければ None。
+///
+/// 画素ごとの詰め替えは rayon で並列にする(ワーカーで図ごとに 1 回。24 MP なら 2,400 万画素と、出力 96 MB の
+/// 初めて触るページを 1 本のスレッドで受けていた)。出力は 1 本のスレッドの版(試験の rgba_image_serial)と同じ:
+/// - from_rgba_unmultiplied は画素ごとの純粋な関数(a=0・255 は分岐、ほかは OnceLock の表引きでスレッド安全)
+/// - par_chunks_exact は IndexedParallelIterator で、Vec への collect は確保した領域へ添字の位置で書くので並びも同じ
+///   (`vec![Color32::TRANSPARENT; n]` に並列で書く形にしないこと。Color32 は 0 埋めの特別扱いの対象外で、
+///   vec! が 1 本のスレッドで全部を埋めてしまう)
+/// - 長さは上で検査済みなので par_chunks_exact に端数は出ない(panic も増えない)
+/// - with_min_len で小さい画像は 1 塊のまま(分けるほうが遅い)
 pub fn rgba_image(width: usize, height: usize, rgba: &[u8]) -> Option<ColorImage> {
+    use rayon::prelude::*;
     if width == 0 || height == 0 || rgba.len() != width * height * 4 {
         return None;
     }
-    let px: Vec<Color32> = rgba.chunks_exact(4).map(|p| Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3])).collect();
+    let px: Vec<Color32> = rgba
+        .par_chunks_exact(4)
+        .with_min_len(1 << 14)
+        .map(|p| Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3]))
+        .collect();
     Some(ColorImage::new([width, height], px))
 }
 
@@ -240,6 +257,56 @@ mod tests {
         assert_eq!(p.level_for(100.0), sizes.len() - 1);
         assert_eq!(p.level_for(f32::NAN), 0);
         assert_eq!(p.levels[1].pixels[0], Color32::from_gray(100));
+    }
+
+    /// 旧版の rgba_image(1 本のスレッド)。並列にした版と同じ結果になるかを見る参照実装
+    fn rgba_image_serial(width: usize, height: usize, rgba: &[u8]) -> Option<ColorImage> {
+        if width == 0 || height == 0 || rgba.len() != width * height * 4 {
+            return None;
+        }
+        let px: Vec<Color32> = rgba.chunks_exact(4).map(|p| Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3])).collect();
+        Some(ColorImage::new([width, height], px))
+    }
+
+    /// 決まった種から作る乱数の RGBA(α は 0・255・中間の値を混ぜる)
+    fn random_rgba(n: usize, seed: u64) -> Vec<u8> {
+        let mut s = seed | 1;
+        let mut next = || {
+            // xorshift64
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            s
+        };
+        let mut v = Vec::with_capacity(n * 4);
+        for _ in 0..n {
+            let x = next();
+            let a = match x % 4 {
+                0 => 0,
+                1 => 255,
+                _ => (x >> 32) as u8,
+            };
+            v.extend_from_slice(&[(x >> 8) as u8, (x >> 16) as u8, (x >> 24) as u8, a]);
+        }
+        v
+    }
+
+    #[test]
+    fn rgba_の詰め替えは並列でも同じ() {
+        // with_min_len(16384 画素)より小さいもの・ちょうど境目・いくつもの塊に分かれるもの
+        for (i, (w, h)) in [(1, 1), (3, 5), (128, 128), (129, 127), (1000, 600), (4001, 37)].into_iter().enumerate() {
+            let rgba = random_rgba(w * h, 0x9E37_79B9_7F4A_7C15 ^ i as u64);
+            let a = rgba_image(w, h, &rgba).unwrap();
+            let b = rgba_image_serial(w, h, &rgba).unwrap();
+            assert_eq!(a.size, b.size, "{w}×{h}");
+            // Color32 の == は 4 バイトの比較(ビット単位で同じ)
+            assert!(a.pixels == b.pixels, "{w}×{h} で画素が違う");
+        }
+        // 大きさが合わないものは今までどおり None
+        let rgba = random_rgba(10, 1);
+        assert!(rgba_image(3, 3, &rgba).is_none());
+        assert!(rgba_image(5, 2, &rgba[..39]).is_none());
+        assert!(rgba_image(0, 0, &[]).is_none());
     }
 
     #[test]

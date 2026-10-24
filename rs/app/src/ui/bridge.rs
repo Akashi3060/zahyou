@@ -108,7 +108,7 @@ pub fn api_key_problem(s: &Settings) -> Option<&'static str> {
 /// `debug_wcs` を渡すと、オフライン解析の代わりにそのファイルの WCS を「解」として返す
 /// (隠しの引数 --debug-wcs。解法と切り離して結果の画面を確かめるため)。
 pub fn run(p: &pipeline::RunParams, debug_wcs: Option<&Path>, cancel: &AtomicBool, log: &(dyn Fn(&str) + Sync)) -> ResultView {
-    let r = match debug_wcs {
+    let mut r = match debug_wcs {
         None => pipeline::run(p, cancel, log),
         Some(path) => match read_wcs_file(path) {
             Ok(wcs) => {
@@ -131,11 +131,8 @@ pub fn run(p: &pipeline::RunParams, debug_wcs: Option<&Path>, cancel: &AtomicBoo
             }
         },
     };
-    let figures = r
-        .figures
-        .iter()
-        .map(|f| FigureOut { scene: Arc::new(figure_to_scene(f)), source: Arc::new(f.clone()) })
-        .collect();
+    // 図は r から抜き出す(このあと r.figures は空。下で r から読むのは図を読まない関数だけ)
+    let figures = take_figures(&mut r);
     ResultView {
         solved: r.wcs.is_some(),
         cancelled: r.cancelled,
@@ -144,6 +141,24 @@ pub fn run(p: &pipeline::RunParams, debug_wcs: Option<&Path>, cancel: &AtomicBoo
         status: r.status_text(),
         figures,
     }
+}
+
+/// 解析の結果から図を抜き出して画面の形にする。図は写さずに移す(r.figures は空になる)。
+///
+/// 以前は `r.figures.iter()` で回して `Arc::new(f.clone())` で図を丸ごと写していた。rgba は幅×高さ×4 バイト
+/// (24 MP で 96 MB、北が上の図は回転の外接矩形のぶん大きくなる)で、写す間は元と写しが両方メモリにあった。
+/// 中身は同じ値を移すだけなので、画面の形(figure_to_scene)も保存(save_figure が読む source)もバイト単位で同じ。
+/// 前提: RunResult の numbers()・detail()・status_text() は figures を読まない(pipeline.rs。offsets・summary・
+/// seconds・cancelled・wcs だけ)。r から図を読む処理をこの後に足すと空になっているので、足すならこの前に置く。
+/// 部分的な move(`r.figures.into_iter()`)にしないのは、そのあと &self のメソッドを呼べなくなるため。
+fn take_figures(r: &mut pipeline::RunResult) -> Vec<FigureOut> {
+    std::mem::take(&mut r.figures)
+        .into_iter()
+        .map(|f| {
+            let scene = Arc::new(figure_to_scene(&f));
+            FigureOut { scene, source: Arc::new(f) }
+        })
+        .collect()
 }
 
 /// --debug-wcs の WCS を「解」の形にする
@@ -480,6 +495,66 @@ mod plot_tests {
         let g = (s.regrid.as_ref().unwrap())([20.0, 60.0, 10.0, 40.0]).unwrap();
         assert!(!g.lines.is_empty());
         assert!((s.regrid.as_ref().unwrap())([5.0, 5.0, 0.0, 1.0]).is_none(), "幅 0 の範囲は作らない");
+    }
+
+    /// 旧版の図の受け渡し(図を丸ごと写していた)。take_figures と同じ結果になるかを見る参照実装
+    fn figures_by_clone(r: &pipeline::RunResult) -> Vec<FigureOut> {
+        r.figures.iter().map(|f| FigureOut { scene: Arc::new(figure_to_scene(f)), source: Arc::new(f.clone()) }).collect()
+    }
+
+    /// 画像の段ごとの (大きさ, 画素)
+    type LevelPixels = Vec<([usize; 2], Vec<Color32>)>;
+
+    /// 画面の形の中身を比べられる形にする(画像の段の画素は別に返す。regrid は関数なので同じ範囲で呼んだ結果)
+    fn scene_dump(s: &Scene) -> (String, LevelPixels) {
+        let text = format!(
+            "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
+            s.title,
+            s.width.to_bits(),
+            s.height.to_bits(),
+            s.flip_y,
+            s.axis_labels,
+            s.home,
+            s.prims,
+            s.regrid.as_ref().map(|g| g([20.0, 60.0, 10.0, 40.0])),
+        );
+        let px = s.image.iter().flat_map(|p| p.levels.iter().map(|l| (l.size, l.pixels.clone()))).collect();
+        (text, px)
+    }
+
+    #[test]
+    fn 図は写さずに移す() {
+        let summary = pipeline::Summary {
+            center_ra: 61.9,
+            center_dec: 41.97,
+            scale: 2.0,
+            pa_screen_up: 12.5,
+            mirrored_on_screen: false,
+            fov_x: 4.0,
+            fov_y: 2.7,
+        };
+        let mut r = pipeline::RunResult {
+            figures: vec![small_figure(), small_figure()],
+            summary: Some(summary),
+            seconds: 1.25,
+            ..Default::default()
+        };
+        let old = figures_by_clone(&r);
+        let before = (r.numbers(), r.detail(), r.status_text());
+        let ptrs: Vec<*const u8> = r.figures.iter().map(|f| f.rgba.as_ptr()).collect();
+        let new = take_figures(&mut r);
+        assert!(r.figures.is_empty());
+        // 図を抜いても数字・説明・状態の文は変わらない(どれも図を読まない)
+        assert_eq!((r.numbers(), r.detail(), r.status_text()), before);
+        assert!(before.0.is_some() && before.1.is_some(), "比べる値が空");
+        assert_eq!(new.len(), old.len());
+        for (i, (n, o)) in new.iter().zip(&old).enumerate() {
+            // 写していない(rgba の領域がそのまま)
+            assert_eq!(n.source.rgba.as_ptr(), ptrs[i], "図 {i} を写している");
+            // 保存に使う元の図も、画面の形も、旧版とバイト単位で同じ(f64 の Debug は往復できる最短の表記)
+            assert_eq!(format!("{:?}", n.source), format!("{:?}", o.source), "図 {i}");
+            assert_eq!(scene_dump(&n.scene), scene_dump(&o.scene), "図 {i} の画面の形");
+        }
     }
 
     #[test]
