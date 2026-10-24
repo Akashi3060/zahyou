@@ -343,7 +343,7 @@ def gen_parts(sw, si, sc, ss, catalog):
         for b, a in ((5, 5), (4, 4), (5, 6), (4, 9), (24, 24), (20, 40), (7, 6), (0, 0))]
 
     # (f3) 改良の後の判定で見送った候補のまとめ(sv_passed_add の並び → 探索の終わりの行の末尾に足す文)。
-    # 最大の候補の要った値を覚えること・同じ値なら先のもの・千の位の区切り・丸め(x.x5 ちょうど・負)を見る
+    # 最大の候補の要った値を覚えること・同じ値なら先のもの・千の位の区切り・丸め(x.x5 ちょうど・負・-0.0)を見る
     acc = lambda n: sc.sv_accept_logodds(sc.SvParams(), n)  # noqa: E731
     seqs = [
         [],
@@ -353,6 +353,8 @@ def gen_parts(sw, si, sc, ss, catalog):
         [("nogain", 30.9), ("nogain", 22.773709888689385)],
         [("nogain", 21.4), ("short", 22.773709888689385, acc(16187319)), ("nogain", 22.25), ("short", -3.75, acc(1))],
         [("short", 22.25, 22.35), ("nogain", 20.75)],
+        [("short", -3.75, acc(1))],
+        [("short", -0.04, -0.06)],
         [("short", 15.0 + (i % 97) * 0.07, acc(100000 + 1000 * i)) for i in range(1001)]
         + [("nogain", 21.0 + 0.01 * i) for i in range(12)],
     ]
