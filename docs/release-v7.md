@@ -830,7 +830,7 @@ Release v7 の zahyou_engine.py と SHA256SUMS.txt、配布ページの zahyou_e
   - `--update-check` は「最新版です (v8)。公開されている最新版 v7 より新しい版を使っています。」
   - 最初の描画まで: DirectX 12 で 0.39〜0.45 秒、OpenGL で 0.48〜0.55 秒(3 回ずつ。README の「起動と大きさ」とマニュアル 3.2 に入れた)
   - 道具: rustc 1.94.0・cargo 1.94.0(MSYS2)・gcc 15.2.0
-- **試験**: main を取り込む前に `cargo test --workspace -- --include-ignored --skip live` で 320/320(20 分 41 秒)。
+- **試験**: `cargo test --workspace -- --include-ignored --skip live` で、main を取り込む前に 320/320(20 分 41 秒)、取り込んだあとに 321/321(17 分 16 秒)。
   取り込んだあとに `cargo test --workspace -- --skip live` で 311 本通過・失敗 0、`clippy -D warnings` 指摘 0、`test_make_release_assets.py` 通過。
   どれも 4 節の置き換えを付けて回した。
 - **資産**(6 節): `%USERPROFILE%\zahyou-dist-v8`。5 つの検査が全部 OK で、`sha256sum -c` も OK だった。
@@ -839,17 +839,30 @@ Release v7 の zahyou_engine.py と SHA256SUMS.txt、配布ページの zahyou_e
 5bae6911d557ded9c7a3f60d7d966881824aded8c46ac9093f2d3e8ad9be937b  zahyou.exe
 ab742a7918588ae14b160a5e281b022200ea8108f12c7bd3a95d5cf111aaf784  zahyou_v8.ipynb
 0ce0febe4ff2ecaadad078c9b605e011b230b199408b1599e3394daff2b805dc  zahyou_engine.py
-6251de0de22ceef82f113729fd8dbb84350febf26acdb7ed3aba3a4e74b89d10  zahyou-manual-v4.pdf
+7f5cabab650dc76f860f4f4e93d7edf669032bea79d78fa6c959f4bac091ebef  zahyou-manual-v4.pdf
 4efc7babf6be215d508636aefa67428a28d1c9977b02d1b580c47b26dd34a3f8  LICENSE.txt
 f677908c1c64fc1965de7076c670f5ed7ef6cf773a6296be35b35e60e40b451e  THIRD-PARTY-NOTICES.md
 ```
 
   - `zahyou_v8.ipynb` はセルの中身が v7 と同じなので、SHA256 も v7 の `zahyou_v7.ipynb` と同じ。
   - セル C の出力の例は、v6 で走らせたときの「zahyou v6」のまま(8 節の 3 の任意の差し替えはしていない)。
-- **残り**(ユーザーの了承のあとで、この順に):
-  1. PR を merge commit で main へ
-  2. 統合した commit にタグ `v8`
-  3. 8 節の 4 の形で Release を下書き → 中身を見る → `--latest` で出す
-  4. 8 節の 5 の確かめ(`releases/latest` が v8、資産の digest、配っている v7 の exe の「更新を確認」で v8 が出て入れ替わること)
-  5. 配布ページ(Nextcloud)の差し替え(8 節の手順。`zahyou_v8.ipynb` は新しい名前のファイル)
-  6. wiki(GitHub の zahyou.wiki)の版の書き方を v8 に
+- **残り**(ユーザーの了承のあとで、この順に)。**ブランチ `v8` とタグ `v8` が同じ名前にならないよう、タグの前にブランチを消す**(v6 で踏んだ ambiguous の問題。8 節の 3):
+  1. `gh pr merge 44 --repo Akashi3060/zahyou --merge`(`--delete-branch` は付けない。worktree が使っているので手元の削除で止まる)
+  2. ブランチを消す: `git push origin --delete refs/heads/v8` → `git worktree remove …/zahyou-v8` → main を fetch・pull → `git branch -d v8`
+  3. タグ: `git tag v8 <merge の SHA>` → `git push origin refs/tags/v8`。`git ls-remote origin refs/heads/v8 refs/tags/v8` が `refs/tags/v8` だけを出すことを確かめる
+  4. Release を下書き(題は版名):
+     `gh release create v8 --repo Akashi3060/zahyou --verify-tag --draft --title "zahyou v8" --notes-file <本文> "$DIST/zahyou.exe" "$DIST/zahyou_v8.ipynb" "$DIST/zahyou_engine.py" "$DIST/zahyou-manual-v4.pdf" "$DIST/LICENSE.txt" "$DIST/THIRD-PARTY-NOTICES.md" "$DIST/SHA256SUMS.txt"`。
+     `gh release view v8 --json isPrerelease,isDraft,name,assets` で prerelease=false・題・資産 7 つ・digest を見てから、
+     `gh release edit v8 --repo Akashi3060/zahyou --draft=false --latest` で出す。`releases/latest` の tag_name が v8 になったか確かめる
+  5. 8 節の 5 の確かめ: 資産の digest が SHA256SUMS.txt と同じ、本文の大文字の SHA256 が zahyou.exe の digest と同じ、配っている v7 の exe(一時の LOCALAPPDATA)の
+     「更新を確認」で v8 が出て、「更新する」で入れ替わり、`zahyou.exe.old` が v8 の起動で消えること
+  6. 配布ページ(Nextcloud)の差し替え(8 節の配布ページの手順。TrueNAS の root で行う):
+     - 中身を替える(`cat 新 > 今`。inode・所有者・ACL はそのまま): `zahyou.exe`・`zahyou_engine.py`・`THIRD-PARTY-NOTICES.md`・
+       `…マニュアルv4.pdf`(資産の `zahyou-manual-v4.pdf` と同じ中身)・`はじめにお読みください.txt`(v8 向けに書き直したもの。BOM 付き・CRLF のまま。
+       v8 の exe の SHA256 と、v7・v6・β からの入れ替え、`zahyou_v8.ipynb`)
+     - 名前を替える: `zahyou_v7.ipynb` → `zahyou_v8.ipynb`(中身は同じなので root で `mv`。inode・所有者・ACL が残る)
+     - 触らない: `LICENSE.txt`(同じ)・`SHA256SUMS.txt`(配布ページのものは星図データの zip 用)・星図データの zip
+     - 最後に公開 URL から落として SHA256 を確かめる
+  7. wiki(GitHub の zahyou.wiki)で、v7 を今の版として書いている所を v8 に(v7 で測った記録は残す)
+  8. v7 の Release の本文の誤り: 「中身が本物か確かめたい方は」の大文字の SHA256(`AE4BC3C9…`)は β2 の exe の値で、
+     v7 の zahyou.exe の digest(`5AB3DEC6…`)と違う。直すなら `gh release edit v7 --notes-file`(ユーザーの了承のあとで)

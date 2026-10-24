@@ -174,15 +174,15 @@ python make_manual.py                 # ../天体画像解析プログラム「z
 ```
 
 マニュアル v4 は、v7 から（デスクトップ版が Rust の exe になってから）の本文。v8 でも版は v4 のままで、中身だけを直した
-（解析の時間・メモリの数字は v7 の exe で測ったもの）。v6（WSL を使う版）の v3 の PDF は
+（解析の時間・メモリの数字は v7 の開発中の exe で 2026-10-16 に測ったもの）。v6（WSL を使う版）の v3 の PDF は
 7.0.0 の準備でリポジトリから消した（commit `0b73d36`(旧タグ v7.0.0-beta.2)の木に残っている。配布ページも v4 に差し替える。
 [../docs/release-v7.md](../docs/release-v7.md) の 8 節）。
 作成日時などを固定して組む（ReportLab の `invariant`）ので、同じ `make_manual.py` とフォントからは同じバイトの PDF になる。
 `make_manual.py` を直したら PDF も組み直して一緒に commit する（`rs/tools/make_release_assets.py` の manual の検査が、
 組み直したものとリポジトリの PDF をバイト単位で比べる）。版の文字（冒頭の説明・表紙の表・9.1 の「ウィンドウの題」）と
-ノートブックの名前（4.3・4.5・9.1・付録 B）があるので、版を上げたら直す（release-v7.md の 2 節の 5）。
+ノートブックの名前（4.3・4.5・9.1・付録 B）があるので、版を上げたら直す（release-v7.md の 2 節の表の 6。make_manual.py の行）。
 試験 `version_in_docs_matches_cargo` が `make_manual.py` で見つけるのは β の版の文字だけなので、正式版どうしの版上げ（7 → 8）の直し忘れは
-release-v7.md の 2 節の 5 にある grep で探す（「v7 から」のような事実の記述は残す）。
+release-v7.md の 2 節の、表の下にある grep で探す（「v7 から」のような事実の記述は残す）。
 
 | ファイル | 中身 |
 |---|---|
