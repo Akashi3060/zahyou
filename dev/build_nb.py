@@ -1,7 +1,8 @@
 """dev/*.py を組み立てて zahyou.ipynb (markdown + 3 セル) と zahyou_engine.py を作る。
 
   python dev/build_nb.py            dev/zahyou.ipynb と dev/zahyou_engine.py (試験用。git には入れない) を作り、
-                                    リポジトリ直下の zahyou_engine.py と zahyou_v7.ipynb も書き換える
+                                    リポジトリ直下の zahyou_engine.py と zahyou_v<大きな版>.ipynb も書き換える
+                                    (名前は rs/Cargo.toml の版から決める。例 8.0.0 → zahyou_v8.ipynb)
                                     (直下のノートブックはセルの中身だけを id ごとに差し替え、出力の例は残す。
                                     改行は今のファイルに合わせる)
   python dev/build_nb.py 出力.ipynb  指定したノートブックと、その隣の zahyou_engine.py だけを新しく書く
@@ -15,8 +16,21 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
-ROOT_NB = os.path.join(REPO, "zahyou_v7.ipynb")
 ROOT_ENGINE = os.path.join(REPO, "zahyou_engine.py")
+
+
+def _cargo_major():
+    """rs/Cargo.toml の [workspace.package] version の大きな版(例 8.0.0 → 8)。読めなければ止める"""
+    with open(os.path.join(REPO, "rs", "Cargo.toml"), encoding="utf-8") as f:
+        text = f.read()
+    m = re.search(r"^\[workspace\.package\][^\[]*?^version\s*=\s*\"(\d+)\.", text, re.M | re.S)
+    if not m:
+        raise SystemExit("rs/Cargo.toml の [workspace.package] version を読めません")
+    return int(m.group(1))
+
+
+# 配るノートブック(直下)。版を上げたら git mv で改名する(docs/release-v7.md 2 節)。make_release_assets.py も同じ名前を使う
+ROOT_NB = os.path.join(REPO, f"zahyou_v{_cargo_major()}.ipynb")
 
 # 自前の解析エンジン。この順につなぐ (後ろのものが前のものの名前を使う)。
 # solver_synth.py は試験用なので入れない。

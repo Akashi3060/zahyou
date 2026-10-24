@@ -73,6 +73,16 @@ class NameTest(unittest.TestCase):
         self.assertEqual(mra.notebook_asset_name("7.0.0"), "zahyou_v7.ipynb")
         self.assertEqual(mra.notebook_asset_name("8.1.2"), "zahyou_v8.ipynb")
 
+    def test_version_label(self):
+        # 版名は末尾の 0 の部分を省く(rs/app/build.rs の version_label と同じ決まり)
+        for version, label in (("7.0.0", "v7"), ("8.0.0", "v8"), ("10.0.0", "v10"), ("8.0.0-beta.1", "v8-beta.1"),
+                               ("7.1.0", "v7.1"), ("7.0.1", "v7.0.1"), ("7.1.2-rc.1", "v7.1.2-rc.1")):
+            self.assertEqual(mra.version_label(version), label, version)
+
+    def test_notebook_repo_path(self):
+        self.assertEqual(mra.notebook_repo_path("8.0.0-beta.1"), mra.REPO_DIR / "zahyou_v8.ipynb")
+        self.assertEqual(mra.notebook_repo_path("7.0.0"), mra.REPO_DIR / "zahyou_v7.ipynb")
+
     def test_real_versions(self):
         # 本物の rs/Cargo.toml と dev/make_manual.py から読める
         core, _ = mra.split_version(mra.cargo_version())
@@ -228,10 +238,13 @@ class NotebookTest(unittest.TestCase):
 
     def test_notebook_version(self):
         e = self.dir / "e.py"
-        e.write_bytes(b'x = 1\r\nNB_VERSION = "v7.0.0-beta.2"\r\n')
-        self.assertEqual(mra.notebook_version(mra._norm(e.read_text(encoding="utf-8"))), "v7.0.0-beta.2")
+        e.write_bytes(b'x = 1\r\nNB_VERSION = "v7-beta.2"\r\n')
+        self.assertEqual(mra.notebook_version(mra._norm(e.read_text(encoding="utf-8"))), "v7-beta.2")
         self.assertEqual(mra.check_notebook_version(e, "7.0.0-beta.2"), [])
         self.assertIn("NB_VERSION", mra.check_notebook_version(e, "7.0.0-beta.3")[0])
+        # 版名は末尾の 0 を省いた形。省かない書き方("v7.0.0-beta.2")は食い違いとして止める
+        e.write_bytes(b'x = 1\r\nNB_VERSION = "v7.0.0-beta.2"\r\n')
+        self.assertIn("NB_VERSION", mra.check_notebook_version(e, "7.0.0-beta.2")[0])
         e.write_bytes(b"x = 1\n")
         self.assertTrue(mra.check_notebook_version(e, "7.0.0-beta.2"))
 
@@ -300,13 +313,20 @@ class AssembleTest(unittest.TestCase):
         p = mra.plan_assets(Path("zahyou.exe"), "7.0.0", "v4")
         self.assertEqual(list(p.files), ["zahyou.exe", "zahyou_v7.ipynb", "zahyou_engine.py",
                                          "zahyou-manual-v4.pdf", "LICENSE.txt", "THIRD-PARTY-NOTICES.md"])
-        self.assertEqual(p.files["zahyou_v7.ipynb"], mra.REPO_NOTEBOOK)
+        self.assertEqual(p.files["zahyou_v7.ipynb"], mra.REPO_DIR / "zahyou_v7.ipynb")
+        # 大きな版が上がれば、元も配る名前も上がる
+        p = mra.plan_assets(Path("zahyou.exe"), "8.0.0", "v4")
+        self.assertEqual(p.files["zahyou_v8.ipynb"], mra.REPO_DIR / "zahyou_v8.ipynb")
 
     def test_repo_notebook_exists(self):
-        # dev/build_nb.py が書き換える直下のノートブック(ROOT_NB)と同じ名前で、実際にある
-        self.assertTrue(mra.REPO_NOTEBOOK.is_file(), mra.REPO_NOTEBOOK)
-        build_nb = (mra.DEV_DIR / "build_nb.py").read_text(encoding="utf-8")
-        self.assertIn(f"ROOT_NB = os.path.join(REPO, \"{mra.REPO_NOTEBOOK.name}\")", build_nb)
+        # 今の版の直下のノートブックが実際にあり、dev/build_nb.py が書き換える ROOT_NB と同じ名前
+        repo_nb = mra.notebook_repo_path(mra.cargo_version())
+        self.assertTrue(repo_nb.is_file(), repo_nb)
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("build_nb_for_test", mra.DEV_DIR / "build_nb.py")
+        build_nb = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(build_nb)  # 名前を決めるだけ(build() は __main__ のときだけ走る)
+        self.assertEqual(Path(build_nb.ROOT_NB), repo_nb)
 
     def test_main_refuses_bad_out(self):
         exe = self.dir / "zahyou.exe"

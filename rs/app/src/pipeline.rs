@@ -40,10 +40,11 @@ fn rule() -> String {
     "=".repeat(62)
 }
 
-/// ログの見出しに出す版。画面の版名(main.rs の APP_VER)と同じ「v + パッケージの版」(例: "v7.0.0-beta.1")。
+/// ログの見出しに出す版。画面の版名(main.rs の APP_VER)と同じ(例: "v8"、β版なら "v8-beta.1")。
 ///
 /// 第 2 段の試作のあいだはパッケージの版が "0.7.0-dev" で、Python 版の言い方 "v7-dev" に直していた。
-/// v7 のβ版からはパッケージの版をそのまま版名にする(GitHub のタグ名・更新の確認の版の比べ方と同じ形)。
+/// v7 のβ版から 7.0.0 まではパッケージの版をそのまま版名にしていた("v7.0.0")。2026-10-24 から、末尾の 0 を省いた
+/// 整数の形("v7"・"v8")にした(GitHub のタグ名と同じ。更新の確認は足りない部分を 0 として読むので、比べ方は変わらない)。
 pub fn log_version() -> String {
     crate::APP_VER.to_string()
 }
@@ -1606,9 +1607,9 @@ mod tests {
     #[test]
     fn version_text() {
         let v = log_version();
-        // ログの見出し・画面の版名・exe の ProductVersion(build.rs)は同じ「v + パッケージの版」
+        // ログの見出し・画面の版名・exe の ProductVersion(build.rs)は同じ版名
         assert_eq!(v, crate::APP_VER);
-        assert_eq!(v, format!("v{}", env!("CARGO_PKG_VERSION")));
+        assert_eq!(v, expected_label(), "build.rs の version_label と、ここで組み立てた版名が違う");
         // 版の文字はここに書かない。以前は `if 版 == "7.0.0-beta.2" { … }` の形で、版を上げて直し忘れると条件が外れ、
         // 黙って通っていた。代わりに cargo が分けた大・中・小・プレリリースと、更新の確認の読み方が同じかを見る
         // (読めないと、正式版の扱い = GitHub の latest だけを見ることになる)。文書に書いた版は次の試験
@@ -1630,6 +1631,29 @@ mod tests {
             assert!(parsed.is_prerelease(), "{v}");
             assert_eq!(zahyou_net::update::prerelease_label(&v), Some("β版"));
         }
+    }
+
+    /// 版名の決まり(build.rs の version_label と同じことを、cargo が分けた数から組み立て直す):
+    /// "v" + 大きな版、中か小が 0 でなければ ".中"、小が 0 でなければ ".小"、プレリリースがあれば "-" + プレリリース。
+    /// 8.0.0 → v8、8.0.0-beta.1 → v8-beta.1、7.1.0 → v7.1、7.0.1 → v7.0.1。
+    fn expected_label() -> String {
+        let (major, minor, patch, pre) = (
+            env!("CARGO_PKG_VERSION_MAJOR"),
+            env!("CARGO_PKG_VERSION_MINOR"),
+            env!("CARGO_PKG_VERSION_PATCH"),
+            env!("CARGO_PKG_VERSION_PRE"),
+        );
+        let mut s = format!("v{major}");
+        if minor != "0" || patch != "0" {
+            s += &format!(".{minor}");
+        }
+        if patch != "0" {
+            s += &format!(".{patch}");
+        }
+        if !pre.is_empty() {
+            s += &format!("-{pre}");
+        }
+        s
     }
 
     /// 版を上げたときに直す文書(docs/release-v7.md 2 節)が、Cargo.toml の版と同じ版を書いているか。
@@ -1657,14 +1681,18 @@ mod tests {
         if env!("CARGO_PKG_VERSION_PRE").starts_with("beta") {
             assert!(seen >= 4, "β の版の文字が見つからない({seen} 個)。拾い方が壊れていないか");
         }
-        // ノートブック版の見出しの版は、β でも正式版でも "v" + 同じ版
+        // ノートブック版の見出しの版は、β でも正式版でも画面と同じ版名
+        let label = expected_label();
         let nb = std::fs::read_to_string(repo.join("dev").join("nb_main.py")).unwrap();
-        assert!(nb.contains(&format!("NB_VERSION = \"v{ver}\"")), "dev/nb_main.py の NB_VERSION が v{ver} でない");
+        assert!(nb.contains(&format!("NB_VERSION = \"{label}\"")), "dev/nb_main.py の NB_VERSION が {label} でない");
         let engine = std::fs::read_to_string(repo.join("zahyou_engine.py")).unwrap();
         assert!(
-            engine.contains(&format!("NB_VERSION = \"v{ver}\"")),
-            "zahyou_engine.py の NB_VERSION が v{ver} でない(python dev/build_nb.py で作り直す)"
+            engine.contains(&format!("NB_VERSION = \"{label}\"")),
+            "zahyou_engine.py の NB_VERSION が {label} でない(python dev/build_nb.py で作り直す)"
         );
+        // 配るノートブックは直下の zahyou_v<大きな版>.ipynb(dev/build_nb.py と make_release_assets.py が版から名前を決める)
+        let nb_name = format!("zahyou_v{}.ipynb", env!("CARGO_PKG_VERSION_MAJOR"));
+        assert!(repo.join(&nb_name).is_file(), "直下に {nb_name} が無い(版を上げたら git mv で改名する。docs/release-v7.md 2 節)");
     }
 
     /// 行の中の「数.数.数-beta.数」をすべて返す(前後が英数字・"." なら別の語の一部とみなして拾わない)。
