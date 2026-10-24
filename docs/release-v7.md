@@ -103,8 +103,9 @@ Release を作って試したり、nova へ送ったりはしていない。ソ�
 - 更新の確認(`zahyou_net::update::parse_version`)は、足りない部分を 0 として読む。そのため `v8` とタグ `v8` と `8.0.0` は同じ版として比べる。
   配っている v7.0.0 の exe も、タグ `v8` を 8.0.0 と読んで新しい版として案内する。
 - `-beta.N` などのプレリリースの版は、題・起動のログ・［使い方］に「(β版)」が付く。
+- β版のタグと Release の題も版名の形にする(`v8-beta.N`、題は「zahyou v8-beta.N (β版)」)。7 節の `v7.0.0-beta.N` は v7 のときの書き方。
 
-ただし版の文字は exe の外にも書いてある。**版を上げるときに直す場所は全部で次の 8 つ**(上から順に):
+ただし版の文字は exe の外にも書いてある。**版を上げるときに直す場所は全部で次の 11 個**(11 はβ版のときだけ。上から順に):
 
 | | 直す場所 | 直し方 | 直し忘れたら |
 |---|---|---|---|
@@ -112,17 +113,25 @@ Release を作って試したり、nova へ送ったりはしていない。ソ�
 | 2 | `rs/Cargo.lock`(ワークスペースの 7 つの crate の版) | `cargo check --workspace` などで cargo が書き換える(手で直さない)。4 節の `--locked` より前に済ませる | 4 節の `cargo build --locked` が止まる |
 | 3 | 直下のノートブックの名前 `zahyou_v<大きな版>.ipynb` | `git mv zahyou_v7.ipynb zahyou_v8.ipynb`。`dev/build_nb.py` と `make_release_assets.py` は名前を Cargo の版から決める | 試験 `version_in_docs_matches_cargo`(直下に無いと落ちる)・`test_make_release_assets.py`・6 節の notebook の検査 |
 | 4 | `dev/nb_main.py` の `NB_VERSION`(ノートブック版のログの見出し) | 版名(`"v8"`)→ `python dev/build_nb.py`(直下の `zahyou_engine.py` を作り直す) | 試験 `version_in_docs_matches_cargo` と 6 節の notebook の検査 |
-| 5 | `dev/make_manual.py` の版の文字(冒頭の説明・表紙の表の「版」の行・9.1 の「ウィンドウの題」)と、ノートブックの名前(4.4・9.1・付録 B) | 手で | 試験では分からない(β の版の文字だけは試験が拾う)。`grep -n "v7\b\|zahyou_v7" dev/make_manual.py` で探す |
-| 6 | `README.md` の版の文字(「起動と大きさ」の表の見出し・入れ替えの節の「ウィンドウの題」・比べの表の行・冒頭の HTML コメント)とノートブックの名前 | 手で。exe の大きさと起動の時間は 4 節で建てた exe の実測に | 同上。`grep -n "v7\b\|zahyou_v7" README.md` で探す |
-| 7 | `docs/img/app-help.png`(［使い方］の「いまの版」が写る) | 4 節で建てた exe で `python rs/tools/shoot_docs.py --exe … --only app-help`(5 節) | 試験では分からない。撮ったものを目で見る |
-| 8 | マニュアル PDF(`…マニュアルv4.pdf`。5 の文字と 7 の写真を貼っている) | 5 と 7 のあとで `python dev/make_manual.py`(5 節) | 6 節の manual の検査(組み直したものとバイト単位で比べる) |
+| 5 | `rs/THIRD-PARTY-NOTICES.md`(MIT の範囲の一覧にノートブックの名前が入る。exe に埋め込まれる) | 3 節の `python rs/tools/gen_notices.py`(名前は Cargo の版から入る)。作り直したら exe もそのあとで建てる | 3 節の `gen_notices.py --check` と 6 節の notices の検査 |
+| 6 | `dev/make_manual.py` の版の文字(冒頭の説明・表紙の表の「版」の行・9.1 の「ウィンドウの題」)と、ノートブックの名前(4.3・4.5・9.1・付録 B) | 手で | 試験では分からない(β の版の文字だけは試験が拾う)。下の grep で探す |
+| 7 | `README.md` の版の文字(「起動と大きさ」の表の見出し・入れ替えの節の「ウィンドウの題」・冒頭の HTML コメント)とノートブックの名前 | 手で。exe の大きさと起動の時間は 4 節で建てた exe の実測に。**比べの表(ほかのソルバーとの比べ)の行は、その版で測り直したときだけ版を上げる**(測り直さないなら、測った版のまま残す) | 同上 |
+| 8 | `docs/img/app-help.png`(［使い方］の「いまの版」が写る) | 4 節で建てた exe で `python rs/tools/shoot_docs.py --exe … --only app-help`(5 節) | 試験では分からない。撮ったものを目で見る |
+| 9 | マニュアル PDF(`…マニュアルv4.pdf`。6 の文字と 8 の写真を貼っている) | 6 と 8 のあとで `python dev/make_manual.py`(5 節) | 6 節の manual の検査(組み直したものとバイト単位で比べる) |
+| 10 | `dev/README.md` のノートブックの名前 | 手で | 試験では分からない。下の grep で探す |
+| 11 | β版を出すときだけ: `rs/app/src/ui/help_tab.rs` のβ版の説明 3 行(「この版は v7 のβ版です…」。前の大きな版への戻し方を含む) | 手で書き直す | 試験 `beta_版の間だけ更新の扱いを説明する`(大きな版を版から組み立てて探すので、書き直し忘れると落ちる) |
 
 - 試験 `version_in_docs_matches_cargo`(`rs/app/src/pipeline.rs`)が見るのは次の 3 つ。
-  - README・`dev/make_manual.py`・`dev/nb_main.py`・`zahyou_engine.py` の「数.数.数-beta.数」をすべて拾い、`Cargo.toml` の版と違うものがあれば落ちる。
+  - README・`dev/make_manual.py`・`dev/nb_main.py`・`zahyou_engine.py` の「数.数.数-beta.数」は `Cargo.toml` の版と、版名の形「v数-beta.数」は版名と比べ、違うものがあれば落ちる。
   - `NB_VERSION` が版名と同じか。
-  - 直下に `zahyou_v<大きな版>.ipynb` があるか。
-- 正式版どうしの版上げ(7 → 8)で、README とマニュアルに前の版の文字が残っていても、この試験では分からない。5・6 の grep で探す。
+  - 直下の `zahyou_v<数>.ipynb` が、今の版の `zahyou_v<大きな版>.ipynb` の 1 つだけか(改名を忘れて `build_nb.py` を走らせると、`build_nb.py` が止める)。
+- 正式版どうしの版上げ(7 → 8)で、README とマニュアルに前の版の文字が残っていても、この試験では分からない。次の grep で探す(GNU grep。表のセルに書くと `|` の扱いで壊れるので、ここに書く)。
   前の版の文字が「配っている前の版の exe の題」のような事実として正しい所もあるので、試験では一律に落とさない。
+
+```bash
+LC_ALL=C.UTF-8 grep -nE 'v7([^0-9]|$)|zahyou_v7' README.md dev/make_manual.py dev/README.md   # 前の大きな版が 7 のとき
+```
+
 - 試験に版の文字は書かない(2026-10-17 から)。`version_text` の試験は、版名が次のとおりであることを、版によらず見る。
   - 画面の版名・ログの見出しが、cargo が分けた大・中・小・プレリリースから組み立てた版名(`expected_label`。build.rs と同じ決まり)と同じ
   - 更新の確認の読み方(`parse_version`)で同じ数になる
@@ -290,7 +299,7 @@ python rs/tools/make_release_assets.py --exe "$(cygpath -w $EXE)" --out "$(cygpa
 - 文字のファイル(.ipynb・.py・.txt・.md)は改行を LF にそろえて書く(作業ツリーが CRLF でも SHA256 が変わらない。`LICENSE.txt` は
   v6 の Release のものと同じ SHA256 になった)。exe と PDF はそのまま写す。
 - 試験: `python -B rs/tools/test_make_release_assets.py`(release の exe があれば `ZAHYOU_RELEASE_EXE` で渡すと版情報・同梱物の表示・
-  ホームのパスが無いことも確かめる。32 本(2026-10-18 に改名の試験を足した)。4 節の置き換えを付けずに建てた exe なら、ホームのパスの試験が落ちる)。
+  ホームのパスが無いことも確かめる。34 本(2026-10-18 に改名の試験を、2026-10-24 に版名とノートブックの元の名前の試験を足した)。4 節の置き換えを付けずに建てた exe なら、ホームのパスの試験が落ちる)。
 - 2026-10-16 に、`7.0.0-beta.1`(help_tab.rs を直したあとの release の exe、14,039,040 バイト)で 4 つの検査が通り、`sha256sum -c` で 6 つとも OK。
   公開しない指定を入れたあと(exe 14,041,088 バイト・マニュアル v4 を組み直したもの)も同じく通った(rust-port.md 10.10)。
   ノートブックの資産(`zahyou_v7_beta.ipynb`・`zahyou_engine.py`)の公開しない指定は、Python 版の直し(native-solver の `b878079`)を
@@ -348,7 +357,7 @@ gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false --latest=fa
 
 **2026-10-18 の時点**(ユーザーの指示「回数については目安程度で、動作に問題が無いことが確認できれば、v7 をリリースしたい」。`native-rs` で):
 
-- 済み: 版を `7.0.0` に(2 節の表の 1〜5)、README・マニュアルの本文(`dev/make_manual.py`)を正式版の形に(下の 2)、
+- 済み: 版を `7.0.0` に(10-18 時点の 2 節の表の 1〜5 = Cargo.toml・Cargo.lock・NB_VERSION・make_manual.py・README)、README・マニュアルの本文(`dev/make_manual.py`)を正式版の形に(下の 2)、
   ノートブックを `zahyou_v6.ipynb` から `zahyou_v7.ipynb` に改名、v6 用の古いものを消した(9 節)、`rs/THIRD-PARTY-NOTICES.md` を作り直した
   (MIT の範囲の一覧の 1 行。exe に埋め込まれる)。
 - 残っていること(この順に):

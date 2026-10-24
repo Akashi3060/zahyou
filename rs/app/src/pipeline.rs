@@ -1657,9 +1657,12 @@ mod tests {
     }
 
     /// 版を上げたときに直す文書(docs/release-v7.md 2 節)が、Cargo.toml の版と同じ版を書いているか。
-    /// 「数.数.数-beta.数」の形をすべて拾い、今の版と違うものがあれば落とす(版の文字は試験に書かない)。
-    /// 正式版(プレリリースの部分なし)にしたら、β の版の文字が 1 つでも残っていれば落ちる
+    /// 「数.数.数-beta.数」の形は Cargo の版と、版名の形「v数-beta.数」「v数.数-beta.数」は版名と比べ、違うものがあれば落とす
+    /// (版の文字は試験に書かない)。正式版(プレリリースの部分なし)にしたら、β の版の文字が 1 つでも残っていれば落ちる
     /// (README とマニュアルを正式版の形にする。docs/release-v7.md 8 節の 2)。`-beta.N` の書き方は拾わない。
+    /// NB_VERSION が版名か、直下のノートブックが zahyou_v<大きな版>.ipynb の 1 つだけかも見る。
+    /// 正式版どうしの版上げ(7 → 8)の、README・マニュアルの前の版の文字の残りは見ない(配っている前の版の事実として
+    /// 正しい所があるため。docs/release-v7.md 2 節の grep で探す)。
     #[test]
     fn version_in_docs_matches_cargo() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
@@ -1672,6 +1675,13 @@ mod tests {
                 for tok in beta_versions(line) {
                     seen += 1;
                     if tok != ver {
+                        bad.push(format!("{rel}:{}: {tok}", line_no + 1));
+                    }
+                }
+                // 版名の形(「v8-beta.1」。窓の題・NB_VERSION・タグ)は版名と比べる
+                for tok in beta_labels(line) {
+                    seen += 1;
+                    if tok != expected_label() {
                         bad.push(format!("{rel}:{}: {tok}", line_no + 1));
                     }
                 }
@@ -1693,6 +1703,56 @@ mod tests {
         // 配るノートブックは直下の zahyou_v<大きな版>.ipynb(dev/build_nb.py と make_release_assets.py が版から名前を決める)
         let nb_name = format!("zahyou_v{}.ipynb", env!("CARGO_PKG_VERSION_MAJOR"));
         assert!(repo.join(&nb_name).is_file(), "直下に {nb_name} が無い(版を上げたら git mv で改名する。docs/release-v7.md 2 節)");
+        // 前の版の名前が残っていない(改名せずに build_nb.py で新しく作ると、前のものが残って 2 つになる)
+        let mut nbs: Vec<String> = std::fs::read_dir(&repo)
+            .unwrap()
+            .filter_map(|e| e.ok()?.file_name().into_string().ok())
+            .filter(|n| {
+                n.strip_prefix("zahyou_v")
+                    .and_then(|r| r.strip_suffix(".ipynb"))
+                    .is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()))
+            })
+            .collect();
+        nbs.sort();
+        assert_eq!(nbs, vec![nb_name], "直下の zahyou_v<数>.ipynb は今の版の 1 つだけのはず");
+    }
+
+    /// 行の中の、版名の形のβの版「v数-beta.数」「v数.数-beta.数」をすべて返す(頭の v は必須。v の前が英数字なら
+    /// 別の語の一部とみなして拾わない)。数 3 つの形(「v8.0.0-beta.1」)は beta_versions が拾うので、ここでは拾わない。
+    fn beta_labels(line: &str) -> Vec<&str> {
+        let b = line.as_bytes();
+        let mut out = Vec::new();
+        let mut from = 0;
+        while let Some(i) = line[from..].find("-beta.").map(|i| i + from) {
+            from = i + 1;
+            let mut s = i;
+            while s > 0 && (b[s - 1].is_ascii_digit() || b[s - 1] == b'.') {
+                s -= 1;
+            }
+            let mut e = i + "-beta.".len();
+            while e < b.len() && b[e].is_ascii_digit() {
+                e += 1;
+            }
+            let has_v = s > 0 && b[s - 1] == b'v' && !(s > 1 && b[s - 2].is_ascii_alphanumeric());
+            let parts: Vec<&str> = line[s..i].split('.').collect();
+            let word_after = e < b.len() && (b[e].is_ascii_alphanumeric() || (b[e] == b'.' && b.get(e + 1).is_some_and(u8::is_ascii_digit)));
+            if has_v
+                && e > i + "-beta.".len()
+                && (1..=2).contains(&parts.len())
+                && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|c| c.is_ascii_digit()))
+                && !word_after
+            {
+                out.push(&line[s - 1..e]);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn beta_labels_finds_only_short_labels() {
+        assert_eq!(beta_labels("題 zahyou v8-beta.1 (β版)。/tag/v8-beta.12) と v8.1-beta.2"), vec!["v8-beta.1", "v8-beta.12", "v8.1-beta.2"]);
+        // 数 3 つの形・v の無いもの・語の一部・数でないβの番号は拾わない
+        assert!(beta_labels("v8.0.0-beta.1 と 8-beta.1 と dev8-beta.1 と v8-beta.N と v8-beta.1a").is_empty());
     }
 
     /// 行の中の「数.数.数-beta.数」をすべて返す(前後が英数字・"." なら別の語の一部とみなして拾わない)。

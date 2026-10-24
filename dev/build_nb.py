@@ -213,7 +213,7 @@ def engine_imports(module_imports, head):
 ENGINE_HEAD = '''# ==============================================================================
 #  zahyou 解析エンジン
 #
-#  zahyou_v7.ipynb のセル A から読み込まれます。単体では実行しません。
+#  @NOTEBOOK@ のセル A から読み込まれます。単体では実行しません。
 #  中身を読む必要はありません (直したいときだけ dev/ の元のファイルを触ってください)。
 #  オフライン解析は自前のエンジン (dev/solver_*.py) で行い、WSL は使いません。
 # ==============================================================================
@@ -251,7 +251,7 @@ except ImportError:
 # (抑えるのはこの 1 種類だけ。他の警告は今までどおり表示する)
 from astropy.wcs import FITSFixedWarning
 warnings.simplefilter("ignore", FITSFixedWarning)
-'''
+'''.replace("@NOTEBOOK@", os.path.basename(ROOT_NB))  # ノートブックの名前は版から(ROOT_NB)
 
 
 HEADER_MD = """\
@@ -390,6 +390,11 @@ def build():
             changed = sync_notebook(ROOT_NB, nb)
             print(f"wrote {ROOT_NB}  (中身を差し替えたセル: {', '.join(changed) or 'なし'})")
         else:
+            # 版を上げてノートブックの改名を忘れたとき、黙って新しいもの(出力の例なし)を作らない
+            others = sorted(n for n in os.listdir(REPO) if re.fullmatch(r"zahyou_v\d+\.ipynb", n))
+            if others:
+                raise SystemExit(f"{os.path.basename(ROOT_NB)} がありません。版を上げたら先に git mv で改名してください"
+                                 f"(今あるのは {', '.join(others)}。docs/release-v7.md 2 節の 3)")
             write_text(ROOT_NB, json.dumps(nb, ensure_ascii=False, indent=1) + "\n")
             print(f"wrote {ROOT_NB}")
 
