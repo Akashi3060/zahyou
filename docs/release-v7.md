@@ -816,7 +816,8 @@ Release v7 の zahyou_engine.py と SHA256SUMS.txt、配布ページの zahyou_e
 
 ### v8 の準備(2026-10-24。ユーザーの指示「次の版を v8 として準備して。…Release の公開と配布ページの差し替えの前に確認して」)
 
-ブランチ `v8`(worktree `GitHub\zahyou-v8`)。中身は main(13 節の高速化・14 節の解の判定の直し・版名を整数の形にする PR #43)に、次の版上げを足したもの。
+ブランチ `v8`(worktree `GitHub\zahyou-v8`)。中身は main(13 節の高速化・14 節の解の判定の直し・版名を整数の形にする PR #43・
+見送った候補のログと `tune_gain_hyps0` を 1e6 にする PR #45)に、次の版上げを足したもの。
 
 - **版**: `rs/Cargo.toml` を `8.0.0` に(版名 `v8`)。`Cargo.lock` は cargo が更新した。2 節の表のとおり、次のものを直した。
   - `zahyou_v7.ipynb` を `zahyou_v8.ipynb` に改名(git mv)
@@ -824,27 +825,38 @@ Release v7 の zahyou_engine.py と SHA256SUMS.txt、配布ページの zahyou_e
   - `gen_notices.py` で同梱物の表示を作り直した(MIT の範囲の一覧のノートブックの名前)
   - README・`dev/make_manual.py`・`dev/README.md` を v8 向けにした。v7 で測った表は v7 の値のまま断りを入れ、比べの表は v7 の行のまま
   - `app-help.png` を撮り直し、マニュアル v4 を組み直した(33 ページ。表紙は 1 ページ)
-- **exe**: 4 節の置き換えを付けて建てた。
-  - 14,243,328 バイト、SHA256 `5bae6911d557ded9c7a3f60d7d966881824aded8c46ac9093f2d3e8ad9be937b`。作者のホームのパスは 0 か所(`/cargo` 502・`/zahyou` 2)
+- **PR #45 の取り込み**(2026-10-25。ユーザーの指示「tune_gain_hyps0 を 1e6 に上げて、#45 の見送りのログと一緒に v8 に入れて。比べ…をやり直し、exe と配布ファイルを作り直して。公開の前にまた確認して」):
+  - #45 は、見送った候補をログに出すことと、`tune_gain_hyps0` を 1e5 から 1e6 に上げることの 2 つ。merge commit で main(`544e6ce`)に入れ、main を v8 に取り込んだ(`eccceab`)。
+  - 比べのやり直し(比較の画像 155 枚・既知の誤った解・4100 系だけの組・弱くて遅く見つかる正しい解の 158 通り)は rust-port.md 14.7 節。
+  - README の v8 の説明に、弱い答えを受け入れないことがある(作って試した 13 通り中 2 通り)ことと、見送った候補のログを書き足した。
+  - exe と資産は下のとおり作り直した。10-24 に建てた exe(14,243,328 バイト・`5bae6911…`)と資産は、`%USERPROFILE%\zahyou-dist-v8-prev-20261024` に残してある(出していない)。
+- **exe**(2026-10-25 に建て直した): 4 節の置き換えを付けて建てた。
+  - 14,245,376 バイト、SHA256 `86d1e160ff3ae5565d78b699164ad1aefb17932734442843cd2c639578b5419f`。作者のホームのパスは 0 か所(`/cargo` 502・`/zahyou` 2)
   - `--engine-check` の version=v8、`--selftest --offline` 25/25
   - `--update-check` は「最新版です (v8)。公開されている最新版 v7 より新しい版を使っています。」
-  - 最初の描画まで: DirectX 12 で 0.39〜0.45 秒、OpenGL で 0.48〜0.55 秒(3 回ずつ。README の「起動と大きさ」とマニュアル 3.2 に入れた)
+  - 最初の描画まで: DirectX 12 で 0.39〜0.47 秒、OpenGL で 0.46〜0.56 秒(3 回ずつ。README の「起動と大きさ」とマニュアル 3.2 に入れ、マニュアルを組み直した。
+    10-24 の exe では 0.39〜0.45 秒・0.48〜0.55 秒)
   - 道具: rustc 1.94.0・cargo 1.94.0(MSYS2)・gcc 15.2.0
-- **試験**: `cargo test --workspace -- --include-ignored --skip live` で、main を取り込む前に 320/320(20 分 41 秒)、取り込んだあとに 321/321(17 分 16 秒)。
-  取り込んだあとに `cargo test --workspace -- --skip live` で 311 本通過・失敗 0、`clippy -D warnings` 指摘 0、`test_make_release_assets.py` 通過。
-  どれも 4 節の置き換えを付けて回した。
+- **試験**: どれも 4 節の置き換えを付けて回した。
+  - 10-24: `cargo test --workspace -- --include-ignored --skip live` で、main(#43)を取り込む前に 320/320(20 分 41 秒)、取り込んだあとに 321/321(17 分 16 秒)。
+    `cargo test --workspace -- --skip live` で 311 本通過・失敗 0、`clippy -D warnings` 指摘 0、`test_make_release_assets.py` 通過。
+  - 10-25(#45 を取り込んだあと): `cargo test --workspace -- --include-ignored --skip live` で **323/323**(15 分 17 秒。`negative_dense_accept_rule` を含む)、
+    `clippy -D warnings` 指摘 0、`dev/test_solver_core.py` 46/46、`dev/test_solver_real.py --engine --both` 62/62
+    (56 件は一度に回し、手元に無かった合成の画像 sim_a0・sim_a1・sim_c0 の 6 件は、`GitHub\zahyou\dev` から写して回し直した)、
+    `test_make_release_assets.py`(この exe を渡して)34 本通過。利用者の cache.json・gui.json は前後で同じ。
 - **資産**(6 節): `%USERPROFILE%\zahyou-dist-v8`。5 つの検査が全部 OK で、`sha256sum -c` も OK だった。
 
 ```
-5bae6911d557ded9c7a3f60d7d966881824aded8c46ac9093f2d3e8ad9be937b  zahyou.exe
+86d1e160ff3ae5565d78b699164ad1aefb17932734442843cd2c639578b5419f  zahyou.exe
 ab742a7918588ae14b160a5e281b022200ea8108f12c7bd3a95d5cf111aaf784  zahyou_v8.ipynb
-0ce0febe4ff2ecaadad078c9b605e011b230b199408b1599e3394daff2b805dc  zahyou_engine.py
-7f5cabab650dc76f860f4f4e93d7edf669032bea79d78fa6c959f4bac091ebef  zahyou-manual-v4.pdf
+6cc22cf508086ba2fff83cc954b2bac5abb9208ecc17870ba9094efac65709d0  zahyou_engine.py
+3ab992146040590ee20ac4b8b4ff6f1736e6f6fc94273c6e5ba1c96f07b3644b  zahyou-manual-v4.pdf
 4efc7babf6be215d508636aefa67428a28d1c9977b02d1b580c47b26dd34a3f8  LICENSE.txt
 f677908c1c64fc1965de7076c670f5ed7ef6cf773a6296be35b35e60e40b451e  THIRD-PARTY-NOTICES.md
 ```
 
   - `zahyou_v8.ipynb` はセルの中身が v7 と同じなので、SHA256 も v7 の `zahyou_v7.ipynb` と同じ。
+  - 10-24 の資産から変わったのは `zahyou.exe`・`zahyou_engine.py`(#45)・`zahyou-manual-v4.pdf`(起動の時間)の 3 つ。
   - セル C の出力の例は、v6 で走らせたときの「zahyou v6」のまま(8 節の 3 の任意の差し替えはしていない)。
 - **残り**(ユーザーの了承のあとで、この順に)。**ブランチ `v8` とタグ `v8` が同じ名前にならないよう、タグの前にブランチを消す**(v6 で踏んだ ambiguous の問題。8 節の 3):
   1. `gh pr merge 44 --repo Akashi3060/zahyou --merge`(`--delete-branch` は付けない。worktree が使っているので手元の削除で止まる)
