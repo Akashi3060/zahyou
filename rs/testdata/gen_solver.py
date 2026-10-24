@@ -12,7 +12,7 @@ dev/ のファイルは読むだけで書き換えない(trace は一時フォ�
   solver_parts.json   部品の値: 星の並べ替え(明るい順 → 一様化、検証の星の並び)、newpoint の quad 作り
                       (足した星ごとの quad の並び)、画像側のコードと正準化・鏡像の形(sv_code_variants)、
                       AB の範囲、検証の積み上げ(1 対 1 の付け替えを含む sv_verify_core)、一致の重み、F 分布の点、
-                      HEALPix の 1 辺、解の判定(sv_accept_logodds・sv_tuneup_accepted)、
+                      HEALPix の 1 辺、解の判定(sv_accept_logodds・sv_tuneup_accepted)と見送った候補のまとめ(sv_passed_note)、
                       4 点の当てはめ(束)、検証の対数オッズ(sv_verify_wcs。真の WCS・乱数の WCS・
                       回転・鏡像、quad あり・なし。索引が要る)
   solver_synth.json   合成星野(dev/test_solver_synth.py の場合から代表。星は solver_synth.py が種で作る)と、
@@ -339,8 +339,34 @@ def gen_parts(sw, si, sc, ss, catalog):
         dict(tune_min_gain=g, tune_gain_hyps0=h0, nhyp=n, before=b, after=a,
              ok=sc.sv_tuneup_accepted(sc.SvParams(tune_min_gain=g, tune_gain_hyps0=h0), n, b, a))
         for g, h0 in ((1, 1e5), (2, 1e5), (0, 1e5), (1, 0.0), (1, 1e6))
-        for n in (1, 4553, 100000, 100001, 2671113, 16187319)
+        for n in (1, 4553, 100000, 100001, 244413, 1000000, 1000001, 2671113, 16187319)
         for b, a in ((5, 5), (4, 4), (5, 6), (4, 9), (24, 24), (20, 40), (7, 6), (0, 0))]
+
+    # (f3) 改良の後の判定で見送った候補のまとめ(sv_passed_add の並び → 探索の終わりの行の末尾に足す文)。
+    # 最大の候補の要った値を覚えること・同じ値なら先のもの・千の位の区切り・丸め(x.x5 ちょうど・負・-0.0)を見る
+    acc = lambda n: sc.sv_accept_logodds(sc.SvParams(), n)  # noqa: E731
+    seqs = [
+        [],
+        [("short", 18.734, acc(100000))],
+        [("short", 21.0, acc(200001)), ("short", 24.95, acc(3000000)), ("short", 22.3, acc(16187319))],
+        [("short", 22.5, 24.0), ("short", 22.5, 26.0)],
+        [("nogain", 30.9), ("nogain", 22.773709888689385)],
+        [("nogain", 21.4), ("short", 22.773709888689385, acc(16187319)), ("nogain", 22.25), ("short", -3.75, acc(1))],
+        [("short", 22.25, 22.35), ("nogain", 20.75)],
+        [("short", -3.75, acc(1))],
+        [("short", -0.04, -0.06)],
+        [("short", 15.0 + (i % 97) * 0.07, acc(100000 + 1000 * i)) for i in range(1001)]
+        + [("nogain", 21.0 + 0.01 * i) for i in range(12)],
+    ]
+    out["passed_note"] = []
+    for seq in seqs:
+        st = {}
+        for e in seq:
+            sc.sv_passed_add(st, *e)
+        out["passed_note"].append(dict(events=[list(e) for e in seq], note=sc.sv_passed_note(st)))
+    # (f4) 見送りが出る探索の最後の行: 合成星野(5205 だけ・ヒント・スケール既知)を、受け入れの値を極端に上げて
+    # (accept_hyps0 = 1e-300)解かせる。正しい候補も見送り、quad を試し尽くして最後の行にまとめが出る(時刻によらない)
+    out["passed_solve"] = gen_passed_solve(sw, si, sc, ss, catalog) if catalog is not None else None
 
     # (g) 4 点の当てはめを束で(sv_fit_similarity_many)
     r = np.random.default_rng(106)
@@ -365,6 +391,27 @@ def gen_parts(sw, si, sc, ss, catalog):
     # (h) 検証の対数オッズ(sv_verify_wcs。索引が要る)
     out["verify"] = gen_verify(sw, si, sc, ss, catalog) if catalog is not None else []
     return out
+
+
+def gen_passed_solve(sw, si, sc, ss, catalog):
+    """改良の後の判定で候補を見送らせて試し尽くした探索の、最後のログの行(秒の所は試験の側で伏せる)。"""
+    iid = 5205
+    if iid not in catalog.series:
+        return None
+    W, H, s, (ra, dec) = 968, 548, 1.4616, (61.89, 41.96)
+    fld = ss.sv_synth_field(catalog, ra, dec, s, W, H, rotation_deg=152.87, mirror=True, seed=1105, n_stars=60,
+                            drop_frac=0.2, distractor_frac=0.2, pos_noise_px=0.3, series=[iid])
+    xy = np.round(np.asarray(fld["xy"], dtype=np.float64), 3)
+    fl = np.round(np.asarray(fld["flux"], dtype=np.float64), 3)
+    hint, s_lo, s_hi, h0 = (ra + 0.5, dec - 0.3, 3.0), s * 0.9, s * 1.1, 1e-300
+    lines = []
+    t0 = time.monotonic()
+    sol = sc.sv_solve(xy, fl, W, H, restrict(catalog, [iid]), scale_lo=s_lo, scale_hi=s_hi, hint=hint,
+                      deadline=t0 + 600.0, log=lines.append, params=sc.SvParams(accept_hyps0=h0))
+    dt = time.monotonic() - t0
+    print(f"  見送りの探索: {'解けた' if sol is not None else '解なし'} {dt:.2f} s / {lines[-1] if lines else ''}", flush=True)
+    return dict(series=[iid], width=W, height=H, xy=xy.tolist(), flux=fl.tolist(), hint=list(hint), scale_lo=s_lo,
+                scale_hi=s_hi, accept_hyps0=h0, solved=sol is not None, log=lines)
 
 
 def gen_verify(sw, si, sc, ss, catalog):
