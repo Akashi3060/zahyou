@@ -7,6 +7,8 @@
 //! - 画像側のコード(sv_field_codes)と照合に投げる形(sv_code_variants。正準化の境界の近く・鏡像・parity 3 通り)
 //! - quad の AB の範囲(sv_quad_ab_range)・一致の重み・F 分布の点・HEALPix の 1 辺
 //! - 解の判定(sv_accept_logodds・sv_tuneup_accepted)と、既定の値で 2026-10-24 の誤った解 2 件が解にならないこと
+//! - 判定で見送った候補のまとめ(sv_passed_add・sv_passed_note。探索の終わりの行の末尾に足す文)と、受け入れの値を
+//!   極端に上げて候補を見送らせ、quad を試し尽くした探索のログの行(秒を除く)が Python と同じこと(索引が要る)
 //! - 4 点の当てはめ(sv_fit_similarity_many の 1 組ずつ)
 //! - 検証の積み上げ(sv_verify_core。1 対 1 の付け替え・偽物・打ち切りを含む 60 仮説)
 //! - 検証の対数オッズ(sv_verify_wcs → zahyou_solver::verify_wcs。合成星野で真の WCS・乱数・回転・鏡像・ずらしたもの。
@@ -18,12 +20,15 @@
 
 mod common;
 
+use std::sync::atomic::AtomicBool;
+
 use common::*;
 use zahyou_solver::parts::{
-    accept_logodds, code_variants, f_upper, field_codes, field_order, fit_similarity_quad, healpix_side_rad,
-    logodds_weight, order_stars, quad_ab_range, quad_geometry, quads_newest, tuneup_accepted, verify_core,
+    PassedOver, accept_logodds, code_variants, f_upper, field_codes, field_order, fit_similarity_quad,
+    healpix_side_rad, logodds_weight, order_stars, quad_ab_range, quad_geometry, quads_newest, tuneup_accepted,
+    verify_core,
 };
-use zahyou_solver::{Params, Parity};
+use zahyou_solver::{Control, Params, Parity, SolveRequest};
 
 fn parts() -> Option<Value> {
     let v = load_testdata("solver_parts.json");
@@ -271,7 +276,7 @@ fn accept_rule_matches_python() {
         }
     }
     let p = Params::default();
-    assert_eq!((p.tune_min_gain, p.tune_gain_hyps0, p.accept_hyps0), (1, 1e5, 1e5), "既定の値");
+    assert_eq!((p.tune_min_gain, p.tune_gain_hyps0, p.accept_hyps0), (1, 1e6, 1e5), "既定の値");
     assert_eq!(accept_logodds(&p, 100_000).to_bits(), p.logodds_solve.to_bits(), "1e5 個までは今までと同じ値");
     for (n, lo, nm) in [(16_187_319u64, 22.773709888689385, 5usize), (2_671_113, 22.232375123308053, 4)] {
         let need = accept_logodds(&p, n);
@@ -297,6 +302,83 @@ fn accept_rule_matches_python() {
             accept_logodds(&p, 2_671_113)
         ),
     );
+}
+
+/// 改良の後の判定で見送った候補のまとめ(探索の終わりの行の末尾に足す文)が、同じ並びの候補から Python と同じ文になる。
+#[test]
+fn passed_note_matches_python() {
+    let Some(d) = parts() else { return };
+    let Some(cases) = d["passed_note"].as_array() else {
+        skip("passed_note", "solver_parts.json に passed_note が無い(gen_solver.py で作り直す)");
+        return;
+    };
+    let mut bad = Vec::new();
+    for (k, r) in cases.iter().enumerate() {
+        let mut acc = PassedOver::default();
+        for e in r["events"].as_array().unwrap() {
+            let lo = e[1].as_f64().unwrap();
+            match e[0].as_str().unwrap() {
+                "short" => acc.add_short(lo, e[2].as_f64().unwrap()),
+                _ => acc.add_nogain(lo),
+            }
+        }
+        let want = r["note"].as_str().unwrap();
+        if acc.note() != want {
+            bad.push(format!("{k} 番目: Rust {:?} ≠ Python {want:?}", acc.note()));
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+    row("PASS", "passed_note", &format!("Python と同じ文({} 通り)", cases.len()));
+}
+
+/// 改良の後の判定で候補を見送らせ(受け入れの値を極端に上げる)、quad を試し尽くした探索のログが、秒の所を除いて
+/// Python と同じ行になる(最後の「解けませんでした」の行の、見送った候補のまとめを含む)。索引が要る。
+#[test]
+fn passed_solve_log_matches_python() {
+    let Some(d) = parts() else { return };
+    let r = &d["passed_solve"];
+    if r.is_null() {
+        skip("passed_solve", "solver_parts.json に passed_solve が無い(作ったときに索引が無かったか、古い)");
+        return;
+    }
+    if catalog().is_none() {
+        skip("passed_solve", "星図データが無い");
+        return;
+    }
+    let ids: Vec<u32> = r["series"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap() as u32).collect();
+    let cat = restricted_catalog(&ids);
+    let h = f64s(&r["hint"]);
+    let req = SolveRequest {
+        stars: stars_xy_flux(&r["xy"], &r["flux"]),
+        width: r["width"].as_u64().unwrap() as usize,
+        height: r["height"].as_u64().unwrap() as usize,
+        scale_lo: r["scale_lo"].as_f64(),
+        scale_hi: r["scale_hi"].as_f64(),
+        hint: Some((h[0], h[1], h[2])),
+    };
+    let p = Params { accept_hyps0: r["accept_hyps0"].as_f64().unwrap(), ..Params::default() };
+    let buf = LogBuf::default();
+    let log = |s: &str| buf.push(s);
+    let cancel = AtomicBool::new(false);
+    let ctl = Control { deadline: Some(deadline_in(120.0)), cancel: &cancel, log: &log };
+    let res = zahyou_solver::solve(&req, &cat, &p, &ctl);
+    cat.close();
+    // 秒(「、0.2 秒)」)だけを伏せる
+    let mask = |s: &str| {
+        let Some(j) = s.find(" 秒)") else { return s.to_string() };
+        match s[..j].rfind('、') {
+            Some(i) if s[i + '、'.len_utf8()..j].parse::<f64>().is_ok() => format!("{}、X{}", &s[..i], &s[j..]),
+            _ => s.to_string(),
+        }
+    };
+    let got: Vec<String> = buf.lines().iter().map(|s| mask(s)).collect();
+    let want: Vec<String> = r["log"].as_array().unwrap().iter().map(|v| mask(v.as_str().unwrap())).collect();
+    let solved = matches!(res, Ok(Some(_)));
+    assert_eq!(solved, r["solved"].as_bool().unwrap(), "解けたか(Rust {solved}・Python {})", r["solved"]);
+    assert_eq!(got, want, "ログの行が Python と違う");
+    let last = got.last().cloned().unwrap_or_default();
+    assert!(last.contains("。改良の後の対数オッズが足りず見送った候補 "), "まとめが無い: {last}");
+    row("PASS", "passed_solve", &format!("Python と同じ {} 行。最後: {last}", got.len()));
 }
 
 #[test]

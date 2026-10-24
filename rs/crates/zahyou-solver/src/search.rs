@@ -16,8 +16,8 @@ use crate::clock::{Abort, Clock};
 use crate::field::Field;
 use crate::lsq::{LSQ_MAX_SHIFTS, fit_wcs_lsq, normalize3, wrms};
 use crate::parts::{
-    CodeVariants, SIP_F_Z, accept_logodds, code_variants, f_upper, field_codes, fit_similarity_quad, logodds_weight,
-    quad_ab_range, quad_geometry, quads_newest_into, tuneup_accepted,
+    CodeVariants, PassedOver, SIP_F_Z, accept_logodds, code_variants, f_upper, field_codes, fit_similarity_quad,
+    logodds_weight, quad_ab_range, quad_geometry, quads_newest_into, tuneup_accepted,
 };
 use crate::pyfmt::{fmt_g, fmt_int};
 use crate::verify::{Hyp, Proj, Refs, SeriesCtx, Store, VerifyOut, quick_pass, series_cone, verify_one};
@@ -117,6 +117,7 @@ pub(crate) struct SearchState {
     pub bad_series: BTreeSet<u32>,
     pub files: Vec<String>,
     pub scale: Option<(f64, f64)>,
+    pub passed: PassedOver,
 }
 
 impl SearchState {
@@ -136,6 +137,7 @@ impl SearchState {
             bad_series: BTreeSet::new(),
             files: Vec::new(),
             scale: None,
+            passed: PassedOver::default(),
         }
     }
 }
@@ -281,11 +283,12 @@ pub(crate) fn search(
         }
     }
     log(&format!(
-        "quad を全部試しても解けませんでした(quad {} 個・仮説 {} 個、対数オッズの最大 {:.1}、{:.1} 秒)",
+        "quad を全部試しても解けませんでした(quad {} 個・仮説 {} 個、対数オッズの最大 {:.1}、{:.1} 秒){}",
         fmt_int(st.quads),
         fmt_int(st.hyps),
         st.logodds_max,
-        st.t0.elapsed().as_secs_f64()
+        st.t0.elapsed().as_secs_f64(),
+        st.passed.note()
     ));
     Ok(None)
 }
@@ -754,11 +757,13 @@ fn verify_and_pick(
                 other => other?,
             };
             if !(res1.best >= accept) {
+                st.passed.add_short(res1.best, accept);
                 continue;
             }
             // 試した仮説が多くなってから tune-up で上がった仮説は、改良で一致が増えたときだけ解にする
             // (同じ星への当て直しだけで上がったものは偶然)
             if tuned && !tuneup_accepted(params, st.hyps, r.nmatch, res1.nmatch) {
+                st.passed.add_nogain(res1.best);
                 continue;
             }
             return Ok(Some(Found {
