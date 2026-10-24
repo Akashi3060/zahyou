@@ -276,7 +276,7 @@ fn accept_rule_matches_python() {
         }
     }
     let p = Params::default();
-    assert_eq!((p.tune_min_gain, p.tune_gain_hyps0, p.accept_hyps0), (1, 1e5, 1e5), "既定の値");
+    assert_eq!((p.tune_min_gain, p.tune_gain_hyps0, p.accept_hyps0), (1, 1e6, 1e5), "既定の値");
     assert_eq!(accept_logodds(&p, 100_000).to_bits(), p.logodds_solve.to_bits(), "1e5 個までは今までと同じ値");
     for (n, lo, nm) in [(16_187_319u64, 22.773709888689385, 5usize), (2_671_113, 22.232375123308053, 4)] {
         let need = accept_logodds(&p, n);

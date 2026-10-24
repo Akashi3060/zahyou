@@ -339,7 +339,7 @@ def gen_parts(sw, si, sc, ss, catalog):
         dict(tune_min_gain=g, tune_gain_hyps0=h0, nhyp=n, before=b, after=a,
              ok=sc.sv_tuneup_accepted(sc.SvParams(tune_min_gain=g, tune_gain_hyps0=h0), n, b, a))
         for g, h0 in ((1, 1e5), (2, 1e5), (0, 1e5), (1, 0.0), (1, 1e6))
-        for n in (1, 4553, 100000, 100001, 2671113, 16187319)
+        for n in (1, 4553, 100000, 100001, 244413, 1000000, 1000001, 2671113, 16187319)
         for b, a in ((5, 5), (4, 4), (5, 6), (4, 9), (24, 24), (20, 40), (7, 6), (0, 0))]
 
     # (f3) 改良の後の判定で見送った候補のまとめ(sv_passed_add の並び → 探索の終わりの行の末尾に足す文)。

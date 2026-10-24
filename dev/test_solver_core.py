@@ -959,14 +959,15 @@ def case_19_check_interval_hint():
 
 def case_20_accept_rule():
     """解の判定(設計書 3.7 節の 6): 試した仮説が accept_hyps0(1e5)個までは ln 1e9、超えたら ln 1e9 + ln(N / 1e5)。
-    試した仮説が tune_gain_hyps0(1e5)個を超えてから tune-up で上がった仮説は、改良後の一致数が 4 点の検証の一致数 +
+    試した仮説が tune_gain_hyps0(1e6)個を超えてから tune-up で上がった仮説は、改良後の一致数が 4 点の検証の一致数 +
     tune_min_gain(1)以上のときだけ解。2026-10-24 に見つけた誤った解(tcase_dense の仮説 16,187,319 個目の 22.77・
     一致 5 → 5、4100 系だけの実写の 2,671,113 個目の 22.23・一致 4 → 4)は、どちらの条件でも解にならない。
-    星 8 個の 3I_00010 の正しい解(仮説 4,553 個目、tune-up で 21.9・一致 4 → 4)は解のまま。値を切る指定(0・無限大)も効く。"""
+    星 8 個の 3I_00010 の正しい解(仮説 4,553 個目、tune-up で 21.9・一致 4 → 4)と、星の少ない画像に偽の検出を足して作った
+    正しい解(仮説 1.0e5〜2.4e5 個目に tune-up で一致が増えずに解ける)は、一致の増えでは落とさない。値を切る指定(0・無限大)も効く。"""
     p = sc.SvParams()
     solve = p.logodds_solve
     bad = []
-    if (p.tune_min_gain, p.tune_gain_hyps0, p.accept_hyps0) != (1, 1e5, 1e5):
+    if (p.tune_min_gain, p.tune_gain_hyps0, p.accept_hyps0) != (1, 1e6, 1e5):
         bad.append(f"既定の値 {p.tune_min_gain}・{p.tune_gain_hyps0}・{p.accept_hyps0}")
     for n in (0, 1, 8192, 100000):
         if sc.sv_accept_logodds(p, n) != solve:
@@ -982,6 +983,11 @@ def case_20_accept_rule():
             bad.append(f"仮説 {n} 個目の一致 {nm} → {nm} の tune-up を解にする")
     if not sc.sv_tuneup_accepted(p, 4553, 4, 4):
         bad.append("仮説 4,553 個目の 3I_00010(一致 4 → 4)の tune-up を解にしない")
+    for n in (100097, 244413, 1000000):
+        if not sc.sv_tuneup_accepted(p, n, 6, 6):
+            bad.append(f"仮説 {n} 個目の一致 6 → 6 の tune-up を解にしない(1e6 個までは一致の増えを求めない)")
+    if sc.sv_tuneup_accepted(p, 1000001, 6, 6):
+        bad.append("仮説 1,000,001 個目の一致 6 → 6 の tune-up を解にする")
     n = 2671113
     if not (sc.sv_tuneup_accepted(p, n, 4, 5) and sc.sv_tuneup_accepted(p, n, 20, 40)
             and not sc.sv_tuneup_accepted(p, n, 7, 6) and sc.sv_tuneup_accepted(p, 100000, 7, 6)):
@@ -991,7 +997,7 @@ def case_20_accept_rule():
             and sc.sv_tuneup_accepted(sc.SvParams(tune_gain_hyps0=math.inf), 10**12, 5, 5)):
         bad.append("切る指定(tune_min_gain=0・tune_gain_hyps0=inf・accept_hyps0=inf)が効かない")
     return not bad, (f"1,619 万個目は {sc.sv_accept_logodds(p, 16187319):.2f}、267 万個目は "
-                     f"{sc.sv_accept_logodds(p, 2671113):.2f}、1e5 個を超えてからの一致が増えない tune-up は解にしない"
+                     f"{sc.sv_accept_logodds(p, 2671113):.2f}、1e6 個を超えてからの一致が増えない tune-up は解にしない"
                      if not bad else "NG: " + "; ".join(bad))
 
 

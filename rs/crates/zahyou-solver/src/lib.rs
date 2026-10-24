@@ -11,7 +11,7 @@
 //!   4. 仮説を系列ごとに newpoint の順で 8192 個ずつ検証する(安い足切り → 対数オッズ)。
 //!      tune 以上 solve 未満なら 1 次で改良して検証し直す。
 //!   5. solve 以上になった最初の仮説を改良して返す。ただし、改良した後の対数オッズが「試した仮説の数で上げた値」
-//!      (`parts::accept_logodds`)に届かないもの、試した仮説が 1e5 個を超えてから tune-up で上がったのに改良で一致が
+//!      (`parts::accept_logodds`)に届かないもの、試した仮説が 1e6 個を超えてから tune-up で上がったのに改良で一致が
 //!      増えないもの(`parts::tuneup_accepted`)は解にしない(astrometry.net には無い条件。設計書 3.7 節の 6)。
 //!
 //! 探す順と判定は Python と同じ。並列(rayon)にするのは索引のファイルごとの照合・当たりの安い棄却と当てはめ・
@@ -138,7 +138,7 @@ impl Default for Params {
             logodds_tune: 1e6f64.ln(),
             logodds_bail: 1e-100f64.ln(),
             tune_min_gain: 1,
-            tune_gain_hyps0: 1e5,
+            tune_gain_hyps0: 1e6,
             accept_hyps0: 1e5,
             max_quad_stars: 60,
             max_verify_stars: 300,
