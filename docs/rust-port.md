@@ -178,7 +178,7 @@ v6 と同じ `%LOCALAPPDATA%\zahyou\cache.json`(targets / rigs)と `gui.json` �
 pub struct FieldStar { pub x: f64, pub y: f64, pub flux: f64 }
 pub struct SolveRequest { pub stars: Vec<FieldStar>, pub width, pub height, pub scale_lo: Option<f64>, pub scale_hi: Option<f64>, pub hint: Option<(f64, f64, f64)> }
 pub enum Parity { Both /* 既定 */, Normal, Mirror }                   // Python の SvParams.parity("both" / "normal" / "mirror")
-pub struct Params { codetol, distractor, verify_pix, logodds_solve, logodds_tune, logodds_bail, max_quad_stars, max_verify_stars, quad_min_frac, uniformize_boxes, tweak_order, parity }  // Python の SvParams と同じ既定値
+pub struct Params { codetol, distractor, verify_pix, logodds_solve, logodds_tune, logodds_bail, max_quad_stars, max_verify_stars, quad_min_frac, uniformize_boxes, tweak_order, parity, tune_min_gain, tune_gain_hyps0, accept_hyps0 }  // Python の SvParams と同じ既定値(最後の 3 つは設計書 3.7 節の 6)
 pub struct Control<'a> { pub deadline: Option<Instant>, pub cancel: &'a AtomicBool, pub log: &'a (dyn Fn(&str) + Sync) }
 pub struct Solution { pub wcs: Wcs, pub logodds, pub nmatch, pub ndistract, pub nfield, pub nref, pub index_name: String, pub quads_tried: u64, pub hypotheses: u64, pub seconds: f64 }
 pub enum SolveError { Cancelled }
@@ -1234,7 +1234,7 @@ cargo の試験は ZAHYOU_CACHE・ZAHYOU_SETTINGS・LOCALAPPDATA を一時のフ
 - tcase_dense の深い星 400 個を全天ブラインドで解くと、仮説 16,186,850 個目(区切りの終わりで 16,187,319)の index-4112 の三角形で誤った解になった。
   4 点の検証は 18.7(一致 5・偽物 4)で、tune-up(同じ 5 個 + quad の 3 星への 1 次の当て直し)の後に 22.77 になった。新しく一致した星は 0 個だった。
 - 利用者の経路(ブラインド・締め切り 60 秒)でも、比較用の画像 f-tcase-dense が同じ誤った解になる。v7.0.0 は遅いので時間内に届かず、「解なし」だった。
-- 星図データを 4107〜4119 だけにすると、実写 r-oc-ser-194114 も同じ形の誤った解になる(index-4111、15.8 → 22.2、一致 4 → 4、仮説 2,663,997 個目)。
+- 星図データを 4107〜4119 だけにすると、実写 r-oc-ser-194114 も同じ形の誤った解になる(index-4111、15.8 → 22.2、一致 4 → 4、仮説 2,663,997 個目。区切りの終わりで 2,671,113)。
 - 判定を受け入れずに最後まで探させ、4 点の検証で ln 1e6 以上になった候補 8,364 件を記録した。
   今の判定なら通ってしまう誤った候補は 5 件で、5 件とも次の点がそろっていた。
   - tune-up 経由
@@ -1295,3 +1295,50 @@ cargo の試験は ZAHYOU_CACHE・ZAHYOU_SETTINGS・LOCALAPPDATA を一時のフ
   - Python の `test_solver_core.py` の 3I_00010(星 8 個)は tune-up で解けるが、仮説 1e5 個より前なので変わらない。
 - そのため、基準値は作り直していない。作り直したのは `solver_parts.json` だけで、2 つの部品の値を足した(ほかの値は前と同じ)。
 - 2 つの式は同じ演算の順で書いた。Rust・Python とも C の `log` を通る。試験(`accept_rule_matches_python`)は 2 ulp まで許す。
+
+### 14.6 代償・配っているものとの関係・残り(main へ入れる前の点検、2026-10-24)
+
+13 節と 14 節を main へ入れる前に、観点別の独立の点検をした。観点は、Rust と Python の一致・利用者への影響・main へ入れる準備の 3 つ。
+merge を止める問題は無かった。ただし、仕組みの上の代償と記録の漏れが見つかったので、ここに書く。
+あわせて、コメントの言い過ぎと締め切り間際のログの文言を直した。
+
+**仕組みの上の代償**(実測で答えが変わった正しい画像は無い):
+
+- **試した数で上げる値**:
+  - 対数オッズ L の本物の解でも、初めて出るのが N > 1e5·e^(L − 20.72) 個目なら捨てる。目安は L = 22 で 3.6e5、24 で 2.7e6、26.9 で 4.8e7、28 で 1.5e8。
+  - N は探索 1 回で全部の系列にまたがって数える。そのため星図データが多いほど・速いほど、同じ締め切りの中で基準が厳しくなる。
+  - 既定の締め切り 300 秒では、全天・スケール全域の深い検出の段がその半分を使い、乱数の星野なら 1e8 個前後(基準 約 27.6)まで届く。
+  - 実測(比較の 155 枚・調べの記録)で、N > 1e5 で見つかった正しい解は約 50 件あった。最小の L は 71.8 で、基準との余裕は 49.7 以上。
+  - L < 50 の弱い正しい解(26.9・29.4・30.4・42.4・48.6)は、5 件とも N ≤ 11,746 で見つかっていて、どちらの条件もかからない。
+    報告の「余裕の最小 6.1」はこのうち r-3i-ser-193002(N = 94)の値で、値上げはかかっていない。
+  - つまり「弱くて遅く見つかる正しい解」は、実測に含まれていない。そうした画像は、main(v7.0.0)では解けて、この版では解なしになりうる。
+  - 代わりに、同じ領域で偶然の解(誤答)を出すことは減る(掩蔽の観測では、望遠鏡を誤った向きへ導く誤答のほうが、解なしより害が大きい)。
+- **tune-up は一致が増えたときだけ**:
+  - 1e5 個を超えてから tune-up で上がり、一致が増えない本物の候補も捨てる。実測では s-30d-r3 の index-4112(N = 5,820,011、17.7 → 30.9、一致 24 → 24)の 1 候補。
+    この画像は N = 5,523 に別の仮説で解けているので、結果は変わらない。
+  - 区切り 1e5 の根拠は、星 8 個の 3I_00010(N = 4,553)の 1 例だけ。
+- **見送った候補はログに出ない**: 探し尽くしたときの「対数オッズの最大」は改良の前の 4 点の値なので、20.72 を超える値と「解けませんでした」が並ぶことがある。
+  黙って捨てるのは前からの作り(改良で solve を割ったとき)だが、今回の 2 つの条件で起きやすくなった。
+
+**配っているものとの関係**:
+
+- この版(13・14 節)は **Release v7 の exe・`zahyou_engine.py`・配布ページには入っていない**。どれも「v7.0.0」を名乗るが、main の直下のエンジンと Rust のソースだけが新しい判定になる。
+  - 版の文字は変えていない。rs/Cargo.toml・dev/nb_main.py の NB_VERSION・直下のエンジンとも 7.0.0。
+  - 試験 `version_in_docs_matches_cargo` も、release-v7.md 6 節の資産の検査も、正式版どうしの版上げ忘れは見つけられない。
+- 配るときは、exe とエンジンを一緒に作り直して 7.0.1 に上げる(release-v7.md 2 節の 7 か所)。10-19 のようにエンジンだけを差し替えることはしない。
+
+**直したもの**(出力は変わらない):
+
+- 値上げの式の説明の言い過ぎ。「全体の見込みは 1e−4·(1 + ln(N/1e5)) 以下に収まる」は実装が保証する上限ではないので、目安と書き直し、代償を書き足した。直したのは parts.rs・solver_core.py・設計書 3.7 節の 6。
+- 締め切りの後の改良のログ「締め切りを過ぎましたが、解が見つかっているので改良を済ませます」。改良の後の判定で見送ることがあるので、「…、solve を超えた候補があるので改良を済ませます」にした。
+  Rust と Python を同じ文にし、直下のエンジンも build_nb.py で作り直した。dev/test_solver_core.py が見るのは前半の「締め切りを過ぎましたが」だけで、試験の基準値にこの文は入っていない。
+- 4.5 節の Params の一覧に、足した 3 つの値を書き足した。
+- 14.1 の r-oc-ser-194114 の仮説の番号に、区切りの終わりの数を添えた。仮説の番号は 2,663,997 で、判定に使う N は 2,671,113。
+
+**残り**(次に直すなら。どれも Rust と Python を同時に直し、直下のエンジンを作り直す):
+
+- 見送った候補を、探索の終わりの「解けませんでした」の行に件数と最大値で出す。1 候補ごとに出すと、乱数の星野でログの行が増えるので避ける。
+  app の試験 run_solver_vs_python は解法のログの行を Python と 1 行ずつ比べるので、両方に同じ文を足す。
+- 弱い正しい解の前に偽の明るい星を足すなどして、N > 1e5 で初めて正しい quad が出る画像を作る。それを締め切り 300 秒で解き、値上げで落ちるかを確かめる。
+- 星の少ない画像(8〜15 個)を、全天・スケール全域・星図データ全部で解く。N が 1e5 を超える場面があるかを測って、tune_gain_hyps0 を見直す。
+- 値上げを 4 点の検証の値にもかけるか(上限を本当に効かせる案)。出力が変わるので、試験と比較の画像をやり直す。

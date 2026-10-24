@@ -745,9 +745,10 @@ fn verify_and_pick(
             }
             let (wcs, res1) = match refine(field, sc, params, h, params.tweak_order, true, clock) {
                 Err(Abort::TimeUp) => {
-                    // solve を超えた仮説がある(解は見つかっている)ので、締め切りを過ぎても改良は最後まで済ませる
-                    // (中止の合図はそのまま見る)。ここで止めると、解けている画像が「解けず」になる
-                    log("締め切りを過ぎましたが、解が見つかっているので改良を済ませます");
+                    // solve を超えた仮説があるので、締め切りを過ぎても改良は最後まで済ませる(中止の合図はそのまま見る)。
+                    // ここで止めると、解けている画像が「解けず」になる。解として返すかは、改良の後の判定(試した数で上げる値・
+                    // tune-up の一致の増え)で決まるので、ログは「解が見つかった」と言い切らない
+                    log("締め切りを過ぎましたが、solve を超えた候補があるので改良を済ませます");
                     refine(field, sc, params, h, params.tweak_order, true, clock.without_deadline())?
                 }
                 other => other?,

@@ -467,8 +467,14 @@ def sv_accept_logodds(p, nhyp):
     """この探索で nhyp 個の仮説を試したところで、解とみなす対数オッズ(3.7 節の 6)。
 
     nhyp が accept_hyps0 以下なら logodds_solve、超えたら logodds_solve + ln(nhyp / accept_hyps0)。
-    偶然の仮説の尤度比が K を超える見込みは 1 つあたり 1/K 以下なので、k 個目に 1e9·k/1e5 を求めれば、
-    探索全体の誤った解の見込みは試した数によらず 1e−4·(1 + ln(N/1e5)) 以下に収まる(固定の 1e9 なら N/1e9)。
+    考え方: 偶然の仮説の尤度比が K を超える見込みは 1 つあたり 1/K 以下なので、当て直す前の尤度比に k 個目で 1e9·k/1e5 を
+    求めれば、探索全体の見込みは 1e−4·(1 + ln(N/1e5)) 以下になる。ただし実装はこの値を最後の改良(一致した星への当て直し)
+    の後の対数オッズと比べ、tune-up を通らない仮説の入口は固定の logodds_solve のままなので、厳密な上限ではない(その経路で
+    保証されるのは固定の 1e9 と同じ N/1e9 まで)。当て直しの上げ幅が ln(N/1e5) より小さい偶然の解を止める目安で、
+    tune-up 経由の偶然の解は sv_tuneup_accepted が受け持つ。
+    代償: 対数オッズ L の本物の解でも、初めて出るのが N > accept_hyps0·e^(L − logodds_solve) 個目なら捨てる
+    (L = 24 で 2.7e6、26.9 で 4.8e7)。N は探索 1 回で全部の系列にまたがって数えるので、星図データが多いほど・速いほど
+    同じ締め切りの中で基準が厳しくなる(実測の正しい解に L < 50 かつ N > 1e5 は無い。docs/rust-port.md 14.6)。
     """
     n = float(nhyp)
     h0 = float(p.accept_hyps0)
@@ -484,6 +490,8 @@ def sv_tuneup_accepted(p, nhyp, nmatch_before, nmatch_after):
     本物の仮説なら改良で新しい星が並ぶので、nhyp が tune_gain_hyps0 を超えたら、改良後の一致数が 4 点の検証の一致数より
     tune_min_gain 以上多いことを求める。それまでは求めない: 星の少ない画像の本物の解は、星が全部一致済みで増えようがない
     (星 8 個の 3I_00010 は仮説 4,553 個目に tune-up で 21.9・一致 4 → 4 で解ける)。誤った解が出るのは何百万個も試したあと。
+    代償: tune_gain_hyps0 を超えてから tune-up で上がり、一致が増えない本物の候補も捨てる(実測では s-30d-r3 の 1 候補。
+    別の仮説で先に解けていて結果は変わらない)。
     """
     if not (int(p.tune_min_gain) > 0 and float(nhyp) > float(p.tune_gain_hyps0)):
         return True
@@ -1682,10 +1690,11 @@ def _sv_verify_and_pick(field, catalog, f, hy, clock, log, p, st, fl):
             try:
                 wcs, res1 = _sv_refine(field, catalog, f, hy1, p.tweak_order, clock=clock)
             except _SvTimeUp:
-                # solve を超えた仮説がある(解は見つかっている)ので、締め切りを過ぎても改良は最後まで済ませる
-                # (数十 ms。中止の合図はそのまま見る)。ここで None を返すと、解けている画像が「解けず」になる
+                # solve を超えた仮説があるので、締め切りを過ぎても改良は最後まで済ませる(数十 ms。中止の合図はそのまま見る)。
+                # ここで None を返すと、解けている画像が「解けず」になる。解として返すかは、改良の後の判定(試した数で上げる値・
+                # tune-up の一致の増え)で決まるので、ログは「解が見つかった」と言い切らない
                 if log:
-                    log("締め切りを過ぎましたが、解が見つかっているので改良を済ませます")
+                    log("締め切りを過ぎましたが、solve を超えた候補があるので改良を済ませます")
                 wcs, res1 = _sv_refine(field, catalog, f, hy1, p.tweak_order,
                                        clock=_SvClock(None, clock.cancel))
             lo = float(res1["best"][0])
