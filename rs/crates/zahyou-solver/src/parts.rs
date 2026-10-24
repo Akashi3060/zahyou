@@ -859,6 +859,60 @@ pub fn tuneup_accepted(p: &Params, nhyp: u64, nmatch_before: usize, nmatch_after
     nmatch_after >= nmatch_before.saturating_add(p.tune_min_gain)
 }
 
+/// solve を超えて(tune-up で届いたものを含む)改良まで済ませたのに、改良の後の判定で解にしなかった候補のまとめ
+/// (Python の `sv_passed_add`・`sv_passed_note` と st の passed_*)。探索の終わりの「解けませんでした」「解けず」の行に
+/// 件数と最大だけを出す(1 候補ごとに出すと、乱数の星野で行が増えるので)。
+#[derive(Clone, Debug, Default)]
+pub struct PassedOver {
+    /// 改良の後の対数オッズが `accept_logodds` に届かなかった数と、その最大・その候補のときに要った値
+    pub short: u64,
+    pub short_best: f64,
+    pub short_need: f64,
+    /// 値は届いたが、tune-up で上がって改良で一致が増えなかった(`tuneup_accepted`)数と、その改良の後の対数オッズの最大
+    pub nogain: u64,
+    pub nogain_best: f64,
+}
+
+impl PassedOver {
+    /// 改良の後の対数オッズ logodds が、要った値 need に届かなかった候補を数える。
+    pub fn add_short(&mut self, logodds: f64, need: f64) {
+        if self.short == 0 || logodds > self.short_best {
+            self.short_best = logodds;
+            self.short_need = need;
+        }
+        self.short += 1;
+    }
+
+    /// tune-up で上がって改良で一致が増えなかった候補(改良の後の対数オッズ logodds)を数える。
+    pub fn add_nogain(&mut self, logodds: f64) {
+        if self.nogain == 0 || logodds > self.nogain_best {
+            self.nogain_best = logodds;
+        }
+        self.nogain += 1;
+    }
+
+    /// 行の末尾に足す文(見送った候補が無ければ空)。
+    pub fn note(&self) -> String {
+        let mut s = String::new();
+        if self.short > 0 {
+            s.push_str(&format!(
+                "。改良の後の対数オッズが足りず見送った候補 {} 件(最大 {:.1}、要った値 {:.1})",
+                crate::pyfmt::fmt_int(self.short),
+                self.short_best,
+                self.short_need
+            ));
+        }
+        if self.nogain > 0 {
+            s.push_str(&format!(
+                "。tune-up で一致が増えず見送った候補 {} 件(改良の後の対数オッズの最大 {:.1})",
+                crate::pyfmt::fmt_int(self.nogain),
+                self.nogain_best
+            ));
+        }
+        s
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

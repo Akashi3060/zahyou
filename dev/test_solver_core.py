@@ -995,6 +995,41 @@ def case_20_accept_rule():
                      if not bad else "NG: " + "; ".join(bad))
 
 
+def case_21_passed_note():
+    """改良の後の判定で見送った候補のまとめ: 探索の終わりの「解けませんでした」「解けず」の行の末尾に、件数と最大
+    (足りなかったものは、その候補のときに要った値も)を足す。見送りが無ければ何も足さない。
+    合成星野(5205 だけ・ヒント・スケール既知)を、受け入れの値を極端に上げて(accept_hyps0 = 1e-300)解かせると、
+    正しい候補も見送って quad を試し尽くし、最後の行にまとめが出る。既定の値なら解ける。"""
+    p = sc.SvParams()
+    bad = []
+    st = {}
+    if sc.sv_passed_note(st) != "":
+        bad.append(f"見送りが無いのに {sc.sv_passed_note(st)!r}")
+    sc.sv_passed_add(st, "short", 21.0, sc.sv_accept_logodds(p, 200001))
+    sc.sv_passed_add(st, "short", 22.773709888689385, sc.sv_accept_logodds(p, 16187319))
+    sc.sv_passed_add(st, "nogain", 30.9)
+    want = ("。改良の後の対数オッズが足りず見送った候補 2 件(最大 22.8、要った値 25.8)"
+            "。tune-up で一致が増えず見送った候補 1 件(改良の後の対数オッズの最大 30.9)")
+    if sc.sv_passed_note(st) != want:
+        bad.append(f"文 {sc.sv_passed_note(st)!r}")
+    cat = catalog()
+    one = copy.copy(cat)
+    one.series = {k: v for k, v in cat.series.items() if k == 5205}
+    one.files = [f for f in cat.files if f.indexid == 5205]
+    last = {}
+    for what, prm in (("既定", p), ("極端に上げる", sc.SvParams(accept_hyps0=1e-300))):
+        lines = []
+        _, _, _, sol, dt = _solve_synth(one, 5205, 968, 548, 1.4616, False, 71, hint=True, scale_lo=1.3,
+                                        scale_hi=1.6, params=prm, log=lines.append)
+        last[what] = lines[-1] if lines else ""
+        if what == "既定" and (sol is None or "見送った" in last[what]):
+            bad.append(f"{what}: {last[what]}")
+        if what != "既定" and (sol is not None or not last[what].startswith("quad を全部試しても解けませんでした")
+                               or "。改良の後の対数オッズが足りず見送った候補 " not in last[what]):
+            bad.append(f"{what}: {last[what]}")
+    return not bad, (f"文は Rust と同じ形、極端に上げると: {last['極端に上げる']}" if not bad else "NG: " + "; ".join(bad))
+
+
 UNIT = [
     ("01 星の並べ替え(明るい順 → 一様化)", case_01_order, ()),
     ("02 newpoint の quad 作り = 総当たり(4 星・3 星)", case_02_newpoint, ()),
@@ -1017,6 +1052,7 @@ UNIT = [
     ("18 スケールを 1 つの値で・おかしいヒントは ValueError", case_18_scale_point_hint_values, (5206,)),
     ("19 ヒントありの照合でも cancel() の間隔 0.2 秒以内", case_19_check_interval_hint, (4107,)),
     ("20 解の判定(試した数で上げる値・tune-up の一致の増え)", case_20_accept_rule, ()),
+    ("21 判定で見送った候補のまとめ(探索の終わりの行)", case_21_passed_note, (5205,)),
 ]
 
 

@@ -307,11 +307,12 @@ pub(crate) fn solve_in(
         Ok(None) => ("unsolved", Ok(None)),
         Err(Abort::TimeUp) => {
             log(&format!(
-                "締め切り: quad {} 個・仮説 {} 個を試して解けず(対数オッズの最大 {:.1}、{:.1} 秒)",
+                "締め切り: quad {} 個・仮説 {} 個を試して解けず(対数オッズの最大 {:.1}、{:.1} 秒){}",
                 pyfmt::fmt_int(st.quads),
                 pyfmt::fmt_int(st.hyps),
                 st.logodds_max,
-                t0.elapsed().as_secs_f64()
+                t0.elapsed().as_secs_f64(),
+                st.passed.note()
             ));
             ("deadline", Ok(None))
         }

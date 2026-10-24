@@ -1954,6 +1954,33 @@ def sv_tuneup_accepted(p, nhyp, nmatch_before, nmatch_after):
     return int(nmatch_after) >= int(nmatch_before) + int(p.tune_min_gain)
 
 
+def sv_passed_add(st, kind, logodds, need=None):
+    """solve を超えて(tune-up で届いたものを含む)改良まで済ませたのに、改良の後の判定で解にしなかった候補を st に数える。
+
+    kind は "short"(改良の後の対数オッズ logodds が sv_accept_logodds の値 need に届かない。最大の候補のときの need も
+    覚える)か "nogain"(届いたが、tune-up で上がって改良で一致が増えない。sv_tuneup_accepted)。Rust の parts::PassedOver。
+    """
+    k = f"passed_{kind}"
+    if st.get(k, 0) == 0 or logodds > st[k + "_best"]:
+        st[k + "_best"] = logodds
+        if need is not None:
+            st[k + "_need"] = need
+    st[k] = st.get(k, 0) + 1
+
+
+def sv_passed_note(st):
+    """sv_passed_add で数えた候補を、探索の終わりの「解けませんでした」「解けず」の行の末尾に足す文にする(無ければ空)。
+    件数と最大だけを出す(1 候補ごとに出すと、乱数の星野で行が増えるので)。Rust の PassedOver::note と同じ文。"""
+    out = ""
+    if st.get("passed_short", 0):
+        out += (f"。改良の後の対数オッズが足りず見送った候補 {st['passed_short']:,} 件"
+                f"(最大 {st['passed_short_best']:.1f}、要った値 {st['passed_short_need']:.1f})")
+    if st.get("passed_nogain", 0):
+        out += (f"。tune-up で一致が増えず見送った候補 {st['passed_nogain']:,} 件"
+                f"(改良の後の対数オッズの最大 {st['passed_nogain_best']:.1f})")
+    return out
+
+
 def _sv_chunks(sizes, per, limit):
     """sizes の小さい順に並べた仮説を、「束の数 × per × 束の中の最大」が limit を超えないように区切る。
 
@@ -2914,7 +2941,8 @@ def sv_solve(xy, flux, width, height, catalog, *, scale_lo=None, scale_hi=None, 
         status = "deadline"
         if log:
             log(f"締め切り: quad {st['quads']:,} 個・仮説 {st['hyps']:,} 個を試して解けず"
-                f"(対数オッズの最大 {st.get('logodds_max', -math.inf):.1f}、{time.monotonic() - t0:.1f} 秒)")
+                f"(対数オッズの最大 {st.get('logodds_max', -math.inf):.1f}、{time.monotonic() - t0:.1f} 秒)"
+                + sv_passed_note(st))
     except SvCancelled:
         status = "cancelled"
         raise
@@ -2996,7 +3024,8 @@ def _sv_search(xy, flux, width, height, catalog, scale_lo, scale_hi, hint, clock
             return sol
     if log:
         log(f"quad を全部試しても解けませんでした(quad {st['quads']:,} 個・仮説 {st['hyps']:,} 個、"
-            f"対数オッズの最大 {st.get('logodds_max', -math.inf):.1f}、{time.monotonic() - t0:.1f} 秒)")
+            f"対数オッズの最大 {st.get('logodds_max', -math.inf):.1f}、{time.monotonic() - t0:.1f} 秒)"
+            + sv_passed_note(st))
     return None
 
 
@@ -3155,10 +3184,12 @@ def _sv_verify_and_pick(field, catalog, f, hy, clock, log, p, st, fl):
                                        clock=_SvClock(None, clock.cancel))
             lo = float(res1["best"][0])
             if not (lo >= accept):
+                sv_passed_add(st, "short", lo, accept)
                 continue
             # 試した仮説が多くなってから tune-up で上がった仮説は、改良で一致が増えたときだけ解にする
             # (同じ星への当て直しだけで上がったものは偶然)
             if tuned and not sv_tuneup_accepted(p, st["hyps"], int(nmatch[i]), int(res1["nmatch"][0])):
+                sv_passed_add(st, "nogain", lo)
                 continue
             return SvSolution(
                 wcs=wcs, logodds=lo, nmatch=int(res1["nmatch"][0]), ndistract=int(res1["ndistract"][0]),

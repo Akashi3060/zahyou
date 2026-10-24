@@ -188,6 +188,7 @@ fn dense_deep_request() -> Option<SolveRequest> {
 ///
 /// 条件ごとに締め切りまで(既定 180 秒。この機械では約 28 秒で quad を試し尽くす)探し、仮説 16,187,319 個目を
 /// 越えたところまで試したことも確かめる(越える前に締め切りが来たら、確かめられなかったとして失敗にする)。
+/// 止めたときは、探索の終わりの行に、見送ったその候補のまとめ(条件ごとの文・最大 22.8)が付くことも確かめる。
 /// 両方を外したときは、系列・対数オッズのビット・一致の数・仮説の番号まで前と同じ誤った解になる
 /// (探す順が変わっていないことと、止めているのがこの 2 つの条件であることの確かめ)。
 #[test]
@@ -206,13 +207,16 @@ fn negative_dense_accept_rule() {
     let _g = heavy();
     let mut bad = Vec::new();
     let d = Params::default();
+    // 止めたときの最後の行の末尾(見送った候補のまとめ)。止めたのはどれもこの誤った解 1 件だけ
+    let short = "。改良の後の対数オッズが足りず見送った候補 1 件(最大 22.8、要った値 25.8)";
+    let nogain = "。tune-up で一致が増えず見送った候補 1 件(改良の後の対数オッズの最大 22.8)";
     let cases = [
-        ("既定(両方の条件)", d.clone(), false),
-        ("tune-up の一致の増えだけ", Params { accept_hyps0: f64::INFINITY, ..d.clone() }, false),
-        ("試した数の値上げだけ", Params { tune_min_gain: 0, ..d.clone() }, false),
-        ("両方を外す", Params { tune_min_gain: 0, accept_hyps0: f64::INFINITY, ..d.clone() }, true),
+        ("既定(両方の条件)", d.clone(), false, short),
+        ("tune-up の一致の増えだけ", Params { accept_hyps0: f64::INFINITY, ..d.clone() }, false, nogain),
+        ("試した数の値上げだけ", Params { tune_min_gain: 0, ..d.clone() }, false, short),
+        ("両方を外す", Params { tune_min_gain: 0, accept_hyps0: f64::INFINITY, ..d.clone() }, true, ""),
     ];
-    for (what, p, expect_false) in cases {
+    for (what, p, expect_false, note) in cases {
         let buf = LogBuf::default();
         let (r, dt, trace) = solve_traced(&req, &cat, &p, deadline, &buf);
         let tried = trace.as_ref().and_then(|t| t["hypotheses"].as_u64()).unwrap_or(0);
@@ -239,8 +243,13 @@ fn negative_dense_accept_rule() {
             continue;
         }
         match r {
-            Ok(None) if tried > DENSE_FALSE_HYPS => {
+            Ok(None) if tried > DENSE_FALSE_HYPS && buf.tail(1).ends_with(note) => {
                 row("PASS", &label, &format!("解なし(仮説 {tried} 個を試した、{dt:.2} 秒)  ログ: {}", buf.tail(1)));
+            }
+            Ok(None) if tried > DENSE_FALSE_HYPS => {
+                let m = format!("解なしだが、最後の行が「…{note}」で終わらない: {}", buf.tail(1));
+                row("FAIL", &label, &m);
+                bad.push(format!("{label}: {m}"));
             }
             Ok(None) => {
                 let m = format!("仮説 {tried} 個で締め切り({dt:.2} 秒)。{DENSE_FALSE_HYPS} 個目まで届かず確かめられない");
