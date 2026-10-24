@@ -833,7 +833,8 @@ pub fn healpix_side_rad(nside: u32) -> f64 {
 /// tune-up 経由の偶然の解は `tuneup_accepted` が受け持つ。
 /// 代償: 対数オッズ L の本物の解でも、初めて出るのが N > accept_hyps0·e^(L − logodds_solve) 個目なら捨てる
 /// (L = 24 で 2.7e6、26.9 で 4.8e7)。N は探索 1 回で全部の系列にまたがって数えるので、星図データが多いほど・速いほど
-/// 同じ締め切りの中で基準が厳しくなる(実測の正しい解に L < 50 かつ N > 1e5 は無い。docs/rust-port.md 14.6)。
+/// 同じ締め切りの中で基準が厳しくなる(比較の画像の正しい解に L < 50 かつ N > 1e5 は無いが、星の少ない画像に偽の検出を足して
+/// 作ると、仮説 1e5 個を超えて初めて出る 21〜22 の正しい解を落とす。docs/rust-port.md 14.6)。
 pub fn accept_logodds(p: &Params, nhyp: u64) -> f64 {
     let n = nhyp as f64;
     if p.accept_hyps0 > 0.0 && n > p.accept_hyps0 {
@@ -850,8 +851,9 @@ pub fn accept_logodds(p: &Params, nhyp: u64) -> f64 {
 /// 本物の仮説なら改良で新しい星が並ぶので、nhyp が tune_gain_hyps0 を超えたら、改良後の一致数が 4 点の検証の一致数より
 /// tune_min_gain 以上多いことを求める。それまでは求めない: 星の少ない画像の本物の解は、星が全部一致済みで増えようがない
 /// (星 8 個の 3I_00010 は仮説 4,553 個目に tune-up で 21.9・一致 4 → 4 で解ける)。誤った解が出るのは何百万個も試したあと。
-/// 代償: tune_gain_hyps0 を超えてから tune-up で上がり、一致が増えない本物の候補も捨てる(実測では s-30d-r3 の 1 候補。
-/// 別の仮説で先に解けていて結果は変わらない)。
+/// 代償: tune_gain_hyps0 を超えてから tune-up で上がり、一致が増えない本物の候補も捨てる(比較の画像では s-30d-r3 の 1 候補で、
+/// 別の仮説で先に解けていて結果は変わらない。星の少ない画像に偽の検出を足して作ると、1e5 個のすぐ上で正しい解を落とす。
+/// docs/rust-port.md 14.6)。
 pub fn tuneup_accepted(p: &Params, nhyp: u64, nmatch_before: usize, nmatch_after: usize) -> bool {
     if !(p.tune_min_gain > 0 && (nhyp as f64) > p.tune_gain_hyps0) {
         return true;
