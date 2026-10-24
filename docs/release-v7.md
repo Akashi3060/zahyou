@@ -813,3 +813,43 @@ Release v7 の zahyou_engine.py と SHA256SUMS.txt、配布ページの zahyou_e
   - `version_text` は、画面の版名を cargo が分けた数から組み立て直した版名と比べる。
   - `version_in_docs_matches_cargo` は、NB_VERSION が版名か、直下に `zahyou_v<大きな版>.ipynb` があるかも見る。
   - `test_make_release_assets.py` に `version_label`・`notebook_repo_path` の試験を足した。
+
+### v8 の準備(2026-10-24。ユーザーの指示「次の版を v8 として準備して。…Release の公開と配布ページの差し替えの前に確認して」)
+
+ブランチ `v8`(worktree `GitHub\zahyou-v8`)。中身は main(13 節の高速化・14 節の解の判定の直し・版名を整数の形にする PR #43)に、次の版上げを足したもの。
+
+- **版**: `rs/Cargo.toml` を `8.0.0` に(版名 `v8`)。`Cargo.lock` は cargo が更新した。2 節の表のとおり、次のものを直した。
+  - `zahyou_v7.ipynb` を `zahyou_v8.ipynb` に改名(git mv)
+  - `NB_VERSION = "v8"` にして、`build_nb.py` で直下のエンジンを作り直した
+  - `gen_notices.py` で同梱物の表示を作り直した(MIT の範囲の一覧のノートブックの名前)
+  - README・`dev/make_manual.py`・`dev/README.md` を v8 向けにした。v7 で測った表は v7 の値のまま断りを入れ、比べの表は v7 の行のまま
+  - `app-help.png` を撮り直し、マニュアル v4 を組み直した(33 ページ。表紙は 1 ページ)
+- **exe**: 4 節の置き換えを付けて建てた。
+  - 14,243,328 バイト、SHA256 `5bae6911d557ded9c7a3f60d7d966881824aded8c46ac9093f2d3e8ad9be937b`。作者のホームのパスは 0 か所(`/cargo` 502・`/zahyou` 2)
+  - `--engine-check` の version=v8、`--selftest --offline` 25/25
+  - `--update-check` は「最新版です (v8)。公開されている最新版 v7 より新しい版を使っています。」
+  - 最初の描画まで: DirectX 12 で 0.39〜0.45 秒、OpenGL で 0.48〜0.55 秒(3 回ずつ。README の「起動と大きさ」とマニュアル 3.2 に入れた)
+  - 道具: rustc 1.94.0・cargo 1.94.0(MSYS2)・gcc 15.2.0
+- **試験**: main を取り込む前に `cargo test --workspace -- --include-ignored --skip live` で 320/320(20 分 41 秒)。
+  取り込んだあとに `cargo test --workspace -- --skip live` で 311 本通過・失敗 0、`clippy -D warnings` 指摘 0、`test_make_release_assets.py` 通過。
+  どれも 4 節の置き換えを付けて回した。
+- **資産**(6 節): `%USERPROFILE%\zahyou-dist-v8`。5 つの検査が全部 OK で、`sha256sum -c` も OK だった。
+
+```
+5bae6911d557ded9c7a3f60d7d966881824aded8c46ac9093f2d3e8ad9be937b  zahyou.exe
+ab742a7918588ae14b160a5e281b022200ea8108f12c7bd3a95d5cf111aaf784  zahyou_v8.ipynb
+0ce0febe4ff2ecaadad078c9b605e011b230b199408b1599e3394daff2b805dc  zahyou_engine.py
+6251de0de22ceef82f113729fd8dbb84350febf26acdb7ed3aba3a4e74b89d10  zahyou-manual-v4.pdf
+4efc7babf6be215d508636aefa67428a28d1c9977b02d1b580c47b26dd34a3f8  LICENSE.txt
+f677908c1c64fc1965de7076c670f5ed7ef6cf773a6296be35b35e60e40b451e  THIRD-PARTY-NOTICES.md
+```
+
+  - `zahyou_v8.ipynb` はセルの中身が v7 と同じなので、SHA256 も v7 の `zahyou_v7.ipynb` と同じ。
+  - セル C の出力の例は、v6 で走らせたときの「zahyou v6」のまま(8 節の 3 の任意の差し替えはしていない)。
+- **残り**(ユーザーの了承のあとで、この順に):
+  1. PR を merge commit で main へ
+  2. 統合した commit にタグ `v8`
+  3. 8 節の 4 の形で Release を下書き → 中身を見る → `--latest` で出す
+  4. 8 節の 5 の確かめ(`releases/latest` が v8、資産の digest、配っている v7 の exe の「更新を確認」で v8 が出て入れ替わること)
+  5. 配布ページ(Nextcloud)の差し替え(8 節の手順。`zahyou_v8.ipynb` は新しい名前のファイル)
+  6. wiki(GitHub の zahyou.wiki)の版の書き方を v8 に
