@@ -229,7 +229,8 @@ fn help_lines() -> Vec<(Tag, String)> {
     add(Plain, "要らなければマニュアル 9 章の手順で消せます。");
     add(Plain, "やめるときは、zahyou.exe と上の置き場所を消してください。");
     add(Plain, "星図データ (C:\\AstrometryData) は、使わないならフォルダーごと消せます。");
-    // β版の間だけ(正式版に上げれば出なくなる)
+    // β版の間だけ(正式版に上げれば出なくなる)。v7 のβ版のときの文。次の大きな版のβ版を出すときは書き直す
+    // (試験 beta_版の間だけ更新の扱いを説明する が大きな版の食い違いで落ちる。docs/release-v7.md 2 節)
     if zahyou_net::update::prerelease_label(APP_VER).is_some() {
         add(Muted, "この版は v7 のβ版です。上の「更新を確認」は、GitHub の Releases から");
         add(Muted, "次のβ版と v7 の正式版を探します。β版は v6 の「更新を確認」には出てきません。");
@@ -402,7 +403,9 @@ mod tests {
     fn beta_版の間だけ更新の扱いを説明する() {
         let text: String = help_lines().into_iter().map(|(_, s)| s + "\n").collect();
         let beta = zahyou_net::update::prerelease_label(APP_VER).is_some();
-        assert_eq!(text.contains("この版は v7 のβ版です。"), beta, "β版の説明の有無が版名と合わない ({APP_VER})");
+        // 大きな版を版から組み立てて探す(β版を出すときに説明の「v7」を書き直し忘れると落ちる。docs/release-v7.md 2 節)
+        let intro = format!("この版は v{} のβ版です。", env!("CARGO_PKG_VERSION_MAJOR"));
+        assert_eq!(text.contains(&intro), beta, "β版の説明の有無が版名と合わない ({APP_VER})");
         assert_eq!(crate::prerelease_suffix().is_empty(), !beta);
         // 起動のログの 1 行目も同じ(β版なら「(β版・Rust 版)」)
         let line = crate::ui::app::startup_line("F");

@@ -498,6 +498,15 @@ def fence(text: str) -> str:
     return f"{f}text\n{text}\n{f}"
 
 
+def notebook_name() -> str:
+    """配るノートブックの名前 zahyou_v<大きな版>.ipynb(rs/Cargo.toml の版から。dev/build_nb.py・make_release_assets.py と同じ)。
+    版を上げると表示の中身が変わるので、`--check` が作り直しを求める(作り直したら exe も建て直す)"""
+    import tomllib
+    with open(cd.RS_DIR / "Cargo.toml", "rb") as f:
+        version = tomllib.load(f)["workspace"]["package"]["version"]
+    return f"zahyou_v{version.split('.')[0]}.ipynb"
+
+
 def md_cell(s: str) -> str:
     return s.replace("|", "\\|").replace("\n", " ")
 
@@ -515,7 +524,7 @@ HEAD = """\
 下の LICENSE —— MIT ライセンス —— が及ぶのは **zahyou 自身のソースコードだけ**です。
 
     rs/app/ / rs/crates/ / rs/tools/ / rs/testdata/(Rust 版)
-    zahyou_engine.py / zahyou_v7.ipynb / dev/ / docs/(Python 版)
+    zahyou_engine.py / {notebook} / dev/ / docs/(Python 版)
 
 オフライン解析のエンジン(`zahyou-solver`・`zahyou-index`・`zahyou-wcs`)も zahyou 自身のコードです。
 `zahyou.exe` に入っている第三者のソフトウェア(この文書の後半)、星図データ
@@ -611,7 +620,7 @@ def render(col: Collected, tc: Toolchain) -> str:
     if lic_text is None:
         raise SystemExit(f"!! zahyou の LICENSE がありません: {cd.REPO_DIR / 'LICENSE'}")
     out: list[str] = [HEAD.format(license=fence(lic_text), lang=LANG_REF, catalogs=CATALOG_REFS,
-                                  gaia_ack=GAIA_ACK, simbad_ack=SIMBAD_ACK)]
+                                  gaia_ack=GAIA_ACK, simbad_ack=SIMBAD_ACK, notebook=notebook_name())]
     w = out.append
     pkgs = deps.runtime
     by_id = {p.id: p for p in pkgs}
