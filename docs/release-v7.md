@@ -898,7 +898,7 @@ f677908c1c64fc1965de7076c670f5ed7ef6cf773a6296be35b35e60e40b451e  THIRD-PARTY-NO
    - `zahyou_v7.ipynb` は中身が v8 と同じなので、`mv` で `zahyou_v8.ipynb` にした。
    - 公開 URL(public.php/webdav)から 6 つを落として、SHA256 が資産と同じことを確かめた。一覧に v7 の名前は残っていない。
    - 置き場の `_claude-tmp` は root で消した。台本・ログ・本文・説明文の控えは作者の手元の `Documents\claude\zahyou\release-backup\v8-release-20261025\`。
-7. wiki(11 ページのうち Home・_Sidebar ほか 11 ファイル)を v8 に直した()。Home に「v8 で変わったこと」、更新とアンインストールに「v7 から入れ替える」を足し、
+7. wiki の 11 ファイル(Home・_Sidebar ほか)を v8 に直した(wiki の `634ad4e`)。Home に「v8 で変わったこと」、更新とアンインストールに「v7 から入れ替える」を足し、
    ノートブックの名前・題の例・起動と大きさを v8 に。v7 で測った表と、ほかのソフトとの比較(v7.0.0 で測った)は、v7 の値のまま断りを入れた。
-8. v7 の Release の本文の大文字の SHA256 を、v7 の zahyou.exe の digest()に直した(変えたのはその 1 行だけ。latest は v8 のまま)。
+8. v7 の Release の本文の大文字の SHA256 を、v7 の zahyou.exe の digest(`5AB3DEC6…`)に直した(変えたのはその 1 行だけ。latest は v8 のまま)。
    直す前と後の本文は作者の手元の控え(上と同じフォルダー)。
