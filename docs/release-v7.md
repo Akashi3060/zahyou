@@ -878,3 +878,23 @@ f677908c1c64fc1965de7076c670f5ed7ef6cf773a6296be35b35e60e40b451e  THIRD-PARTY-NO
   7. wiki(GitHub の zahyou.wiki)で、v7 を今の版として書いている所を v8 に(v7 で測った記録は残す)
   8. v7 の Release の本文の誤り: 「中身が本物か確かめたい方は」の大文字の SHA256(`AE4BC3C9…`)は β2 の exe の値で、
      v7 の zahyou.exe の digest(`5AB3DEC6…`)と違う。直すなら `gh release edit v7 --notes-file`(ユーザーの了承のあとで)
+
+### v8(タグ `v8`。2026-10-25 12:16 JST に公開。ユーザーの指示「v8 を公開して、配布ページも差し替えて。」)
+
+上の「残り」の 1〜6 をこの順に行った。7(wiki)と 8(v7 の本文の SHA256)はまだ。
+
+1. PR #44 を merge commit で main へ(`f3ff657`)。
+2. ブランチ `v8` を消した(origin・worktree・手元)。
+3. タグ `v8` を `f3ff657` に打って push。`git ls-remote` は `refs/tags/v8` だけを出した。
+4. 下書きを作り、確かめた: prerelease=false・題「zahyou v8」・資産 7 つ。資産の digest は 6 つとも SHA256SUMS.txt と同じ。
+   本文のリンク 17 個はどれも 200、本文の大文字の SHA256 は zahyou.exe の digest と同じ。そのあと `--latest` で出し、`releases/latest` は v8 になった。
+5. 配っている v7 の exe(Release v7 から落とした `5ab3dec6…`)の写しを一時のフォルダーに置き、一時の LOCALAPPDATA で `--update-check --update-apply` を動かした。
+   - 「新しい版があります: v8 (2026-10-25 版 / 14 MB)」と出て、落とした exe の SHA256 が一致し、入れ替わった(`zahyou.exe` = `86d1e160…`、`zahyou.exe.old` = v7)。
+   - v8 を画面で 1 回起動すると、`zahyou.exe.old` が消えた(API キーを空にしてオフラインのみで起動し、起動したその 1 つだけを PID で閉じた)。
+   - 利用者の cache.json・gui.json は前後で同じ。
+6. 配布ページを差し替えた。TrueNAS の root(一時 cronjob)で、台本は先に新しいファイルの SHA256 と、今の中身が v7 であることを確かめる。
+   - `cat >` で中身を入れ替えたもの: `zahyou.exe`・`zahyou_engine.py`・`THIRD-PARTY-NOTICES.md`・マニュアル v4・`はじめにお読みください.txt`(v8 向け。BOM 付き・CRLF)。
+     inode・所有者(AstroKIT:YoFu)・ACL は前のまま。
+   - `zahyou_v7.ipynb` は中身が v8 と同じなので、`mv` で `zahyou_v8.ipynb` にした。
+   - 公開 URL(public.php/webdav)から 6 つを落として、SHA256 が資産と同じことを確かめた。一覧に v7 の名前は残っていない。
+   - 置き場の `_claude-tmp` は root で消した。台本・ログ・本文・説明文の控えは作者の手元の `Documents\claude\zahyou\release-backup\v8-release-20261025\`。
