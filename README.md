@@ -845,6 +845,7 @@ python rs/tools/make_release_assets.py --exe <zahyou.exe> --out <フォルダー
 `test_robust.py` が作る `dev/tcase` の画像 (解けてはいけない画像) だけです。ほかの画像は、
 リポジトリの中 (`dev/realcase` など。git には入れていない) か、環境変数 `ZAHYOU_TEST_IMAGES`
 (既定はホームフォルダー) の下に、正解ファイル `dev/solver_truth.json` の path と同じ並びで置けば走ります。
+`Downloads/…` の画像がそこに無いときは、同じ並びの控え (`Documents/claude/zahyou/testdata/images/Downloads/…`。作者の PC の置き場) も探します。
 陽性の画像が 1 枚も走らなかったときは、そう表示して終了コード 2 で終わります。
 
 ---

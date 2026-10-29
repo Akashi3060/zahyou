@@ -27,6 +27,21 @@ pub fn zahyou_dev() -> PathBuf {
     std::env::var_os("ZAHYOU_DEV").map(PathBuf::from).unwrap_or_else(|| repo_root().join("dev"))
 }
 
+/// "$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を base からの相対で実際のパスに。`Downloads/…` がそこに無ければ、同じ並びの控え
+/// (作者の PC の `Documents/claude/zahyou/testdata/images/` の下。Downloads を整理するので写してある。2026-10-29)も見る
+/// (dev/test_solver_real.py の images_path と同じ決まり)。
+fn images_path(base: PathBuf, rest: &str) -> PathBuf {
+    let p = rest.split('/').fold(base.clone(), |b, s| b.join(s));
+    if !p.exists() && rest.starts_with("Downloads/") {
+        let copy = ["Documents", "claude", "zahyou", "testdata", "images"].iter().fold(base, |b, s| b.join(s));
+        let q = rest.split('/').fold(copy, |b, s| b.join(s));
+        if q.exists() {
+            return q;
+        }
+    }
+    p
+}
+
 /// image_pipeline.json の path をこの PC のパスにする(gen_image.py の image_path と同じ決まり)。
 /// `$ZAHYOU_TEST_IMAGES/…` は環境変数 ZAHYOU_TEST_IMAGES(無ければホームフォルダー)からの相対。
 /// それ以外はリポジトリからの相対で、`dev/…` がリポジトリに無ければ $ZAHYOU_DEV、隣の ../zahyou/dev の順に探す。
@@ -38,7 +53,7 @@ pub fn image_path(p: &str) -> PathBuf {
             .or_else(|| std::env::var_os("HOME"))
             .map(PathBuf::from)
             .unwrap_or_default();
-        return join(base, rest);
+        return images_path(base, rest);
     }
     let first = join(repo_root(), p);
     let mut cands = vec![first.clone()];

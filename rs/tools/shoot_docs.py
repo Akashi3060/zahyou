@@ -50,6 +50,10 @@ WIN_W, WIN_H = 1180, 780  # --shot の既定の窓の大きさ(論理座標)
 TARGET = "UCAC4 660-021020"
 TARGET_SEED = {"ra": 61.91199157844, "dec": 41.98626242835, "name": TARGET}
 DEFAULT_IMAGE = Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Downloads" / "Capture_00001 00_10_33.fits"
+if not DEFAULT_IMAGE.is_file():   # Downloads を整理したあとは、同じ並びの控え(dev/test_solver_real.py の images_path と同じ)
+    _copy = DEFAULT_IMAGE.parents[1] / "Documents" / "claude" / "zahyou" / "testdata" / "images" / "Downloads" / DEFAULT_IMAGE.name
+    if _copy.is_file():
+        DEFAULT_IMAGE = _copy
 
 # 通信を手元で止めるプロキシ(0.0.0.0 へはつなげないので、外へ出る前にすぐ失敗する = os error 10049)
 DEAD_PROXY = "http://0.0.0.0:9"

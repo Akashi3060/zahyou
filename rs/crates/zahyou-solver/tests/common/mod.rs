@@ -72,12 +72,27 @@ pub fn load_truth() -> Option<Value> {
     Some(serde_json::from_str(&s).expect("solver_truth.json"))
 }
 
+/// "$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を base からの相対で実際のパスに。`Downloads/…` がそこに無ければ、同じ並びの控え
+/// (作者の PC の `Documents/claude/zahyou/testdata/images/` の下。Downloads を整理するので写してある。2026-10-29)も見る
+/// (dev/test_solver_real.py の images_path と同じ決まり)。
+fn images_path(base: PathBuf, rest: &str) -> PathBuf {
+    let p = rest.split('/').fold(base.clone(), |b, s| b.join(s));
+    if !p.exists() && rest.starts_with("Downloads/") {
+        let copy = ["Documents", "claude", "zahyou", "testdata", "images"].iter().fold(base, |b, s| b.join(s));
+        let q = rest.split('/').fold(copy, |b, s| b.join(s));
+        if q.exists() {
+            return q;
+        }
+    }
+    p
+}
+
 /// solver_truth.json の path をこの PC のパスにする($ZAHYOU_TEST_IMAGES/ か、リポジトリからの相対)。
 pub fn image_path(rel: &str) -> PathBuf {
     const VAR: &str = "$ZAHYOU_TEST_IMAGES/";
     if let Some(rest) = rel.strip_prefix(VAR) {
         let base = std::env::var_os("ZAHYOU_TEST_IMAGES").map(PathBuf::from).unwrap_or_else(home_dir);
-        return rest.split('/').fold(base, |p, s| p.join(s));
+        return images_path(base, rest);
     }
     let q = rel.split('/').fold(repo_dir(), |p, s| p.join(s));
     if q.is_file() {
