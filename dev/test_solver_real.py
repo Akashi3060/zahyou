@@ -58,12 +58,28 @@ REPO = os.path.dirname(HERE)
 IMAGES_VAR = "$ZAHYOU_TEST_IMAGES/"
 
 
+# Downloads の試験画像の控え(作者の PC では Downloads を整理するので、試験が読む元の画像を同じ並びで写してある。2026-10-29)
+TEST_IMAGES_COPY = ("Documents", "claude", "zahyou", "testdata", "images")
+
+
+def images_path(rest):
+    """"$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を実際のパスに。ZAHYOU_TEST_IMAGES(無ければホームフォルダー)からの相対で、
+    Downloads/… がそこに無ければ、同じ並びの控え(TEST_IMAGES_COPY の下)も見る。"""
+    base = os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~")
+    parts = rest.split("/")
+    p = os.path.join(base, *parts)
+    if not os.path.exists(p) and parts[0] == "Downloads":
+        q = os.path.join(base, *TEST_IMAGES_COPY, *parts)
+        if os.path.exists(q):
+            return q
+    return p
+
+
 def image_path(e):
     """正解ファイルの path を、この PC のパスにする(リポジトリからの相対か $ZAHYOU_TEST_IMAGES/ から)。"""
     p = e["path"]
     if p.startswith(IMAGES_VAR):
-        base = os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~")
-        return os.path.join(base, *p[len(IMAGES_VAR):].split("/"))
+        return images_path(p[len(IMAGES_VAR):])
     return os.path.join(REPO, *p.split("/"))
 
 

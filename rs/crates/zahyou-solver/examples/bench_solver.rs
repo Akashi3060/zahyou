@@ -26,6 +26,21 @@ use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+
+/// "$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を base からの相対で実際のパスに。`Downloads/…` がそこに無ければ、同じ並びの控え
+/// (作者の PC の `Documents/claude/zahyou/testdata/images/` の下。Downloads を整理するので写してある。2026-10-29)も見る
+/// (dev/test_solver_real.py の images_path と同じ決まり)。
+fn images_path(base: PathBuf, rest: &str) -> PathBuf {
+    let p = rest.split('/').fold(base.clone(), |b, s| b.join(s));
+    if !p.exists() && rest.starts_with("Downloads/") {
+        let copy = ["Documents", "claude", "zahyou", "testdata", "images"].iter().fold(base, |b, s| b.join(s));
+        let q = rest.split('/').fold(copy, |b, s| b.join(s));
+        if q.exists() {
+            return q;
+        }
+    }
+    p
+}
 use zahyou_image::{DetectOpts, detect_sources, load_image_any, preprocess};
 use zahyou_index::Catalog;
 use zahyou_solver::{Control, FieldStar, OfflineRequest, Params, SolveRequest, Solution};
@@ -228,7 +243,7 @@ fn main() -> ExitCode {
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
             .unwrap_or_default();
-        let path = rel.strip_prefix("$ZAHYOU_TEST_IMAGES/").map(|r| r.split('/').fold(base, |p, s| p.join(s)));
+        let path = rel.strip_prefix("$ZAHYOU_TEST_IMAGES/").map(|r| images_path(base, r));
         if let Some(path) = path.filter(|p| p.is_file())
             && (pick.is_none() || want("solve_offline"))
             && let Ok(l) = load_image_any(&path)

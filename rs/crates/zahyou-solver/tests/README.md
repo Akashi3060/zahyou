@@ -45,7 +45,7 @@ Rust の trace は Python と同じく仮説のスケールを 6 桁・対数オ
 |---|---|---|
 | `ZAHYOU_INDEX_DIR` | `C:\AstrometryData` | 星図データ |
 | `ZAHYOU_TESTDATA` | `rs/testdata` | 基準値の JSON |
-| `ZAHYOU_TEST_IMAGES` | ホームフォルダー | `$ZAHYOU_TEST_IMAGES/` で始まる画像の基点 |
+| `ZAHYOU_TEST_IMAGES` | ホームフォルダー | `$ZAHYOU_TEST_IMAGES/` で始まる画像の基点(`Downloads/…` が無ければ、その下の `Documents/claude/zahyou/testdata/images/Downloads/…` の控えも見る) |
 | `ZAHYOU_PY_REPO` | `~/Documents/GitHub/zahyou` | `dev/realcase`・`dev/tcase`(.gitignore)の画像を探す Python 版のリポジトリ |
 | `ZAHYOU_SOLVER_DEADLINE` | 120 | 解ける場合の 1 回の締め切り [秒] |
 | `ZAHYOU_NEG_DEADLINE` | 8(既定)/ 30(`--ignored`) | 陰性の締め切り [秒] |

@@ -2675,6 +2675,20 @@ pub(crate) mod pyref {
     fn home_dir() -> PathBuf {
         std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).unwrap_or_default()
     }
+    /// "$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を base からの相対で実際のパスに。`Downloads/…` がそこに無ければ、同じ並びの控え
+    /// (作者の PC の `Documents/claude/zahyou/testdata/images/` の下。Downloads を整理するので写してある。2026-10-29)も見る
+    /// (dev/test_solver_real.py の images_path と同じ決まり)。
+    fn images_path(base: PathBuf, rest: &str) -> PathBuf {
+        let p = rest.split('/').fold(base.clone(), |b, s| b.join(s));
+        if !p.exists() && rest.starts_with("Downloads/") {
+            let copy = ["Documents", "claude", "zahyou", "testdata", "images"].iter().fold(base, |b, s| b.join(s));
+            let q = rest.split('/').fold(copy, |b, s| b.join(s));
+            if q.exists() {
+                return q;
+            }
+        }
+        p
+    }
 
     /// 基準値(run_solver.json・pipeline_run.json)の画像のパス("$ZAHYOU_TEST_IMAGES/…" か、リポジトリからの相対)を
     /// 実際のパスに。$ZAHYOU_TEST_IMAGES の既定はホームフォルダー。リポジトリに無いもの(dev/tcase・dev/realcase は
@@ -2683,7 +2697,7 @@ pub(crate) mod pyref {
     pub(crate) fn resolve_image(p: &str) -> PathBuf {
         if let Some(rest) = p.strip_prefix("$ZAHYOU_TEST_IMAGES/") {
             let base = std::env::var_os("ZAHYOU_TEST_IMAGES").map(PathBuf::from).unwrap_or_else(home_dir);
-            return rest.split('/').fold(base, |b, s| b.join(s));
+            return images_path(base, rest);
         }
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
         let here = p.split('/').fold(repo, |b, s| b.join(s));

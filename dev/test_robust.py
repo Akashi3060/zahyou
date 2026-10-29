@@ -23,6 +23,23 @@ rng = np.random.default_rng(20260831)
 TMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tcase")
 # 手元の実写 (あるときだけ走る)。test_solver_real.py と同じく ZAHYOU_TEST_IMAGES (無ければホームフォルダー) から
 IMAGES = os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~")
+# Downloads の試験画像の控え(作者の PC では Downloads を整理するので、試験が読む元の画像を同じ並びで写してある。2026-10-29)
+TEST_IMAGES_COPY = ("Documents", "claude", "zahyou", "testdata", "images")
+
+
+def images_path(rest):
+    """"$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を実際のパスに。ZAHYOU_TEST_IMAGES(無ければホームフォルダー)からの相対で、
+    Downloads/… がそこに無ければ、同じ並びの控え(TEST_IMAGES_COPY の下)も見る。"""
+    base = os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~")
+    parts = rest.split("/")
+    p = os.path.join(base, *parts)
+    if not os.path.exists(p) and parts[0] == "Downloads":
+        q = os.path.join(base, *TEST_IMAGES_COPY, *parts)
+        if os.path.exists(q):
+            return q
+    return p
+
+
 os.makedirs(TMP, exist_ok=True)
 
 RESULTS = []
@@ -109,7 +126,7 @@ def check(name, path, expect_sources=8, planted=None, tol=2.0, expect_fail=False
 
 # --------------------------------------------------------------- ケース群 ---
 def case_real():
-    p = os.path.join(IMAGES, "Downloads", "Capture_00001 00_10_33.fits")
+    p = images_path("Downloads/Capture_00001 00_10_33.fits")
     if os.path.exists(p):
         check("01 実データ SharpCap 8bit + 焼き込み時刻", p, expect_sources=10)
 
@@ -386,7 +403,7 @@ def case_star_chart():
 
 def case_real_star_chart():
     """実物の星図 (Occult などが描くもの)。手元にあるときだけ。"""
-    p2 = os.path.join(IMAGES, "Downloads", "20261031 3200 Phaethon StarChart 40arcmin.png")
+    p2 = images_path("Downloads/20261031 3200 Phaethon StarChart 40arcmin.png")
     if os.path.exists(p2):
         check("33 実物の星図 (40 分角)", p2, expect_sources=50)
 
@@ -471,7 +488,7 @@ def case_zz37_deep_position():
 
 def case_zz38_deep_real_few_stars():
     """実写の 3I (星の少ない画像)。標準の検出は 8 個。深い検出で 12 個以上。手元にあるときだけ。"""
-    p = os.path.join(IMAGES, "Downloads", "02013I_00010 20_47_25.fits")
+    p = images_path("Downloads/02013I_00010 20_47_25.fits")
     if not os.path.exists(p):
         return
     b = zc.load_image_any(p)

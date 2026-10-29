@@ -57,6 +57,10 @@ DEFAULT_ORACLE = (os.environ.get("ZAHYOU_ORACLE")
                   or os.path.join(IMAGES, "Documents", "claude", "zahyou", "testdata", "oracle"))
 TEST_IMAGE_REL = "$ZAHYOU_TEST_IMAGES/Downloads/Capture_00001 00_10_33.fits"   # JSON に書く形
 TEST_IMAGE = os.path.join(IMAGES, *TEST_IMAGE_REL.split("/")[1:])
+if not os.path.exists(TEST_IMAGE):   # Downloads を整理したあとは、同じ並びの控え(dev/test_solver_real.py の images_path と同じ)
+    _copy = os.path.join(IMAGES, "Documents", "claude", "zahyou", "testdata", "images", *TEST_IMAGE_REL.split("/")[1:])
+    if os.path.exists(_copy):
+        TEST_IMAGE = _copy
 INDEX_DIR = r"C:\AstrometryData"
 TARGET = "UCAC4 660-021020"
 TARGET_RADEC = (61.91199157844, 41.98626242835)   # 手元の cache.json の値(Gaia DR3 で精密化したもの)

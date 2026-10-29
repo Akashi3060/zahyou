@@ -529,12 +529,28 @@ def sources_list(found, n=50):
              float(c["elong"]), float(c["fwhm"]), float(c["snr"])] for c in found[:n]]
 
 
+# Downloads の試験画像の控え(作者の PC では Downloads を整理するので、試験が読む元の画像を同じ並びで写してある。2026-10-29)
+TEST_IMAGES_COPY = ("Documents", "claude", "zahyou", "testdata", "images")
+
+
+def images_path(rest):
+    """"$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を実際のパスに。ZAHYOU_TEST_IMAGES(無ければホームフォルダー)からの相対で、
+    Downloads/… がそこに無ければ、同じ並びの控え(TEST_IMAGES_COPY の下)も見る。"""
+    base = os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~")
+    parts = rest.split("/")
+    p = os.path.join(base, *parts)
+    if not os.path.exists(p) and parts[0] == "Downloads":
+        q = os.path.join(base, *TEST_IMAGES_COPY, *parts)
+        if os.path.exists(q):
+            return q
+    return p
+
+
 def image_path(p):
     """image_pipeline.json の path をこの PC のパスにする(dev/test_solver_real.py の image_path と同じ決まり)。
     dev/ で始まるものは、リポジトリに無ければ $ZAHYOU_DEV、隣の ../zahyou/dev の順に探す。"""
     if p.startswith(IMAGES_VAR):
-        base = os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~")
-        return os.path.join(base, *p[len(IMAGES_VAR):].split("/"))
+        return images_path(p[len(IMAGES_VAR):])
     cands = [os.path.join(REPO, *p.split("/"))]
     if p.startswith("dev/"):
         rest = p[len("dev/"):].split("/")

@@ -89,12 +89,28 @@ SCENES = [
 ]
 
 
+# Downloads の試験画像の控え(作者の PC では Downloads を整理するので、試験が読む元の画像を同じ並びで写してある。2026-10-29)
+TEST_IMAGES_COPY = ("Documents", "claude", "zahyou", "testdata", "images")
+
+
+def images_path(rest):
+    """"$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を実際のパスに。ZAHYOU_TEST_IMAGES(無ければホームフォルダー)からの相対で、
+    Downloads/… がそこに無ければ、同じ並びの控え(TEST_IMAGES_COPY の下)も見る。"""
+    base = os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~")
+    parts = rest.split("/")
+    p = os.path.join(base, *parts)
+    if not os.path.exists(p) and parts[0] == "Downloads":
+        q = os.path.join(base, *TEST_IMAGES_COPY, *parts)
+        if os.path.exists(q):
+            return q
+    return p
+
+
 def resolve(path):
     """$ZAHYOU_TEST_IMAGES/… とリポジトリからの相対を実際のパスに。リポジトリに無いもの(dev/tcase・dev/realcase は
     .gitignore)は、ZAHYOU_PY_REPO(既定は Python 版のリポジトリ)の同じ相対パスも見る(rs/testdata/gen_solver.py と同じ)。"""
     if path.startswith("$ZAHYOU_TEST_IMAGES/"):
-        base = os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~")
-        return os.path.join(base, *path.split("/")[1:])
+        return images_path(path[len("$ZAHYOU_TEST_IMAGES/"):])
     here = os.path.join(REPO, *path.split("/"))
     if os.path.exists(here):
         return here
