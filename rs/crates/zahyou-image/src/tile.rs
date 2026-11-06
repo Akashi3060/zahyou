@@ -290,26 +290,26 @@ fn gunzip(c: &[u8], limit: usize) -> Result<Vec<u8>, String> {
 fn finalize_bytes(buf: &[u8], tile_size: usize, bitpix: i64, lossless: bool) -> Result<(TileVals, usize), String> {
     let n = buf.len();
     if tile_size > 0 && n == tile_size * 2 {
-        return Ok((TileVals::I(buf.chunks_exact(2).map(|r| i16::from_be_bytes([r[0], r[1]]) as i64).collect()), 2));
+        return Ok((TileVals::I(buf.as_chunks::<2>().0.iter().map(|r| i16::from_be_bytes([r[0], r[1]]) as i64).collect()), 2));
     }
     if tile_size > 0 && n == tile_size * 4 {
         let v = if bitpix < 0 && lossless {
-            TileVals::F(buf.chunks_exact(4).map(|r| f32::from_be_bytes([r[0], r[1], r[2], r[3]]) as f64).collect())
+            TileVals::F(buf.as_chunks::<4>().0.iter().map(|r| f32::from_be_bytes([r[0], r[1], r[2], r[3]]) as f64).collect())
         } else {
-            TileVals::I(buf.chunks_exact(4).map(|r| i32::from_be_bytes([r[0], r[1], r[2], r[3]]) as i64).collect())
+            TileVals::I(buf.as_chunks::<4>().0.iter().map(|r| i32::from_be_bytes([r[0], r[1], r[2], r[3]]) as i64).collect())
         };
         return Ok((v, 4));
     }
     if tile_size > 0 && n == tile_size * 8 {
         let v = if bitpix < 0 && lossless {
             TileVals::F(
-                buf.chunks_exact(8)
+                buf.as_chunks::<8>().0.iter()
                     .map(|r| f64::from_be_bytes([r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]]))
                     .collect(),
             )
         } else {
             TileVals::I(
-                buf.chunks_exact(8)
+                buf.as_chunks::<8>().0.iter()
                     .map(|r| i64::from_be_bytes([r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]]))
                     .collect(),
             )
@@ -559,7 +559,7 @@ impl Ctx<'_> {
             "GZIP_1" => finalize_bytes(&gunzip(c, limit)?, tile_size, self.zbitpix, lossless)?,
             "GZIP_2" => {
                 let raw = gunzip(c, limit)?;
-                let item = if tile_size == 0 { 0 } else { raw.len() / tile_size };
+                let item = raw.len().checked_div(tile_size).unwrap_or(0);
                 if item == 0 || raw.len() % item != 0 {
                     return Err("GZIP_2 のタイルの大きさが画素数と合いません".into());
                 }

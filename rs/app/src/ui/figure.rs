@@ -289,7 +289,7 @@ impl FigureView {
 
         // --- 拡大の四角(ドラッグ中) -------------------------------------------
         if let (Tool::Zoom, Some(start), Some(cur)) = (self.tool, self.zoom_start, resp.interact_pointer_pos()) {
-            ap.rect_stroke(Rect::from_two_pos(start, cur), 0.0, Stroke::new(1.0, fg), egui::StrokeKind::Inside);
+            ap.rect_stroke(Rect::from_two_pos(start, cur), 0.0, Stroke::new(1.0_f32, fg), egui::StrokeKind::Inside);
         }
 
         // --- 枠・目盛り・目盛りの文字 -------------------------------------------

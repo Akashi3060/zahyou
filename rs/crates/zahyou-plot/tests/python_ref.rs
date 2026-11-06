@@ -113,13 +113,13 @@ fn norm_and_gray() {
         assert_eq!((n.vmin.to_bits(), n.vmax.to_bits()), (vmin.to_bits(), vmax.to_bits()), "{note}: vmin/vmax");
         let rgba = gray_rgba(&img, Some(&n));
         let gray = c["gray"].as_str().unwrap().as_bytes();
-        for (i, px) in rgba.chunks_exact(4).enumerate() {
+        for (i, px) in rgba.as_chunks::<4>().0.iter().enumerate() {
             let hx = std::str::from_utf8(&gray[i * 2..i * 2 + 2]).unwrap();
             if hx == "--" {
-                assert_eq!(px, [0, 0, 0, 0], "{note}: 画素 {i} は透明のはず");
+                assert_eq!(*px, [0, 0, 0, 0], "{note}: 画素 {i} は透明のはず");
             } else {
                 let g = u8::from_str_radix(hx, 16).unwrap();
-                assert_eq!(px, [g, g, g, 255], "{note}: 画素 {i}");
+                assert_eq!(*px, [g, g, g, 255], "{note}: 画素 {i}");
             }
             npx += 1;
         }

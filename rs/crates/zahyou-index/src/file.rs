@@ -656,7 +656,7 @@ fn run_ball_typed<S: KdInt, T: KdInt, const D: usize>(
     let cap = 2 * meta.levels + 2;
     if queries.len() / D < PAR_MIN_QUERIES {
         let mut stack = Vec::with_capacity(cap);
-        queries.chunks_exact(D).map(|q| one(&mut stack, q)).collect()
+        queries.as_chunks::<D>().0.iter().map(|q| one(&mut stack, q)).collect()
     } else {
         queries
             .par_chunks_exact(D)

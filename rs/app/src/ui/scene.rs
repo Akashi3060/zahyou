@@ -264,7 +264,7 @@ mod tests {
         if width == 0 || height == 0 || rgba.len() != width * height * 4 {
             return None;
         }
-        let px: Vec<Color32> = rgba.chunks_exact(4).map(|p| Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3])).collect();
+        let px: Vec<Color32> = rgba.as_chunks::<4>().0.iter().map(|p| Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3])).collect();
         Some(ColorImage::new([width, height], px))
     }
 

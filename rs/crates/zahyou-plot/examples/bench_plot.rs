@@ -157,7 +157,7 @@ fn main() {
             let bad = im
                 .data
                 .iter()
-                .zip(fast.chunks_exact(4))
+                .zip(fast.as_chunks::<4>().0.iter())
                 .filter(|(v, px)| n.gray8(**v).map_or([0, 0, 0, 0], |g| [g, g, g, 255]) != **px)
                 .count();
             println!("{name}: 灰色の速い写しと式の違い {bad} / {} 画素", im.data.len());

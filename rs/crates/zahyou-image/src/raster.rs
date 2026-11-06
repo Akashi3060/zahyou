@@ -166,25 +166,25 @@ fn from_dynamic(img: DynamicImage, mode: &str) -> Result<Pix, String> {
     let gray_mode = matches!(mode, "L" | "1");
     Ok(match img {
         DynamicImage::ImageLuma8(b) if gray_mode => Pix::Gray8(b.into_raw()),
-        DynamicImage::ImageLumaA8(b) if gray_mode => Pix::Gray8(b.into_raw().chunks_exact(2).map(|p| p[0]).collect()),
+        DynamicImage::ImageLumaA8(b) if gray_mode => Pix::Gray8(b.into_raw().as_chunks::<2>().0.iter().map(|p| p[0]).collect()),
         DynamicImage::ImageLuma16(b) if mode == "I;16" => Pix::Gray16(b.into_raw()),
         DynamicImage::ImageLumaA16(b) if mode == "I;16" => {
-            Pix::Gray16(b.into_raw().chunks_exact(2).map(|p| p[0]).collect())
+            Pix::Gray16(b.into_raw().as_chunks::<2>().0.iter().map(|p| p[0]).collect())
         }
         DynamicImage::ImageLuma8(b) => Pix::Rgb(b.into_raw().iter().flat_map(|&g| [g, g, g]).collect()),
         DynamicImage::ImageLumaA8(b) => {
-            Pix::Rgb(b.into_raw().chunks_exact(2).flat_map(|p| [p[0], p[0], p[0]]).collect())
+            Pix::Rgb(b.into_raw().as_chunks::<2>().0.iter().flat_map(|p| [p[0], p[0], p[0]]).collect())
         }
         DynamicImage::ImageLuma16(b) => Pix::Rgb(b.into_raw().iter().flat_map(|&g| [(g >> 8) as u8; 3]).collect()),
         DynamicImage::ImageLumaA16(b) => {
-            Pix::Rgb(b.into_raw().chunks_exact(2).flat_map(|p| [(p[0] >> 8) as u8; 3]).collect())
+            Pix::Rgb(b.into_raw().as_chunks::<2>().0.iter().flat_map(|p| [(p[0] >> 8) as u8; 3]).collect())
         }
         DynamicImage::ImageRgb8(b) => Pix::Rgb(b.into_raw()),
         DynamicImage::ImageRgba8(b) => Pix::Rgb(rgba8_to_rgb(&b.into_raw())),
         DynamicImage::ImageRgb16(b) => Pix::Rgb(b.into_raw().iter().map(|&v| (v >> 8) as u8).collect()),
         DynamicImage::ImageRgba16(b) => Pix::Rgb(
             b.into_raw()
-                .chunks_exact(4)
+                .as_chunks::<4>().0.iter()
                 .flat_map(|p| [(p[0] >> 8) as u8, (p[1] >> 8) as u8, (p[2] >> 8) as u8])
                 .collect(),
         ),
@@ -229,7 +229,7 @@ fn load_jpeg(bytes: &[u8]) -> Result<(Pil, u8), String> {
                     "CMYK",
                     Pix::Rgb(
                         j.pix
-                            .chunks_exact(4)
+                            .as_chunks::<4>().0.iter()
                             .flat_map(|p| cmyk_to_rgb(255 - p[0], 255 - p[1], 255 - p[2], 255 - p[3]))
                             .collect(),
                     ),
@@ -306,7 +306,7 @@ fn load_tiff(bytes: &[u8]) -> Result<(Pil, u8), String> {
             ("F".into(), Pix::Float(v.iter().map(|&x| x as f32).collect()))
         }
         (TiffColor::GrayA(8), DecodingResult::U8(v)) => {
-            ("LA".into(), Pix::Rgb(v.chunks_exact(2).flat_map(|p| [p[0], p[0], p[0]]).collect()))
+            ("LA".into(), Pix::Rgb(v.as_chunks::<2>().0.iter().flat_map(|p| [p[0], p[0], p[0]]).collect()))
         }
         (TiffColor::RGB(8), DecodingResult::U8(v)) => ("RGB".into(), Pix::Rgb(v)),
         (TiffColor::RGB(16), DecodingResult::U16(v)) => {
@@ -316,11 +316,11 @@ fn load_tiff(bytes: &[u8]) -> Result<(Pil, u8), String> {
         (TiffColor::RGBA(16), DecodingResult::U16(v)) => (
             "RGBA".into(),
             Pix::Rgb(
-                v.chunks_exact(4).flat_map(|p| [(p[0] >> 8) as u8, (p[1] >> 8) as u8, (p[2] >> 8) as u8]).collect(),
+                v.as_chunks::<4>().0.iter().flat_map(|p| [(p[0] >> 8) as u8, (p[1] >> 8) as u8, (p[2] >> 8) as u8]).collect(),
             ),
         ),
         (TiffColor::CMYK(8), DecodingResult::U8(v)) => {
-            ("CMYK".into(), Pix::Rgb(v.chunks_exact(4).flat_map(|p| cmyk_to_rgb(p[0], p[1], p[2], p[3])).collect()))
+            ("CMYK".into(), Pix::Rgb(v.as_chunks::<4>().0.iter().flat_map(|p| cmyk_to_rgb(p[0], p[1], p[2], p[3])).collect()))
         }
         (TiffColor::Palette(8), DecodingResult::U8(v)) => {
             // Pillow はカラーマップ(16 bit)を 256 で割って 8 bit にする
@@ -461,7 +461,7 @@ mod tests {
     fn rgba_to_rgb_same_as_serial() {
         for n in [0usize, 1, 4, 7, 4 * 1000 + 3] {
             let v: Vec<u8> = (0..n).map(|i| (i * 91 % 256) as u8).collect();
-            let old: Vec<u8> = v.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+            let old: Vec<u8> = v.as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
             assert_eq!(rgba8_to_rgb(&v), old, "{n}");
         }
     }

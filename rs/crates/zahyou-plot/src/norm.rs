@@ -208,14 +208,14 @@ fn std_f64(vals: &[f32]) -> f64 {
 #[inline]
 fn sum8<F: Fn(f32) -> f64>(c: &[f32], f: &F) -> f64 {
     let mut r = [0.0f64; 8];
-    let mut it = c.chunks_exact(8);
-    for g in &mut it {
+    let (groups, rest) = c.as_chunks::<8>();
+    for g in groups {
         for j in 0..8 {
             r[j] += f(g[j]);
         }
     }
     let mut t = ((r[0] + r[1]) + (r[2] + r[3])) + ((r[4] + r[5]) + (r[6] + r[7]));
-    for &x in it.remainder() {
+    for &x in rest {
         t += f(x);
     }
     t
@@ -534,7 +534,7 @@ pub fn gray_rgba(img: &Image2D, norm: Option<&Norm>) -> Vec<u8> {
     let Some(norm) = norm else { return out };
     let map = GrayMap::new(norm);
     out.par_chunks_mut(4 * CHUNK).zip(img.data.par_chunks(CHUNK)).for_each(|(o, src)| {
-        for (px, &v) in o.chunks_exact_mut(4).zip(src) {
+        for (px, &v) in o.as_chunks_mut::<4>().0.iter_mut().zip(src) {
             if let Some(g) = map.gray8(v) {
                 px.copy_from_slice(&[g, g, g, 255]);
             }
