@@ -184,7 +184,7 @@ Windows のシステムのものだけです。ライセンスは Apache-2.0 AND
 ### Rust の標準ライブラリと実行時ライブラリ
 
 `x86_64-pc-windows-gnu` 向けにリンクすると、次のものが exe に静的に結合されます(`rustc --print link-args` で確かめたもの)。
-コンパイラーは rustc 1.94.0 (4a4ef493e 2026-03-02) (Rev2, Built by MSYS2 project)、リンカーは MSYS2 UCRT64 の gcc 15.2.0。
+コンパイラーは rustc 1.99.1 (58cf8f9c3 2026-10-13) (Rev1, Built by MSYS2 project)、リンカーは MSYS2 UCRT64 の gcc 16.2.0。
 
 | 結合されるもの | ライセンス式 | 表示 |
 |---|---|---|
@@ -192,9 +192,9 @@ Windows のシステムのものだけです。ライセンスは Apache-2.0 AND
 | compiler-rt(標準ライブラリの compiler_builtins に入っている C) | Apache-2.0 WITH LLVM-exception | 下の 実行時-2(`share/doc/rustc/licenses/LLVM-exception.txt`) |
 | MinGW-w64 の実行時ライブラリ(crt2.o・libmingw32.a・libmingwex.a) | ZPL-2.1 AND ISC AND BSD-2-Clause AND LicenseRef-Lucent-gdtoa AND SunPro AND MIT | 下の 実行時-3(`share/licenses/crt/COPYING.MinGW-w64-runtime.txt`) |
 | winpthreads(libpthread.a) | MIT AND BSD-3-Clause | 下の 実行時-4(`share/licenses/winpthreads/COPYING`) |
-| libgcc.a・libgcc_eh.a(GCC の実行時ライブラリ。例外の巻き戻しなど) | GPL-3.0-or-later WITH GCC-exception-3.1 | 下の 実行時-5(`share/licenses/gcc-libs/COPYING.RUNTIME`) |
+| libgcc.a・libgcc_eh.a(GCC の実行時ライブラリ。例外の巻き戻しなど) | GPL-3.0-or-later WITH GCC-exception-3.1 | 下の 実行時-5(`share/licenses/gcc/COPYING.RUNTIME`) |
 
-- 標準ライブラリの rlib: `addr2line`・`adler2`・`alloc`・`cfg_if`・`compiler_builtins`・`core`・`gimli`・`hashbrown`・`libc`・`memchr`・`miniz_oxide`・`object`・`panic_unwind`・`rustc_demangle`・`rustc_std_workspace_alloc`・`rustc_std_workspace_core`・`std`・`std_detect`・`unwind`・`windows_targets`。
+- 標準ライブラリの rlib: `addr2line`・`adler2`・`alloc`・`cfg_if`・`compiler_builtins`・`core`・`gimli`・`hashbrown`・`libc`・`memchr`・`miniz_oxide`・`object`・`panic_unwind`・`rustc_demangle`・`rustc_std_workspace_alloc`・`rustc_std_workspace_core`・`std`・`std_detect`・`unwind`・`windows_link`。
   Rust の配布物の表示(実行時-1)のとおり、標準ライブラリは Apache-2.0 OR MIT です(本文は下の「ライセンス本文」の Apache-2.0・MIT と同じ)。
 - `compiler_builtins` には LLVM の compiler-rt の C が入っています。LLVM の例外(実行時-2)により、
   組み込まれた目的コードについては Apache-2.0 の表示の条件(4 条 (a)(b)(d))がかかりません。
@@ -3125,6 +3125,20 @@ Copyright: The Rust Project Developers (see https://thanks.rust-lang.org)
 
 Exceptions:
 
+File/Directory: library/core/src/unicode
+
+License: Unicode-3.0
+
+Copyright: 1991-2024 Unicode, Inc
+
+Exceptions:
+
+File/Directory: mod.rs
+
+License: Apache-2.0 OR MIT
+
+Copyright: The Rust Project Developers (see https://thanks.rust-lang.org)
+
 File/Directory: library/backtrace
 
 License: Apache-2.0 OR MIT
@@ -3132,12 +3146,6 @@ License: Apache-2.0 OR MIT
 Copyright: 2014 Alex Crichton
 
 Copyright: The Rust Project Developers (see https://thanks.rust-lang.org)
-
-File/Directory: library/core/src/unicode/unicode_data.rs
-
-License: Unicode-3.0
-
-Copyright: 1991-2024 Unicode, Inc
 
 File/Directory: library/std/src/sync/mpmc
 
@@ -3517,7 +3525,7 @@ DEALINGS IN THE SOFTWARE.
 
 ### 実行時-5: libgcc.a・libgcc_eh.a(GCC の実行時ライブラリ。例外の巻き戻しなど)
 
-ライセンス式: GPL-3.0-or-later WITH GCC-exception-3.1。元のファイル: `share/licenses/gcc-libs/COPYING.RUNTIME`(rustc の sysroot から)
+ライセンス式: GPL-3.0-or-later WITH GCC-exception-3.1。元のファイル: `share/licenses/gcc/COPYING.RUNTIME`(rustc の sysroot から)
 
 ```text
 GCC RUNTIME LIBRARY EXCEPTION

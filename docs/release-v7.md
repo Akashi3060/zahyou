@@ -154,6 +154,10 @@ python -B tools/test_tools.py
 ```
 
 - 依存を足したら、必ず `check_licenses.py` を通す(v6 では `crc32c`(LGPL)が連鎖で入っていた)。
+- **道具の版は変わることがある**: 作者の PC は MSYS2 を毎日 `pacman -Syu` で上げる(pc-update-watch)。前の Release から `rustc -V`・`gcc -dumpversion` が
+  変わっていたら、建てる前に `cargo clippy --workspace --all-targets -- -D warnings` と 4 節の試験も通し、上の表示を作り直す
+  (2026-11-07 に Rust 1.94 → 1.99.1・gcc 15.2 → 16.2 で、clippy が 54 か所と、`gen_notices.py` が gcc の表示のファイルの置き場所で止まった。10 節)。
+  MSYS2 は一部だけ古い版に留められない(rust を戻すと LLVM・gcc の実行時ライブラリも戻すことになる)ので、版は固定せず今の版に合わせる。
 - 配る `THIRD-PARTY-NOTICES.md` は **`rs/THIRD-PARTY-NOTICES.md`**(リポジトリ直下にあった試作の Python の exe 用のものは、
   7.0.0 の準備で消した。`gen_notices.py` は以前それと星図データの条件の文を突き合わせていたが、それもやめた)。
 
@@ -902,3 +906,26 @@ f677908c1c64fc1965de7076c670f5ed7ef6cf773a6296be35b35e60e40b451e  THIRD-PARTY-NO
    ノートブックの名前・題の例・起動と大きさを v8 に。v7 で測った表と、ほかのソフトとの比較(v7.0.0 で測った)は、v7 の値のまま断りを入れた。
 8. v7 の Release の本文の大文字の SHA256 を、v7 の zahyou.exe の digest(`5AB3DEC6…`)に直した(変えたのはその 1 行だけ。latest は v8 のまま)。
    直す前と後の本文は作者の手元の控え(上と同じフォルダー)。
+
+### 2026-11-07 の直し(建てる道具を Rust 1.99.1・gcc 16.2 に。ユーザーの指示「1.99 と gcc16 に上げたほうがいいか? 上げて問題ないならば実行して」)
+
+作者の PC の MSYS2 が、毎日の `pacman -Syu` で rustc 1.94.0 → 1.99.1(cargo も)、gcc 15.2.0 → 16.2.0、LLVM 21 → 23 に上がっていた。
+1.94 に戻すと LLVM・gcc の実行時ライブラリまで戻すことになり、MSYS2 では一部だけ古い版に留められない。そのため今の版に合わせた。
+
+1. clippy の `-D warnings` で増えた 54 か所を、出力を変えずに直した(PR #50、`374c016`)。1.94.0 でも 0 件。
+   `cargo test --workspace -- --include-ignored --skip live` は 1.99.1・1.94.0 とも 323 本が通過。
+   実写の画像で `--selftest --offline` を走らせると、出力の全文が main と同じだった。
+2. gcc 16 で `gcc-libs` が `libgcc`・`libstdc++` などに分かれ、`share/licenses/gcc-libs/COPYING.RUNTIME` が無くなった。
+   そのため `gen_notices.py` が「実行時ライブラリの表示のファイルがありません」で止まっていた。
+   - 結合される `libgcc.a`・`libgcc_eh.a` は `gcc` パッケージのものなので(`pacman -Qo`)、`cargo_deps.TOOLCHAIN_PARTS` の元のファイルをその `share/licenses/gcc/COPYING.RUNTIME` にした。
+   - 本文は gcc-libs 15.2.0-13 のものとバイト単位で同じ(SHA256 `9d6b43ce…`)。
+3. `rs/THIRD-PARTY-NOTICES.md` を作り直した。変わったのは次の 4 つ。`check_licenses.py` は許可リストの外のライセンス 0 件、本文 35 種。
+   - 道具の版
+   - 上のファイルの置き場所
+   - 標準ライブラリの rlib の `windows_targets` → `windows_link`(どちらも標準ライブラリの一部で、ライセンスは同じ)
+   - Rust の配布物の表示(実行時-1)にある Unicode のファイルの並び
+4. 1.99.1 の `rustc --print link-args` で静的に結合されるものは、前と同じだった(`-lgcc -lgcc_eh -l:libpthread.a -lmingw32 -lmingwex` と crt2.o)。
+   `cargo build --release -p zahyou --locked` の exe が読み込む DLL(`objdump -p`)は、公開中の v8 の exe と一覧が同じ。
+   MSYS2 の DLL(libgcc_s・libwinpthread など)は使わず、配った PC でそのまま動く。
+
+この時点では Release を出していない。v8 の exe(1.94.0 で建てたもの)は今のまま配る。次に中身が変わる版(8.0.1 か 8.1)から、1.99.1・gcc 16.2.0 で建てる。
