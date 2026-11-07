@@ -277,7 +277,7 @@ TOOLCHAIN_PARTS = [
      "share/licenses/winpthreads/COPYING"),
     ("libgcc.a・libgcc_eh.a(GCC の実行時ライブラリ。例外の巻き戻しなど)",
      "GPL-3.0-or-later WITH GCC-exception-3.1",
-     "share/licenses/gcc-libs/COPYING.RUNTIME"),
+     "share/licenses/gcc/COPYING.RUNTIME"),  # gcc 16 から。libgcc.a は gcc パッケージに入る(15 までは gcc-libs/。本文は同じ)
 ]
 
 
