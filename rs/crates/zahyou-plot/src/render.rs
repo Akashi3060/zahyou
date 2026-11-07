@@ -473,7 +473,7 @@ pub fn render_rgba_with(fig: &Figure, opts: &RenderOptions, fonts: Option<&Fonts
     let (w, h) = (pm.width(), pm.height());
     let mut data = pm.take();
     // premultiplied → straight(地の色が不透明なので実際は変わらない)
-    for px in data.chunks_exact_mut(4) {
+    for px in data.as_chunks_mut::<4>().0.iter_mut() {
         let a = px[3] as u32;
         if a != 0 && a != 255 {
             for v in px.iter_mut().take(3) {

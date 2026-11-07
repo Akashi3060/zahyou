@@ -105,7 +105,7 @@ fn notices_view(ui: &mut egui::Ui, th: &Theme) {
         let cols = if char_w > 0.5 { (text_w / char_w).floor().max(1.0) as usize } else { 100 };
         let lines = notices_wrapped(cols);
         let area = egui::ScrollArea::vertical().id_salt("third_party_notices_text").max_height(360.0).auto_shrink([false, true]);
-        egui::Frame::new().fill(th.entry).stroke(egui::Stroke::new(1.0, th.border)).inner_margin(egui::Margin::same(4)).show(ui, |ui| {
+        egui::Frame::new().fill(th.entry).stroke(egui::Stroke::new(1.0_f32, th.border)).inner_margin(egui::Margin::same(4)).show(ui, |ui| {
             ui.scope(|ui| {
                 // つまみの色は widgets::scroll と同じにする(既定の色はチェックの箱の地と同じで見えにくい)
                 {

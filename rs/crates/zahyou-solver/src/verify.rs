@@ -645,7 +645,7 @@ mod tests {
             let sel: Vec<(u8, u32, u32, usize, f64, f64)> =
                 (0..n).map(|k| (rnd(4) as u8, rnd(3) as u32, rnd(6) as u32, k, k as f64 * 0.5, 1.0)).collect();
             let mut a = sel.clone();
-            a.sort_by(|a, b| (a.0, a.1, a.2).cmp(&(b.0, b.1, b.2)));
+            a.sort_by_key(|e| (e.0, e.1, e.2));
             let mut b = sel;
             b.sort_unstable_by_key(|e| (e.0, e.1, e.2, e.3));
             assert_eq!(a, b);

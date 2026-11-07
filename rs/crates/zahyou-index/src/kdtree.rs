@@ -143,7 +143,7 @@ impl TreeMeta {
         // 範囲の表: minval[D], maxval[D], scale(小さいので写して読む)
         let rb = sub(bytes, lay.range, 8 * (2 * d as u64 + 1))?;
         let rng: Vec<f64> = rb
-            .chunks_exact(8)
+            .as_chunks::<8>().0.iter()
             .map(|c| f64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]))
             .collect();
         let scale = rng[2 * d];
@@ -399,7 +399,7 @@ pub(crate) fn ball_query<S: KdInt, T: KdInt, const D: usize>(
     let start_len = out.len();
     let _ = ball_visit(meta, lr, split, &qt, r_t * r_t, stack, |s, e| {
         let Some(rows) = data.get(s * D..e * D) else { return ControlFlow::Continue(()) };
-        for (i, row) in rows.chunks_exact(D).enumerate() {
+        for (i, row) in rows.as_chunks::<D>().0.iter().enumerate() {
             // 候補の 99 % 以上は外れるので、割り算の要る実数の判定の前に木の単位で捨てる
             if prefilter && code_far(row, &qt, t2) {
                 continue;
@@ -522,7 +522,7 @@ pub(crate) fn cone_visit<S: KdInt, T: KdInt>(
     let mut stack = CONE_STACK.try_with(Cell::take).unwrap_or_default();
     let r = ball_visit(meta, lr, split, &q.qt, q.r2, &mut stack, |s, e| {
         let Some(rows) = data.get(s * 3..e * 3) else { return ControlFlow::Continue(()) };
-        for (i, row) in rows.chunks_exact(3).enumerate() {
+        for (i, row) in rows.as_chunks::<3>().0.iter().enumerate() {
             if prefilter && star_far(row, &q.qt, q.r2, &q.o, q.s2, q.tol) {
                 continue;
             }

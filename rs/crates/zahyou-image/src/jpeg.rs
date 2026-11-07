@@ -958,7 +958,7 @@ pub(crate) fn decode(d: &[u8]) -> Result<Jpeg, String> {
     } else if let Some(t) = adobe {
         t == 0
     } else {
-        ids == [b'R', b'G', b'B']
+        ids == *b"RGB"
     };
     let mut pix = vec![0u8; w * h * 3];
     if is_rgb {

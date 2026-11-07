@@ -204,7 +204,7 @@ fn healpix_matches_python() {
     let mut n = 0;
     for ns in u64s(&want["nsides"]) {
         let w = u64s(&want["hp"][ns.to_string()]);
-        for (i, p) in pts.chunks_exact(3).enumerate() {
+        for (i, p) in pts.as_chunks::<3>().0.iter().enumerate() {
             assert_eq!(healpix_xy_from_xyz([p[0], p[1], p[2]], ns as u32) as u64, w[i], "nside {ns} 点 {i}");
             n += 1;
         }

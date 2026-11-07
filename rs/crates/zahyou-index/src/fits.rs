@@ -280,7 +280,7 @@ pub fn read_hdus<S: BlockSource>(src: &mut S, size: u64) -> Result<(Vec<Hdu>, u6
                 )));
             }
             nblk += 1;
-            for card in blk.chunks_exact(80) {
+            for card in blk.as_chunks::<80>().0.iter() {
                 let key_s = ascii_replace(&card[..8]);
                 let key = py_strip(&key_s);
                 if key == "END" {

@@ -131,7 +131,7 @@ impl ZahyouApp {
             let mut order: Vec<(u32, f64, f64)> = zahyou_net::SCALE_FOV.to_vec();
             order.sort_by(|a, b| (a.1, a.2).partial_cmp(&(b.1, b.2)).unwrap_or(std::cmp::Ordering::Equal));
             let have: Vec<u32> = self.env_state.as_ref().map(|s| s.index.scales.clone()).unwrap_or_default();
-            egui::Frame::new().fill(th.panel).stroke(egui::Stroke::new(1.0, th.border)).inner_margin(egui::Margin::same(4)).show(ui, |ui| {
+            egui::Frame::new().fill(th.panel).stroke(egui::Stroke::new(1.0_f32, th.border)).inner_margin(egui::Margin::same(4)).show(ui, |ui| {
                 let area = egui::ScrollArea::vertical().id_salt("scales").max_height(150.0).auto_shrink([false, true]);
                 widgets::scroll(ui, th, area, |ui| {
                     ui.set_width(ui.available_width());

@@ -1290,12 +1290,10 @@ fn to_halfwidth(s: &str) -> String {
 }
 
 fn starts_with_at(chars: &[char], i: usize, pat: &str) -> bool {
-    let mut j = i;
-    for pc in pat.chars() {
+    for (j, pc) in (i..).zip(pat.chars()) {
         if chars.get(j) != Some(&pc) {
             return false;
         }
-        j += 1;
     }
     true
 }

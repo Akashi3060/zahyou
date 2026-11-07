@@ -128,7 +128,7 @@ pub fn visuals(th: &Theme) -> Visuals {
     let r = CornerRadius::same(2);
     v.panel_fill = th.bg;
     v.window_fill = th.bg;
-    v.window_stroke = Stroke::new(1.0, th.border);
+    v.window_stroke = Stroke::new(1.0_f32, th.border);
     v.extreme_bg_color = th.trough; // スクロールバーの溝など
     // 入力欄の地
     v.text_edit_bg_color = Some(th.entry);
@@ -139,7 +139,7 @@ pub fn visuals(th: &Theme) -> Visuals {
     v.error_fg_color = th.ng;
     v.override_text_color = None;
     v.selection.bg_fill = th.accent;
-    v.selection.stroke = Stroke::new(1.0, th.panel);
+    v.selection.stroke = Stroke::new(1.0_f32, th.panel);
     v.window_corner_radius = CornerRadius::same(4);
     v.menu_corner_radius = CornerRadius::same(3);
     v.striped = false;
@@ -150,32 +150,32 @@ pub fn visuals(th: &Theme) -> Visuals {
     let w = &mut v.widgets;
     w.noninteractive.bg_fill = th.bg;
     w.noninteractive.weak_bg_fill = th.bg;
-    w.noninteractive.bg_stroke = Stroke::new(1.0, th.border);
-    w.noninteractive.fg_stroke = Stroke::new(1.0, th.ink);
+    w.noninteractive.bg_stroke = Stroke::new(1.0_f32, th.border);
+    w.noninteractive.fg_stroke = Stroke::new(1.0_f32, th.ink);
     w.noninteractive.corner_radius = r;
     // 押せる部品。ボタンの地は weak_bg_fill、チェックの箱の地は bg_fill
     w.inactive.weak_bg_fill = th.btn;
     w.inactive.bg_fill = th.entry;
-    w.inactive.bg_stroke = Stroke::new(1.0, th.border);
-    w.inactive.fg_stroke = Stroke::new(1.0, th.ink);
+    w.inactive.bg_stroke = Stroke::new(1.0_f32, th.border);
+    w.inactive.fg_stroke = Stroke::new(1.0_f32, th.ink);
     w.inactive.corner_radius = r;
     w.inactive.expansion = 0.0;
     w.hovered.weak_bg_fill = th.btn_hi;
     w.hovered.bg_fill = th.entry;
-    w.hovered.bg_stroke = Stroke::new(1.0, th.accent);
-    w.hovered.fg_stroke = Stroke::new(1.5, th.ink);
+    w.hovered.bg_stroke = Stroke::new(1.0_f32, th.accent);
+    w.hovered.fg_stroke = Stroke::new(1.5_f32, th.ink);
     w.hovered.corner_radius = r;
     w.hovered.expansion = 0.0;
     w.active.weak_bg_fill = th.btn_hi;
     w.active.bg_fill = th.entry;
-    w.active.bg_stroke = Stroke::new(1.0, th.accent);
-    w.active.fg_stroke = Stroke::new(2.0, th.accent);
+    w.active.bg_stroke = Stroke::new(1.0_f32, th.accent);
+    w.active.fg_stroke = Stroke::new(2.0_f32, th.accent);
     w.active.corner_radius = r;
     w.active.expansion = 0.0;
     w.open.weak_bg_fill = th.btn_hi;
     w.open.bg_fill = th.entry;
-    w.open.bg_stroke = Stroke::new(1.0, th.accent);
-    w.open.fg_stroke = Stroke::new(1.0, th.ink);
+    w.open.bg_stroke = Stroke::new(1.0_f32, th.accent);
+    w.open.fg_stroke = Stroke::new(1.0_f32, th.ink);
     w.open.corner_radius = r;
     v
 }
