@@ -1,7 +1,7 @@
 //! JPEG を Pillow(libjpeg-turbo)と同じ値で復号する。
 //!
 //! image クレート(zune-jpeg)の復号は IDCT・色差の補間・色変換の丸めが libjpeg-turbo と違い、画素が ±1 ずれる
-//! (星の位置が最大 7e-3 px、σ が相対 2e-4 ずれた)。ここでは libjpeg-turbo の既定の復号を写す:
+//! (星の位置が最大 7e-3 px、σ が相対 2e-4 ずれた)。ここでは libjpeg-turbo の既定の復号を再現する:
 //! - 整数の逆 DCT `jpeg_idct_islow`(jidctint.c。CONST_BITS 13・PASS1_BITS 2、範囲の制限表も同じ)
 //! - 色差の補間は既定の "fancy upsampling"(jdsample.c の h2v1・h1v2・h2v2 の三角フィルター。端は複製)
 //! - YCbCr → RGB は jdcolor.c の 16 bit 固定小数点の表
@@ -185,7 +185,7 @@ impl<'a> Bits<'a> {
         }
     }
 
-    /// 再同期の区切り(RSTn)の前: 余りのビットを捨ててマーカーを読む。
+    /// リスタートマーカー(RSTn)の前: 余りのビットを捨ててマーカーを読む。
     fn restart(&mut self) -> Result<(), String> {
         self.acc = 0;
         self.n = 0;

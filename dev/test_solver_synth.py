@@ -1,20 +1,20 @@
-"""合成星野(索引の星から作った正解つきの星野)で、自前の解析エンジン sv_solve を確かめるテスト。
+"""合成星野(インデックスの星から作った正解つきの星野)で、自前の解析エンジン sv_solve を確かめるテスト。
 
 docs/design-native-solver.md の 8 節。星野は dev/solver_synth.py が作る(星の欠け 30 %・偽の星 30 %・
-位置の雑音 0.3 px。どの 1 つの索引よりも星が多い)。合格の基準:
+位置の雑音 0.3 px。どの 1 つのインデックスよりも星が多い)。合格の基準:
   中心のずれ 2″ 以内(0.5 px のほうが大きければそれ)、画素スケール 0.2 %、回転(配列の +y の位置角)0.1°、
-  鏡像(配列座標の det CD の符号)の一致。一様乱数の星野は締め切りまで探して解なし(超過 1 秒以内)。
+  鏡像(配列座標の det CD の符号)の一致。一様乱数の星野はタイムアウトまで探して解なし(超過 1 秒以内)。
 
   python dev/test_solver_synth.py                  全部
-  python dev/test_solver_synth.py --quick          代表 13 件(全部は 59 件。ほかに物差しの自己検査 5 項目)
+  python dev/test_solver_synth.py --quick          代表 13 件(全部は 59 件。ほかに指標の自己検査 5 項目)
   python dev/test_solver_synth.py --case s52*,ra0  名前で選ぶ(ワイルドカード可、カンマ区切り)
-  --json 結果.json   --deadline 60(1 件の締め切り [秒])   --deadline-random 30(乱数の星野)
+  --json 結果.json   --deadline 60(1 件のタイムアウト [秒])   --deadline-random 30(乱数の星野)
   --index-dir C:\\AstrometryData(環境変数 ZAHYOU_INDEX_DIR でも)   --dump-fields フォルダー(星野を JSON に)
   --trace フォルダー(sv_solve の trace)   --verbose(解法のログ)   --fake(sv_solve の代わりに正解を返す偽物)
 
-最初の 5 項目は物差しと星野の作り方の自己検査で、sv_solve が無くても走る(00c は、どの星野にも
-「画像の星だけで組めてコードが許容 0.01 以内の索引の quad」がある = 設計どおりの解法なら解ける形であることを
-確かめる)。C:\\AstrometryData に無い段の場合は SKIP、dev/solver_core.py(sv_solve)がまだ無ければ解く項目は SKIP。
+最初の 5 項目は指標と星野の作り方の自己検査で、sv_solve が無くても走る(00c は、どの星野にも
+「画像の星だけで組めてコードが許容 0.01 以内のインデックスの quad」がある = 設計どおりの解法なら解ける形であることを
+確かめる)。C:\\AstrometryData に無いスケールの場合は SKIP、dev/solver_core.py(sv_solve)がまだ無ければ解く項目は SKIP。
 """
 import argparse
 import copy
@@ -40,7 +40,7 @@ DATA = os.environ.get("ZAHYOU_INDEX_DIR", r"C:\AstrometryData")
 RESULTS = []                   # (名前, True / False / None(SKIP), 説明, 記録)
 ARGS = None
 
-# 各段の quad の大きさ(AB の角距離、分角)。docs/index-format.md の 1 節
+# 各スケールの quad の大きさ(AB の角距離、分角)。docs/index-format.md の 1 節
 SERIES_ARCMIN = {
     5202: (4.0, 5.6), 5203: (5.6, 8.0), 5204: (8.0, 11.0), 5205: (11.0, 16.0), 5206: (16.0, 22.0),
     4107: (22.0, 30.0), 4108: (30.0, 42.0), 4109: (42.0, 60.0), 4110: (60.0, 85.0),
@@ -70,9 +70,9 @@ def _gm(iid):
     return math.sqrt(lo * hi)
 
 
-# 段ごと: その段だけの目録で、スケール既知(±25 %)で解く。画像の短辺 = 2 × 段の quad の大きさ(幾何平均)。
-# スケール不明にしないのは、sv_solve のスケール不明の範囲が v6 の blind_scale_bounds と同じく「手持ちの段の
-# quad の大きさ ≒ 画像の横幅」から逆算するため(段 1 つだけの目録では、横幅がその段の大きさから外れる
+# インデックスのスケールごと: そのスケールだけの目録で、画素スケール既知(±25 %)で解く。画像の短辺 = 2 × そのスケールの quad の大きさ(幾何平均)。
+# スケール不明にしないのは、sv_solve のスケール不明の範囲が v6 の blind_scale_bounds と同じく「手持ちのインデックスのスケールの
+# quad の大きさ ≒ 画像の横幅」から逆算するため(スケール 1 つだけの目録では、横幅がそのスケールの大きさから外れる
 # この星野は範囲の外になる)。スケール不明の全天ブラインドは、全部の目録の bb・w*deg で確かめる
 _SPOTS = {5202: (83.82, -5.39), 5203: (10.68, 41.27), 5204: (201.30, -43.02), 5205: (61.89, 41.96),
           5206: (148.89, 69.07), 4107: (266.42, -29.01), 4108: (180.0, 0.0), 4109: (30.0, -75.0),
@@ -87,9 +87,9 @@ for _iid in (5202, 5203, 5204, 5205, 5206, 4107, 4108, 4109, 4110):
          2.0 * _gm(_iid) * 60.0 / 548.0, rot=(37.0 * _iid) % 360.0, mirror=(_iid % 2 == 1),
          only=[_iid], scale_known=True, quick=_iid in (5205, 4108))
 # 短辺は 30° で頭打ち(4118・4119)。普通のレンズ(TAN)の視野がそれより広いと、視野の端の quad が投影で
-# ゆがみ、画素で測ったコードが索引のコード(quad の中心で投影)から許容より離れる。実測(位置 (190, −50)、
-# 許容 0.01): 段 4119 は短辺 28° で組める quad 1 個のうち許容内 1 個、33° で 6 個のうち 0 個、40° で 1 個のうち
-# 0 個(33° と 40° は解けない)。段 4118 は 25〜30° で許容内 9〜10 個、39.4° では 5 個で、種しだいで解けたり
+# ゆがみ、画素で測ったコードがインデックスのコード(quad の中心で投影)から許容より離れる。実測(位置 (190, −50)、
+# 許容 0.01): スケール 4119 は短辺 28° で組める quad 1 個のうち許容内 1 個、33° で 6 個のうち 0 個、40° で 1 個のうち
+# 0 個(33° と 40° は解けない)。スケール 4118 は 25〜30° で許容内 9〜10 個、39.4° では 5 個で、種しだいで解けたり
 # 解けなかったりした
 for _iid in range(4111, 4120):
     _short = min(2.0 * _gm(_iid), 30.0 * 60.0)            # 分角
@@ -142,7 +142,7 @@ case("rand300", "一様乱数の星 300 個(ブラインド)", None, 2.3188, siz
 case("rand_hint", "一様乱数の星 60 個 + ヒント + スケール既知", (61.89, 41.96), 1.4616, n_stars=60,
      hint=(0.0, 0.0, 5.0), scale_known=True, random=True)
 
-# 位置の場合と同じ星野(種も同じ)にヒントを与えた版。位置の場合のブラインドは全天探索の速さにも左右される
+# 位置の場合と同じ星野(種も同じ)にヒントを与えたもの。位置の場合のブラインドは全天探索の速さにも左右される
 # (Python 版では tile_corner・ra0・polein が 60 秒に収まらないことがある)ので、位置の扱い(タイルの選び方・
 # 赤経 0°・極)はこちらで速さと切り離して確かめる。種は一覧の順で決まるので、前の場合を変えないよう最後に置く
 for _n, _q in (("tile_edge", False), ("tile_corner", True), ("ra0", True), ("pole89", False),
@@ -151,7 +151,7 @@ for _n, _q in (("tile_edge", False), ("tile_corner", True), ("ra0", True), ("pol
     case(f"{_n}_h", _b["what"] + " + ヒント(0.36° ずれ・半径 1°)", _b["center"], _b["scale"], size=_b["size"],
          rot=_b["rot"], mirror=_b["mirror"], seed=_b["seed"], hint=(0.3, -0.2, 1.0), quick=_q)
 
-# 対応画角の上端近く(短辺 25°・30°、全部の目録、スケール既知・ヒントなし)。改良の当て直しが収束しきらず、
+# 対応画角の上端近く(短辺 25°・30°、全部の目録、スケール既知・ヒントなし)。改良の再フィットが収束しきらず、
 # 中心が許容の 2〜13 倍(125〜750″)・スケールが −0.4〜−1.1 % ずれた解を「解けた」として返したことがある
 # (2026-10-16 の直す前、種 1〜15 × 短辺 25°・30° の 24 回中 6 回)。種は明示する
 for _seed in (3, 10, 12, 13):
@@ -160,10 +160,10 @@ for _seed in (3, 10, 12, 13):
              _short * 60.0 / 800.0, size=(1200, 800), rot=30.0, seed=_seed, scale_known=True)
 
 
-# ------------------------------------------------------------------ 道具 ---
+# ------------------------------------------------------------------ ヘルパー ---
 
 def restrict(catalog, ids):
-    """目録のうち系列 ids だけを見せる写し(ファイルは共有)。"""
+    """目録のうち系列 ids だけを見せるコピー(ファイルは共有)。"""
     c = copy.copy(catalog)
     c.series = {i: catalog.series[i] for i in ids if i in catalog.series}
     c.files = [f for f in catalog.files if f.indexid in c.series]
@@ -171,7 +171,7 @@ def restrict(catalog, ids):
 
 
 def needed(c, catalog):
-    """この場合に要る段がそろっているか。(ok, 足りない説明)。"""
+    """この場合に要るスケールがそろっているか。(ok, 足りない説明)。"""
     have = set(catalog.series) if catalog is not None else set()
     if c["only"]:
         miss = [i for i in c["only"] if i not in have]
@@ -186,7 +186,7 @@ def needed(c, catalog):
 
 
 def match_series(c):
-    """この場合を解くのに使うはずの段: only の先頭か、quad の大きさが短辺の半分に最も近い段。"""
+    """この場合を解くのに使うはずのスケール: only の先頭か、quad の大きさが短辺の半分に最も近いスケール。"""
     if c["only"]:
         return c["only"][0]
     W, H = c["size"]
@@ -321,7 +321,7 @@ def selfcheck_generator(fields, catalog):
 
 
 def selfcheck_contents(fields):
-    """00b: 星の数・偽の星の割合・どの 1 つの索引よりも多い・境界をまたぐ場合が本当にまたいでいる。"""
+    """00b: 星の数・偽の星の割合・どの 1 つのインデックスよりも多い・境界をまたぐ場合が本当にまたいでいる。"""
     bad, notes = [], []
     fr, ratio, same = [], [], []
     for c, f in fields:
@@ -333,9 +333,9 @@ def selfcheck_contents(fields):
             bad.append(f"{c['name']}: 星が {cnt['out']} 個しかない")
         if cnt["out"]:
             fr.append(cnt["out_distractors"] / cnt["out"])
-        # 解くのに使うはずの段(only か、quad の大きさが短辺の半分に近い段)より星が多いか。
-        # 段どうしはほぼ入れ子(細かい段が粗い段の星をほぼ全部含む)なので、集めた星の数は
-        # いちばん細かい段とほぼ同じになる。いちばん細かい段で解く場合(s5202)は同じ数にしかならない
+        # 解くのに使うはずのスケール(only か、quad の大きさが短辺の半分に近いスケール)より星が多いか。
+        # スケールどうしはほぼ入れ子(細かいスケールが粗いスケールの星をほぼ全部含む)なので、集めた星の数は
+        # いちばん細かいスケールとほぼ同じになる。いちばん細かいスケールで解く場合(s5202)は同じ数にしかならない
         mid = match_series(c)
         n_mid = m["series"].get(str(mid), 0)
         finest = max(m["series"].values()) if m["series"] else 0
@@ -426,13 +426,13 @@ def solver_pos(f):
 def wellposed(c, f, catalog):
     """この星野が「設計どおりの解法なら解ける形」か。
 
-    画角に合う段(quad の大きさが [0.1 × 短辺, 対角] に重なる段。only があればそれだけ)の索引の quad のうち、
-    4 星(三角形は 3 星)が全部「出力した本物の星」にあり(1″ 以内)、画素で計算したコードと索引のコードの
-    距離が codetol_for 以内のもの(= 照合で当たるはずの quad)を数える。コードは索引の星の順 A, B, C, D のまま
+    画角に合うスケール(quad の大きさが [0.1 × 短辺, 対角] に重なるスケール。only があればそれだけ)のインデックスの quad のうち、
+    4 星(三角形は 3 星)が全部「出力した本物の星」にあり(1″ 以内)、画素で計算したコードとインデックスのコードの
+    距離が codetol_for 以内のもの(= 照合で当たるはずの quad)を数える。コードはインデックスの星の順 A, B, C, D のまま
     計算するので正準化は要らない。鏡像(det CD > 0)の星野は x と y を入れ替えて計算する(設計書 3.4)。
     星の順位は解法の並び(solver_pos)で数える。
     戻り値 {"quads": 組める数, "good": 許容内の数, "good_top": 許容内で星が全部解法の並びの QUAD_STARS 番以内の数,
-    "first": 許容内で最も早く組める quad の (最後の星の解法の並びでの位置, 距離, 索引名),
+    "first": 許容内で最も早く組める quad の (最後の星の解法の並びでの位置, 距離, インデックス名),
     "dist_max": 組める quad の距離の最大}。
     """
     W, H = f["width"], f["height"]
@@ -455,7 +455,7 @@ def wellposed(c, f, catalog):
             sid = fi.stars_in_cone(center, rad)
             if len(sid) == 0 or len(ridx) == 0:
                 continue
-            dots = rxyz @ fi.star_xyz(sid).T                  # (本物の星, 索引の星)
+            dots = rxyz @ fi.star_xyz(sid).T                  # (本物の星, インデックスの星)
             j = np.argmax(dots, axis=1)
             hit = dots[np.arange(len(ridx)), j] >= tol
             lookup = np.full(fi.nstars, -1, dtype=np.int64)
@@ -510,7 +510,7 @@ def selfcheck_wellposed(fields, catalog):
 
 
 def selfcheck_astropy(fields):
-    """01: 物差しを astropy で確かめる(ヘッダーにした正解を astropy で読み、同じ物差しで測る。
+    """01: 指標を astropy で確かめる(ヘッダーにした正解を astropy で読み、同じ指標で測る。
     位置角は zahyou の wcs_summary と同じ「中心 → +y へ 10 px の点」の position_angle とも比べる)。"""
     from astropy.wcs import WCS
     from astropy.coordinates import SkyCoord
@@ -569,7 +569,7 @@ def perturbed(truth, W, H, kind, k):
 
 
 def selfcheck_fake(fields):
-    """02: 偽のソルバーで物差しを確かめる。正解そのまま → 全部 PASS、許容の半分ずらす → PASS、
+    """02: 偽のソルバーで指標を確かめる。正解そのまま → 全部 PASS、許容の半分ずらす → PASS、
     1.5〜2 倍ずらす → その項目だけ FAIL。乱数の星野に解を返したら FAIL になること。"""
     bad = []
     n = 0
@@ -589,7 +589,7 @@ def selfcheck_fake(fields):
             n += 1
             if cmp["failed"] != expect:
                 bad.append(f"{c['name']}: {kind}×{k} で {cmp['failed']}(期待 {expect}) {describe(cmp)}")
-    # 乱数の星野: 解なしなら PASS、解を返したら・締め切りを 1 秒超えたら FAIL(判定の関数そのもの)
+    # 乱数の星野: 解なしなら PASS、解を返したら・タイムアウトを 1 秒超えたら FAIL(判定の関数そのもの)
     ok_none, _ = judge_random(None, 1.0, 10.0)
     ok_some, _ = judge_random(object(), 1.0, 10.0)
     late, _ = judge_random(None, 11.5, 10.0)
@@ -750,7 +750,7 @@ def main():
             record(c["name"], None, f"索引が無い({DATA})")
         return finish(t_all)
 
-    # 星野を作る(要る段が無い場合は SKIP)
+    # 星野を作る(要るスケールが無い場合は SKIP)
     fields, runnable = [], []
     for c in cases:
         ok, why = needed(c, catalog)

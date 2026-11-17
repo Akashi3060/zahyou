@@ -1,4 +1,4 @@
-//! [準備] タブ: 星図データの表・まとめて準備・置き場所・おすすめ・必要な段・段の一覧・ログ。
+//! [準備] タブ: インデックスファイルの表・まとめて準備・置き場所・おすすめ・必要なスケール・スケールの一覧・ログ。
 
 use eframe::egui::{self, RichText, TextEdit};
 
@@ -126,7 +126,7 @@ impl ZahyouApp {
             widgets::muted(ui, th, "この 2 つから画角を出して、要るスケールだけにチェックを入れます");
             ui.add_space(4.0);
 
-            // 段の一覧。番号順ではなく画角の順(4100 系のあとに 5200 系が来ると、はしごが途中で切れて見える)
+            // スケールの一覧。番号順ではなく画角の順(4100 系のあとに 5200 系が来ると、画角の並びが途中で途切れて見える)
             let rec = zahyou_net::recommended_scales();
             let mut order: Vec<(u32, f64, f64)> = zahyou_net::SCALE_FOV.to_vec();
             order.sort_by(|a, b| (a.1, a.2).partial_cmp(&(b.1, b.2)).unwrap_or(std::cmp::Ordering::Equal));
@@ -146,7 +146,7 @@ impl ZahyouApp {
                         let v = self.marks.entry(s).or_insert(false);
                         ui.horizontal(|ui| {
                             ui.checkbox(v, text);
-                            // v6 には入っている段の印が無かった(gui.md 7.9)。入っていれば「入っています」と出す
+                            // v6 には入っているスケールの表示が無かった(gui.md 7.9)。入っていれば「入っています」と出す
                             if have.contains(&s) {
                                 ui.label(RichText::new("入っています").color(th.ok).size(super::fonts::pt(9.0)));
                             }

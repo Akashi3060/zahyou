@@ -1,8 +1,8 @@
-//! ヘッダーは正しいのに表の中身が壊れた索引(Python 版に無い、Rust で安全に読むための検査)。
+//! ヘッダーは正しいのに表の中身が壊れたインデックス(Python 版に無い、Rust で安全に読むための検査)。
 //!
 //! ヘッダーの検査(validate_index_file・IndexFile::open)は通り、表を mmap するとき(IndexFile::data)に
 //! 文つきの Err になること、そのあと探しても panic せず空を返すことを確かめる。
-//! 星図データ(C:\AstrometryData。ZAHYOU_INDEX_DIR で変えられる)が無ければ SKIP と出して通す(Windows 以外でも。表を開くのは Windows だけ)。
+//! インデックスファイル(C:\AstrometryData。ZAHYOU_INDEX_DIR で変えられる)が無ければ SKIP と出して通す(Windows 以外でも。表を開くのは Windows だけ)。
 
 mod common;
 
@@ -30,7 +30,7 @@ fn put_u32(b: &mut [u8], at: usize, v: u32) {
     b[at..at + 4].copy_from_slice(&v.to_le_bytes());
 }
 
-/// tag の索引を tmp に写し、edit で中身を書き換える。
+/// tag のインデックスを tmp にコピーし、edit で中身を書き換える。
 fn broken_copy(tmp: &Path, tag: &str, label: &str, edit: impl FnOnce(&Path, &mut Vec<u8>)) -> PathBuf {
     let dir = tmp.join(label);
     std::fs::create_dir_all(&dir).unwrap();
@@ -51,7 +51,7 @@ fn corrupted_tables_are_rejected_without_panic() {
     let tmp = temp_dir();
     let mut cases: Vec<(PathBuf, String)> = Vec::new();
 
-    // 1. コード木の lr が途中で減る(区切りの中)
+    // 1. コード木の lr が途中で減る(チャンクの中)
     let p = broken_copy(&tmp, "4119", "lr-dec", |src, b| {
         let (o, _) = table(src, "kdtree_lr_codes");
         let v = get_u32(b, o + 4 * 4);
@@ -93,7 +93,7 @@ fn corrupted_tables_are_rejected_without_panic() {
     });
     cases.push((p, "codes の木の範囲の表がおかしい(scale = nan)".into()));
 
-    // 6. lr が並列の検査の区切り(16384 個)の境目で減る(4110 のコード木は葉が 32768)
+    // 6. lr が並列の検査のチャンク(16384 個)の境目で減る(4110 のコード木は葉が 32768)
     let p = broken_copy(&tmp, "4110", "lr-boundary", |src, b| {
         let (o, n) = table(src, "kdtree_lr_codes");
         assert!(n / 4 > 16384, "葉が少なすぎて境目を試せない");

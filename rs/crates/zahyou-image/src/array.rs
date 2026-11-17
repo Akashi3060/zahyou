@@ -36,7 +36,7 @@ pub(crate) struct Scaling {
 }
 
 impl Scaling {
-    /// astropy の _ImageBaseHDU の規則で型を決める。`native` は圧縮 HDU(展開後はその機械のバイト順)。
+    /// astropy の _ImageBaseHDU の規則で型を決める。`native` は圧縮 HDU(展開後はそのマシンのバイト順)。
     pub fn new(bitpix: i32, bscale: f64, bzero: f64, blank: Option<i64>, native: bool) -> Scaling {
         let blank = if bitpix > 0 { blank } else { None };
         let raw_name = |b: i32| -> &'static str {
@@ -244,7 +244,7 @@ impl Typed {
     }
 }
 
-/// 多次元配列(numpy の形の順、最後の軸が最も速い)から値を取り出す口。
+/// 多次元配列(numpy の形の順、最後の軸が最も速い)から値を取り出すトレイト。
 pub(crate) trait ArraySource {
     fn shape(&self) -> Vec<usize>;
     /// 線形の添字 start から out.len() 個を float32 で。
@@ -313,7 +313,7 @@ pub(crate) fn alloc_filled<T: Clone + Default + Send>(n: usize) -> Result<Vec<T>
 /// 以前は全体を float32 の 3〜4 面ぶん(24 MP で 288 MB)に読んでから合成していた。ここでは blk 画素ずつ
 /// 使い回しの作業領域に読み、合成した輝度だけを出力に積む。作業領域の値は以前の全体の配列の同じ添字の値と同じ
 /// (同じ `read_f32` を同じ添字で呼ぶ)で、輝度の式も括弧まで同じなので、結果はビット単位で同じ。
-/// 区切りは必ず画素の境目(添字は ch の倍数)で、最後の端数の区切りも読む。`par_extend` は添字の順に書く。
+/// ブロックの境目は必ず画素の境目(添字は ch の倍数)で、最後の端数のブロックも読む。`par_extend` は添字の順に書く。
 pub(crate) fn luminance_interleaved(
     src: &mut dyn ArraySource,
     n: usize,
@@ -336,7 +336,7 @@ pub(crate) fn luminance_interleaved(
     Ok(out)
 }
 
-/// `luminance_interleaved` の 1 区切りの画素数(作業領域は 3 色で 6 MB。rayon の呼び出しは区切りごとに 2 回なので
+/// `luminance_interleaved` の 1 ブロックの画素数(作業領域は 3 色で 6 MB。rayon の呼び出しはブロックごとに 2 回なので
 /// 小さすぎると呼び出しの重さが目立つ)
 pub(crate) const LUM_BLOCK: usize = 1 << 19;
 
@@ -459,7 +459,7 @@ mod tests {
                 for (data, scaling) in arrays {
                     let mut a = MemArray { shape: vec![h, wd, ch], data, scaling };
                     let old = old_luminance(&mut a, n, ch, w);
-                    // 区切り: 1 画素・端数の出る大きさ・ちょうど割り切れる大きさ・全体より大きい
+                    // ブロックの大きさ: 1 画素・端数の出る大きさ・ちょうど割り切れる大きさ・全体より大きい
                     for &blk in &[1usize, 7, n / 3, n, n + 5, LUM_BLOCK] {
                         let new = luminance_interleaved(&mut a, n, ch, w, blk).unwrap();
                         assert_eq!(new.len(), n);

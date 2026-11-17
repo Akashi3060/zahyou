@@ -2,7 +2,7 @@
 
 使い方(numpy・astropy が要る):
     python gen_wcs.py
-同じフォルダーに次の 4 つを書く。Rust の試験 crates/zahyou-wcs/tests/python_ref.rs がこれと比べる。
+同じフォルダーに次の 4 つを書く。Rust のテスト crates/zahyou-wcs/tests/python_ref.rs がこれと比べる。
     wcs_proj.json     乱数の WCS(TAN・SIP 2 次・3 次、逆変換あり・なし)で 画素 ↔ 天、スケール、鏡像、ヘッダーのカード、COMMENT の折り返し
     wcs_fit.json      4 点の相似変換、重みつき最小二乗(TAN・SIP 2 次・3 次)、SIP の逆変換、縮退した入力
     wcs_header.json   いろいろな形のヘッダー(CD・PC+CDELT・CROTA2・LONPOLE・極・solve-field の実物)を astropy が読んだ結果
@@ -196,7 +196,7 @@ def gen_proj():
     dump("wcs_proj.json", {"meta": meta(), "cases": cases, "wraps": wraps})
 
 
-# -------------------------------------------------------------- 当てはめ ---
+# -------------------------------------------------------------- フィット ---
 
 def gen_fit():
     rng = np.random.default_rng(1015)

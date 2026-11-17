@@ -1,4 +1,4 @@
-//! 画素スケールの推定と機材の記憶、星図データの段と画角の対応。
+//! 画素スケールの推定と機材の記憶、インデックスファイルのスケールと画角の対応。
 //!
 //! Python 版 `dev/zahyou_core.py` の `_first_float`・`rig_key`・`remembered_scale`・`remember_scale`・
 //! `estimate_pixel_scale`・`implied_focal_length`・`index_coverage`・`blind_scale_bounds`・`missing_index_advice` と、
@@ -9,7 +9,7 @@
 //!
 //! Python 版との違い(意図したもの)
 //! - 値の無いカード(astropy の `Undefined`)は、文字列の候補としては「無い」扱いにする。Python では
-//!   `str(Undefined)` がオブジェクトの番地を含む文字列になり、機材の鍵が実行のたびに変わってしまう。
+//!   `str(Undefined)` がオブジェクトのアドレスを含む文字列になり、機材のキーが実行のたびに変わってしまう。
 //! - 画像に入っている WCS は `zahyou_wcs::Wcs::from_header_cards` で読む。読めるのは TAN(と SIP)だけで、
 //!   ほかの投影(SIN など)は「WCS なし」として次の手がかり(CDELT1 など)へ進む。astropy は SIN なども読む。
 #![forbid(unsafe_code)]
@@ -30,7 +30,7 @@ pub const ARCSEC_PER_UM_PER_MM: f64 = 206.264806;
 pub const SCALE_MIN: f64 = 0.01;
 pub const SCALE_MAX: f64 = 3600.0;
 
-/// 星図データの段(番号の末尾 2 桁)→ 画角 [分角] の範囲。Python の `_INDEX_SCALES`。
+/// インデックスファイルのスケール(番号の末尾 2 桁)→ 画角 [分角] の範囲。Python の `_INDEX_SCALES`。
 pub const INDEX_SCALES: [(u32, f64, f64); 20] = [
     (0, 2.0, 2.8),
     (1, 2.8, 4.0),
@@ -130,7 +130,7 @@ fn first_truthy<'a>(header: &'a [Card], keys: &[&str]) -> Option<&'a CardValue> 
 
 // ------------------------------------------------------------------ 機材の記憶 ---
 
-/// 「同じ機材・同じ画像の大きさ」を表す鍵(Python の `rig_key`)。
+/// 「同じ機材・同じ画像の大きさ」を表すキー(Python の `rig_key`)。
 /// 形は `"{カメラ}|{望遠鏡}|{幅}x{高さ}|bin{ビニング}|f{焦点距離}"`。
 pub fn rig_key(header: &[Card], width: usize, height: usize) -> String {
     let cam = first_truthy(header, &["INSTRUME", "CAMID", "CAMERA"]).map(py_str).unwrap_or_else(|| "?".to_string());
@@ -266,9 +266,9 @@ pub fn implied_focal_length(header: &[Card], scale_arcsec: f64) -> Option<f64> {
     Some(ARCSEC_PER_UM_PER_MM * pix / scale_arcsec)
 }
 
-// ------------------------------------------------------------------ 星図データの段と画角 ---
+// ------------------------------------------------------------------ インデックスファイルのスケールと画角 ---
 
-/// `index-XXXX[-YY].fits` の段(番号の末尾 2 桁)。読めなければ None(Python の index_coverage の読み方)。
+/// `index-XXXX[-YY].fits` のスケール(番号の末尾 2 桁)。読めなければ None(Python の index_coverage の読み方)。
 pub fn index_scale_of_name(name: &str) -> Option<u32> {
     let core = Path::new(name).file_name()?.to_str()?;
     let rest = core.strip_prefix("index-")?;
@@ -279,12 +279,12 @@ pub fn index_scale_of_name(name: &str) -> Option<u32> {
     num[num.len() - 2..].parse().ok()
 }
 
-/// 段の画角 [分角]。
+/// スケールの画角 [分角]。
 pub fn index_scale_fov(scale: u32) -> Option<(f64, f64)> {
     INDEX_SCALES.iter().find(|r| r.0 == scale).map(|r| (r.1, r.2))
 }
 
-/// 索引ファイルの名前の一覧から、扱える画角 [分角] の範囲(Python の `index_coverage`)。
+/// インデックスファイルの名前の一覧から、扱える画角 [分角] の範囲(Python の `index_coverage`)。
 pub fn index_coverage<S: AsRef<str>>(names: &[S]) -> Option<(f64, f64)> {
     let mut out: Option<(f64, f64)> = None;
     for n in names {
@@ -306,7 +306,7 @@ pub fn blind_scale_bounds<S: AsRef<str>>(width_px: usize, names: &[S]) -> (f64, 
     (low.max(0.01), high.min(3600.0))
 }
 
-/// この画角を解くにはどの索引を足せばよいか(Python の `missing_index_advice`)。戻り値 (足りているか, 案内文)。
+/// この画角を解くにはどのインデックスを足せばよいか(Python の `missing_index_advice`)。戻り値 (足りているか, 案内文)。
 pub fn missing_index_advice<S: AsRef<str>>(fov_arcmin: f64, names: &[S]) -> (bool, Vec<String>) {
     let have: Vec<u32> = names.iter().filter_map(|n| index_scale_of_name(n.as_ref())).collect();
     let need: Vec<u32> = INDEX_SCALES.iter().filter(|r| r.1 <= fov_arcmin && fov_arcmin < r.2).map(|r| r.0).collect();

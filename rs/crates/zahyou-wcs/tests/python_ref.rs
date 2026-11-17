@@ -115,7 +115,7 @@ fn sip_px(a: &[f64], b: &[f64], n: usize, l: f64) -> (f64, f64) {
 }
 
 /// SIP の係数を比べる。px の差はいつも、相対誤差は SIP の効きが 0.01 px 以上のときだけ記録する
-/// (真の WCS が TAN で、当てた SIP が投影の丸めぶんしか無いときは、相対誤差に意味が無い)。
+/// (真の WCS が TAN で、フィットした SIP が投影の丸めぶんしか無いときは、相対誤差に意味が無い)。
 fn put_sip(w: &mut Worst, key: &str, pairs: [(&[f64], &[f64]); 2], n: usize, l: f64) {
     let (mut d, mut s) = (0.0f64, 0.0f64);
     for (a, b) in pairs {
@@ -250,7 +250,7 @@ fn projection_and_cards_match_python() {
     }
 }
 
-// -------------------------------------------------------------- 当てはめ ---
+// -------------------------------------------------------------- フィット ---
 
 #[test]
 fn fits_match_python() {
@@ -294,7 +294,7 @@ fn fits_match_python() {
                         eprintln!("      A(Rust)   {:?}\n      A(Python) {:?}\n      B(Rust)   {:?}\n      B(Python) {:?}", gs.a, es.a, gs.b, es.b);
                     }
                 }
-                // 当てた WCS どうしで、点の位置の天と画素を比べる
+                // フィットした WCS どうしで、点の位置の天と画素を比べる
                 let srad = exp.pixel_scale_arcsec() / ARCSEC_PER_RAD;
                 for p in field.iter().filter(|p| p[0].is_finite()) {
                     w.put("最小二乗 当てた WCS の画素→天 [px]", ang(g.pix_to_xyz(p[0], p[1]), exp.pix_to_xyz(p[0], p[1])) / srad);

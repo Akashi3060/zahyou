@@ -3,7 +3,7 @@
 //! 拡張子が FITS のもの(.fits .fit .fts .fz .fits.gz .fit.gz)は FITS → 画像ファイルの順、それ以外は逆の順で試す
 //! (拡張子と中身が食い違うファイル対策)。読めたら
 //! 1. 2 次元・16 画素以上かを確かめる
-//! 2. 表示用の面は今の配列をそのまま持つ(写さない。検出用の面は 3・4・6 で書き換えるときだけ新しい配列にする)
+//! 2. 表示用の面は今の配列をそのまま持つ(コピーしない。検出用の面は 3・4・6 で書き換えるときだけ新しい配列にする)
 //! 3. ベイヤー配列のキーがあれば 3×3 の二項フィルター [1,2,1]⊗[1,2,1]/16 で市松模様を消す(星の位置はずれない)
 //! 4. 非有限値を有限値の中央値で埋める
 //! 5. 一様なら Err
@@ -52,9 +52,9 @@ impl std::error::Error for LoadError {}
 
 const FITS_EXT: [&str; 6] = [".fits", ".fit", ".fts", ".fz", ".fits.gz", ".fit.gz"];
 
-/// 読み込み器の結果(2 次元の画素、高さ、幅、ヘッダー、説明、上下反転)。
+/// ローダーの結果(2 次元の画素、高さ、幅、ヘッダー、説明、上下反転)。
 type Raw = (Vec<f32>, usize, usize, Vec<Card>, Vec<String>, bool);
-/// 読み込み器(FITS か画像ファイル)
+/// ローダー(FITS か画像ファイル)
 type Loader = fn(&Path) -> Result<Raw, String>;
 
 fn via_fits(path: &Path) -> Result<Raw, String> {
@@ -160,7 +160,7 @@ fn count_bad_min_max(v: &[f32]) -> (usize, f32, f32) {
 }
 
 /// 画素ごとの変換を面にかける。ほかと共有していない(`Arc` が 1 つだけの)面はその場で書き換え、
-/// 表示用の面と共有しているなら、並列の map で新しい配列を作る(`Arc::make_mut` のように直列で写してから
+/// 表示用の面と共有しているなら、並列の map で新しい配列を作る(`Arc::make_mut` のように直列でコピーしてから
 /// 書き換えると、96 MB の直列の memcpy が残る)。どちらも各画素に同じ `f` をかけるだけなので値は同じ。
 fn map_plane(img: &mut Arc<Image2D>, f: impl Fn(f32) -> f32 + Sync + Send) {
     if let Some(m) = Arc::get_mut(img) {
@@ -201,7 +201,7 @@ pub fn load_image_any(path: impl AsRef<Path>) -> Result<Loaded, LoadError> {
 /// 読めた画素から `Loaded` を作る(モジュールの説明の 1〜6)。
 ///
 /// 表示用の面は読み込んだままの配列をそのまま持ち、検出用の面は書き換えが要るときだけ新しい配列にする
-/// (以前は最初に `data.clone()` で表示用を写していた。値は同じ: 表示用は今も加工前の値)。
+/// (以前は最初に `data.clone()` で表示用をコピーしていた。値は同じ: 表示用は今も加工前の値)。
 /// - ベイヤー: `binomial3` が新しい配列を返す(表示用はそのまま)
 /// - 非有限値の補完・明暗の反転: `map_plane`(共有中なら並列に新しい配列、単独ならその場で)
 /// - どれも無ければ検出用と表示用は同じ配列
@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn count_bad_min_max_values() {
         // 最小・最大は、非有限値があっても同じ v の min_max と同じ値(説明のとおり)。0 以外ならビットも同じ。
-        // 区切り(1 << 16)をまたぐ長さで、NaN・±inf の有り無しを試す
+        // 並列のブロック(1 << 16)の境目をまたぐ長さで、NaN・±inf の有り無しを試す
         let mut r = Rng(0x0dd_ba11_cafe_f00d);
         let n = (1 << 16) * 2 + 333;
         let base: Vec<f32> = (0..n).map(|_| r.next() * 1000.0 - 500.0).collect();
@@ -471,7 +471,7 @@ mod tests {
 
     #[test]
     fn plain_image_shares_one_array() {
-        // 加工の無い画像では検出用と表示用が同じ配列(写しを作らない)
+        // 加工の無い画像では検出用と表示用が同じ配列(コピーを作らない)
         let d: Vec<f32> = (0..400).map(|i| i as f32).collect();
         let l = finish(d, 20, 20, vec![], vec![], false).unwrap();
         assert!(Arc::ptr_eq(&l.data, &l.display));

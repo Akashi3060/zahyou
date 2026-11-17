@@ -1,7 +1,7 @@
-//! 索引に入っている quad のコードを星から計算する(index-format.md 8.1。Python 版 `sv_index_codes_from_xyz`)。
+//! インデックスに入っている quad のコードを星から計算する(index-format.md 8.1。Python 版 `sv_index_codes_from_xyz`)。
 //!
 //! 投影中心 = A と B の中点の方向、x = 北・y = 東の心射投影、A → (0, 0)・B → (1, 1) の相似変換。
-//! この式を符号化すると、保存されている整数と全 quad で一致する(試験で確かめる)。
+//! この式を符号化すると、保存されている整数と全 quad で一致する(テストで確かめる)。
 
 use zahyou_wcs::{add, cross, dot, normalize, Vec3};
 
@@ -22,7 +22,7 @@ fn cdiv(ar: f64, ai: f64, br: f64, bi: f64) -> (f64, f64) {
     }
 }
 
-/// quad の星(単位ベクトル。並びは A, B, C(, D))から、索引のコードを計算する。
+/// quad の星(単位ベクトル。並びは A, B, C(, D))から、インデックスのコードを計算する。
 ///
 /// 戻り値は (cx, cy, dx, dy)。三角形(星 3 つ)は (cx, cy, 0, 0)。星の数が 3 か 4 でなければ None。
 pub fn quad_code_from_xyz(stars: &[Vec3]) -> Option<[f64; 4]> {

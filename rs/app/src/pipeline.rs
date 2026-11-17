@@ -1,6 +1,6 @@
 //! 解析の流れ(画面を持たない)。Python 版 `dev/nb_main.py` の `run()` と、`dev/zahyou_plot.py` の
 //! `wcs_summary`・`print_solution`・`report_offsets`、`dev/zahyou_core.py` の `solver_diagnostics`・
-//! `index_catalog`・`_solve_offline` の前後のログ(画素スケールと段の案内・解けなかったときの案内)を移したもの。
+//! `index_catalog`・`_solve_offline` の前後のログ(画素スケールとインデックスのスケールの案内・解けなかったときの案内)を移したもの。
 //!
 //! 流れ: 画像を読む → 星を検出する(60 個まで粘る)→ つながりを決める → 目標を決める → 画素スケールを推す →
 //! (画像の WCS → オンライン → オフライン の順に)解く → 検算 → 結果のまとめ → 図 1(撮影時の向き)→
@@ -9,11 +9,11 @@
 //! 画面(app の gui)はワーカーのスレッドで [`run`] を呼び、`cancel` を立てて中止を伝える。
 //! ログは `log` に 1 行ずつ(先頭に改行を含むことがある。Python の `_log` と同じ)届く。
 //!
-//! 係の分担(オフライン解析): 事前のログ(画素スケール・手持ちの段・足りない段)と、解けなかったときの案内と、
-//! 中止の「■ 中止しました。」はここが出す。`zahyou_solver::solve_offline_detailed` が出すのは深い検出と
-//! 試行のはしごのログ(`[i/N] ラベル (最大 t 秒)`・探索・解の要約・`✅ 解析成功 (ラベル)`・星が 1〜2 個のときの
+//! モジュールの分担(オフライン解析): 事前のログ(画素スケール・手持ちのスケール・足りないスケール)と、解けなかったときの案内と、
+//! 中止の「■ 中止しました。」はここが出す。`zahyou_solver::solve_offline_detailed` が出すのはディープ検出と
+//! 段階的な試行のログ(`[i/N] ラベル (最大 t 秒)`・探索・解の要約・`✅ 解析成功 (ラベル)`・星が 1〜2 個のときの
 //! 「❌ 星が N 個しかない」・途中の失敗)。解けなかったときの案内は、解法が返す止まった理由(`OfflineStop`)と
-//! 深い検出の星の数で選ぶ(Python の `_solve_offline` の末尾と同じ分岐)。
+//! ディープ検出の星の数で選ぶ(Python の `_solve_offline` の末尾と同じ分岐)。
 #![forbid(unsafe_code)]
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -29,7 +29,7 @@ use zahyou_wcs::{Card, CardValue, Wcs};
 
 use crate::scale::{self, fmt_g};
 
-/// 星図データの既定の置き場所(Python の `DEFAULT_INDEX_DIR`)。
+/// インデックスファイルの既定の置き場所(Python の `DEFAULT_INDEX_DIR`)。
 pub const DEFAULT_INDEX_DIR: &str = r"C:\AstrometryData";
 /// 既定の目標(Python の nb_settings / GUI の初期値)。
 pub const DEFAULT_TARGET: &str = "UCAC4 660-021020";
@@ -40,10 +40,10 @@ fn rule() -> String {
     "=".repeat(62)
 }
 
-/// ログの見出しに出す版。画面の版名(main.rs の APP_VER)と同じ(例: "v8"、β版なら "v8-beta.1")。
+/// ログの見出しに出すバージョン。画面のバージョン名(main.rs の APP_VER)と同じ(例: "v8"、β版なら "v8-beta.1")。
 ///
-/// 第 2 段の試作のあいだはパッケージの版が "0.7.0-dev" で、Python 版の言い方 "v7-dev" に直していた。
-/// v7 のβ版から 7.0.0 まではパッケージの版をそのまま版名にしていた("v7.0.0")。2026-10-24 から、末尾の 0 を省いた
+/// 第 2 段階の試作のあいだはパッケージのバージョンが "0.7.0-dev" で、Python 版の言い方 "v7-dev" に直していた。
+/// v7 のβ版から 7.0.0 まではパッケージのバージョンをそのままバージョン名にしていた("v7.0.0")。2026-10-24 から、末尾の 0 を省いた
 /// 整数の形("v7"・"v8")にした(GitHub のタグ名と同じ。更新の確認は足りない部分を 0 として読むので、比べ方は変わらない)。
 pub fn log_version() -> String {
     crate::APP_VER.to_string()
@@ -75,7 +75,7 @@ pub enum SolveMode {
     Offline,
 }
 
-/// 解析 1 回の設定(Python の run() が global から読む 14 個 + 星図データの置き場所)。
+/// 解析 1 回の設定(Python の run() が global から読む 14 個 + インデックスファイルの置き場所)。
 #[derive(Clone, Debug)]
 pub struct RunParams {
     pub mode: InputMode,
@@ -101,10 +101,10 @@ pub struct RunParams {
     pub show_sources: bool,
     /// 画像のパス
     pub image_path: PathBuf,
-    /// 星図データの置き場所(空なら C:\AstrometryData)
+    /// インデックスファイルの置き場所(空なら C:\AstrometryData)
     pub index_dir: PathBuf,
     /// nova.astrometry.net の API キー(画面の「API キー」の欄の値)。Some で空なら問い合わせない
-    /// (「自動」はオフラインへ、「オンラインのみ」は「API キーが空です」)。None(自己診断・速さの物差し)なら
+    /// (「自動」はオフラインへ、「オンラインのみ」は「API キーが空です」)。None(自己診断・速さのベンチマーク)なら
     /// 環境変数 ASTROMETRY_API_KEY、無ければ既定のキー(v6 と同じ)。Debug では値を伏せる
     pub api_key: Option<zahyou_net::nova::ApiKey>,
 }
@@ -185,13 +185,13 @@ pub struct RunResult {
     /// 解けた WCS(解けない・中止・検算に落ちたときは None。Python の run() の戻り値)
     pub wcs: Option<Wcs>,
     pub summary: Option<Summary>,
-    /// 目標があって、図 2 の段まで進んだときだけ
+    /// 目標があって、図 2 の段階まで進んだときだけ
     pub offsets: Option<Offsets>,
     /// 図(目標があれば 撮影時の向き → 北が上 の 2 枚、無ければ 1 枚)
     pub figures: Vec<zahyou_plot::Figure>,
     /// かかった時間 [秒]
     pub seconds: f64,
-    /// 終わった時点で中止の合図が立っていたか
+    /// 終わった時点で中止のフラグが立っていたか
     pub cancelled: bool,
     /// 読み込んだ画像の大きさ (幅, 高さ)
     pub image_size: Option<(usize, usize)>,
@@ -257,12 +257,12 @@ impl RunResult {
 pub type OfflineSolverFn =
     dyn Fn(&OfflineRequest, &Catalog, &Params, &Control) -> Result<OfflineOutcome, SolveError> + Sync;
 
-/// 差し替えの解法が返す「試行のはしごを試した」結果(深い検出の星の数は 0 とする)。
+/// 差し替えの解法が返す「段階的な試行をひととおり終えた」結果(ディープ検出の星の数は 0 とする)。
 pub fn tried(solution: Option<zahyou_solver::Solution>) -> OfflineOutcome {
     OfflineOutcome { solution, n_deep: 0, stop: OfflineStop::Tried }
 }
 
-/// 試験・自己診断・速さの物差しのための差し替え。画面からは [`RunEnv::default`](= 本物)で使う。
+/// テスト・自己診断・速さのベンチマークのための差し替え。画面からは [`RunEnv::default`](= 本物)で使う。
 #[derive(Default)]
 pub struct RunEnv<'a> {
     /// cache.json の場所(None なら `zahyou_net::cache_path()` = %LOCALAPPDATA%\zahyou\cache.json)
@@ -271,7 +271,7 @@ pub struct RunEnv<'a> {
     pub offline_solver: Option<&'a OfflineSolverFn>,
     /// AUTO のときのつながりの判定(None なら `zahyou_net::internet_available()`)
     pub online: Option<bool>,
-    /// 図を描かない(速さの物差し・試験用)
+    /// 図を描かない(速さのベンチマーク・テスト用)
     pub skip_figures: bool,
 }
 
@@ -282,7 +282,7 @@ pub fn run(params: &RunParams, cancel: &AtomicBool, log: &(dyn Fn(&str) + Sync))
     run_with(params, &RunEnv::default(), cancel, log)
 }
 
-/// [`run`] の差し替え口つきの版。
+/// [`run`] に差し替え口を付けたもの。
 pub fn run_with(params: &RunParams, env: &RunEnv, cancel: &AtomicBool, log: &(dyn Fn(&str) + Sync)) -> RunResult {
     let t0 = Instant::now();
     let mut res = match catch_unwind(AssertUnwindSafe(|| Runner::new(params, env, cancel, log, t0).run())) {
@@ -466,7 +466,7 @@ impl<'a> Runner<'a> {
 
         let Some(wcs) = wcs else {
             if self.cancelled(false) {
-                // 中止はオフライン解析(か、その前の段)が知らせ済み
+                // 中止はオフライン解析(か、その前の段階)が知らせ済み
                 return self.res;
             }
             self.log("\n❌ 座標を特定できませんでした。");
@@ -497,7 +497,7 @@ impl<'a> Runner<'a> {
         let _ = scale::remember_scale(&loaded.header, nx, ny, summary.scale, &self.cache_file);
 
         // 図を描く前に、もう使わない大きな配列を放す(24 MP なら前処理の sub 96 MB・mask 24 MB と、検出用の面 96 MB)。
-        // 図の段は一時の確保がいちばん多い所なので、私有メモリの最大が下がる。ここから先に要るのは表示用の面と
+        // 図の段階は一時の確保がいちばん多い所なので、私有メモリの最大が下がる。ここから先に要るのは表示用の面と
         // 上下反転・検出した星・WCS・目標だけ。`let Loaded { display, .. } = loaded` のような部分 move では、
         // 残り(検出用の面)が run() の終わりまで生きるので、検出用の面は名前で受けて drop する
         // (加工の無い画像では表示用と同じ配列なので、参照が 1 つ減るだけで解放はされない)
@@ -709,7 +709,7 @@ impl<'a> Runner<'a> {
         if let Some(sol) = out.solution {
             return Some(sol.wcs);
         }
-        // 「写っている星が N 個」は標準の検出と深い検出の多いほう(Python の max(len(sources), len(deep_stars)))
+        // 「写っている星が N 個」は標準の検出とディープ検出の多いほう(Python の max(len(sources), len(deep_stars)))
         let n_best = inp.sources.len().max(out.n_deep);
         match out.stop {
             OfflineStop::Tried => {
@@ -868,7 +868,7 @@ pub fn offsets_lines(o: &Offsets) -> Vec<String> {
     ]
 }
 
-/// 図 2 の題(Python の `plot_north_up`。図の題は zahyou-plot が作るので、試験で照合するときだけ使う)。
+/// 図 2 のタイトル(Python の `plot_north_up`。図のタイトルは zahyou-plot が作るので、テストで照合するときだけ使う)。
 #[cfg(test)]
 pub fn north_up_title(o: &Offsets) -> String {
     format!(
@@ -903,22 +903,22 @@ fn draw_north_up(wcs: &Wcs, img: &Image2D, target: (f64, f64)) -> Result<zahyou_
     zahyou_plot::figure_north_up(img, wcs, Some(target)).map_err(|e| e.to_string())
 }
 
-// ================================================================== 星図データ ===
+// ================================================================== インデックスファイル ===
 
-/// 星図データの事前確認(Python の `solver_diagnostics`)。
+/// インデックスファイルの事前確認(Python の `solver_diagnostics`)。
 #[derive(Clone, Debug)]
 pub struct Diagnostics {
     /// オフライン解析できるか
     pub ok: bool,
     /// 画面とログに出す注意(Python と同じ文)
     pub messages: Vec<String>,
-    /// 検査に通った索引ファイルの名前(名前の順)
+    /// 検査に通ったインデックスファイルの名前(名前の順)
     pub indexes: Vec<String>,
     /// 目録(ok のとき)。同じ置き場所・同じ中身なら前回のものを使い回す
     pub catalog: Option<Arc<Catalog>>,
 }
 
-/// 目録の「中身の目印」: 置き場所・フォルダーの更新時刻・索引ファイルの (名前, 大きさ, 更新時刻)。
+/// 目録のキー(中身が前回と同じかを見分ける): 置き場所・フォルダーの更新時刻・インデックスファイルの (名前, 大きさ, 更新時刻)。
 type CatalogKey = (PathBuf, Option<SystemTime>, Vec<(String, u64, Option<SystemTime>)>);
 
 static CATALOG: Mutex<Option<(CatalogKey, Arc<Catalog>)>> = Mutex::new(None);
@@ -941,7 +941,7 @@ fn catalog_key(dir: &Path) -> Option<CatalogKey> {
     Some((norm, dir_mtime, files))
 }
 
-/// 星図データの目録(Python の `index_catalog`)。置き場所と中身が前回と同じなら使い回す。
+/// インデックスファイルの目録(Python の `index_catalog`)。置き場所と中身が前回と同じなら使い回す。
 pub fn index_catalog(dir: &Path) -> Arc<Catalog> {
     let key = catalog_key(dir);
     let mut g = CATALOG.lock().unwrap_or_else(|e| e.into_inner());
@@ -960,8 +960,8 @@ pub fn index_catalog(dir: &Path) -> Arc<Catalog> {
     cat
 }
 
-/// 覚えている目録を手放す(索引ファイルの mmap を閉じる)。Windows では mmap 中のファイルを消したり
-/// 置き換えたりできないので、画面は星図データを落とし直す前にこれを呼ぶ(Python の `release_index_catalog`)。
+/// 覚えている目録を手放す(インデックスファイルの mmap を閉じる)。Windows では mmap 中のファイルを消したり
+/// 置き換えたりできないので、画面はインデックスファイルをダウンロードし直す前にこれを呼ぶ(Python の `release_index_catalog`)。
 pub fn release_index_catalog() {
     let mut g = CATALOG.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((_, cat)) = g.take() {
@@ -969,7 +969,7 @@ pub fn release_index_catalog() {
     }
 }
 
-/// 星図データが本当に使えるかを事前に確かめる(Python の `solver_diagnostics`)。
+/// インデックスファイルが本当に使えるかを事前に確かめる(Python の `solver_diagnostics`)。
 pub fn solver_diagnostics(index_dir: &Path) -> Diagnostics {
     let mut d = Diagnostics { ok: false, messages: Vec::new(), indexes: Vec::new(), catalog: None };
     if !index_dir.is_dir() {
@@ -1011,7 +1011,7 @@ pub fn solver_diagnostics(index_dir: &Path) -> Diagnostics {
     d
 }
 
-/// オフライン解析の前に出す行(Python の `_solve_offline` の冒頭: 画素スケールと画角・手持ちの段・足りない段)。
+/// オフライン解析の前に出す行(Python の `_solve_offline` の冒頭: 画素スケールと画角・手持ちのスケール・足りないスケール)。
 pub fn offline_prelog<S: AsRef<str>>(
     scale: Option<f64>,
     how: &str,
@@ -1021,7 +1021,7 @@ pub fn offline_prelog<S: AsRef<str>>(
 ) -> Vec<String> {
     let mut out = Vec::new();
     let fov = scale.map(|s| (nx as f64 * s / 60.0, ny as f64 * s / 60.0));
-    // 星の並び (quad) は「短いほうの辺」に収まる大きさまでしか作れないので、必要な索引は短辺で決まる
+    // 星の並び (quad) は「短いほうの辺」に収まる大きさまでしか作れないので、必要なインデックスは短辺で決まる
     match (scale, fov) {
         (Some(s), Some((w, h))) => {
             out.push(format!("  - 画素スケール {s:.3}″/px ({how}) → 画角 {w:.1}′ x {h:.1}′ (短辺 {:.1}′)", w.min(h)));
@@ -1064,7 +1064,7 @@ pub fn offline_prelog<S: AsRef<str>>(
 }
 
 /// すべての試行で解けなかったときの案内(Python の `_solve_offline` の末尾)。
-/// `n_best` は標準の検出と深い検出の星の数の多いほう(Python の `n_best`)。
+/// `n_best` は標準の検出とディープ検出の星の数の多いほう(Python の `n_best`)。
 pub fn offline_advice<S: AsRef<str>>(
     n_best: usize,
     scale: Option<f64>,
@@ -1596,7 +1596,7 @@ pub fn parse_coords(ra: &str, dec: &str) -> Result<(f64, f64), String> {
     Ok((wrap_longitude(r), d))
 }
 
-// ================================================================== 試験 ===
+// ================================================================== テスト ===
 
 #[cfg(test)]
 mod tests {
@@ -1605,12 +1605,12 @@ mod tests {
     #[test]
     fn version_text() {
         let v = log_version();
-        // ログの見出し・画面の版名・exe の ProductVersion(build.rs)は同じ版名
+        // ログの見出し・画面のバージョン名・exe の ProductVersion(build.rs)は同じバージョン名
         assert_eq!(v, crate::APP_VER);
         assert_eq!(v, expected_label(), "build.rs の version_label と、ここで組み立てたバージョン名が違う");
-        // 版の文字はここに書かない。以前は `if 版 == "7.0.0-beta.2" { … }` の形で、版を上げて直し忘れると条件が外れ、
-        // 黙って通っていた。代わりに cargo が分けた大・中・小・プレリリースと、更新の確認の読み方が同じかを見る
-        // (読めないと、正式版の扱い = GitHub の latest だけを見ることになる)。文書に書いた版は次の試験
+        // バージョンの文字はここに書かない。以前は `if バージョン == "7.0.0-beta.2" { … }` の形で、バージョンを上げて直し忘れると条件が外れ、
+        // 黙って通っていた。代わりに cargo が分けたメジャー・マイナー・パッチ・プレリリースと、更新の確認の読み方が同じかを見る
+        // (読めないと、正式版の扱い = GitHub の latest だけを見ることになる)。文書に書いたバージョンは次のテスト
         let parsed = zahyou_net::update::parse_version(&v).unwrap_or_else(|| panic!("バージョン名を読めません: {v}"));
         let num = |s: &str| s.parse::<u64>().unwrap();
         assert_eq!(
@@ -1623,16 +1623,16 @@ mod tests {
             "{v}"
         );
         assert_eq!(parsed.pre.join("."), env!("CARGO_PKG_VERSION_PRE"), "{v}");
-        // β版(プレリリース)なら、更新の確認は GitHub のプレリリースも含めた一覧から同じ大きな版の新しいものを探し、
-        // 題・起動のログ・［使い方］に「β版」と添える
+        // β版(プレリリース)なら、更新の確認は GitHub のプレリリースも含めた一覧から同じメジャーバージョンの新しいものを探し、
+        // ウィンドウのタイトル・起動のログ・［使い方］に「β版」と添える
         if env!("CARGO_PKG_VERSION_PRE").starts_with("beta") {
             assert!(parsed.is_prerelease(), "{v}");
             assert_eq!(zahyou_net::update::prerelease_label(&v), Some("β版"));
         }
     }
 
-    /// 版名の決まり(build.rs の version_label と同じことを、cargo が分けた数から組み立て直す):
-    /// "v" + 大きな版、中か小が 0 でなければ ".中"、小が 0 でなければ ".小"、プレリリースがあれば "-" + プレリリース。
+    /// バージョン名の決まり(build.rs の version_label と同じことを、cargo が分けた数から組み立て直す):
+    /// "v" + メジャー、マイナーかパッチが 0 でなければ ".マイナー"、パッチが 0 でなければ ".パッチ"、プレリリースがあれば "-" + プレリリース。
     /// 8.0.0 → v8、8.0.0-beta.1 → v8-beta.1、7.1.0 → v7.1、7.0.1 → v7.0.1。
     fn expected_label() -> String {
         let (major, minor, patch, pre) = (
@@ -1654,12 +1654,13 @@ mod tests {
         s
     }
 
-    /// 版を上げたときに直す文書(docs/release-v7.md 2 節)が、Cargo.toml の版と同じ版を書いているか。
-    /// 「数.数.数-beta.数」の形は Cargo の版と、版名の形「v数-beta.数」「v数.数-beta.数」は版名と比べ、違うものがあれば落とす
-    /// (版の文字は試験に書かない)。正式版(プレリリースの部分なし)にしたら、β の版の文字が 1 つでも残っていれば落ちる
-    /// (README とマニュアルを正式版の形にする。docs/release-v7.md 8 節の 2)。`-beta.N` の書き方は拾わない。
-    /// NB_VERSION が版名か、直下のノートブックが zahyou_v<大きな版>.ipynb の 1 つだけかも見る。
-    /// 正式版どうしの版上げ(7 → 8)の、README・マニュアルの前の版の文字の残りは見ない(配っている前の版の事実として
+    /// バージョンを上げたときに直す文書(docs/release-v7.md 2 節)が、Cargo.toml のバージョンと同じバージョンを書いているか。
+    /// 「数.数.数-beta.数」の形は Cargo のバージョンと、バージョン名の形「v数-beta.数」「v数.数-beta.数」はバージョン名と比べ、
+    /// 違うものがあれば失敗にする(バージョンの文字はテストに書かない)。正式版(プレリリースの部分なし)にしたら、
+    /// β のバージョンの文字が 1 つでも残っていれば失敗する
+    /// (README とマニュアルを正式版の形にする。docs/release-v7.md 8 節の 2)。`-beta.N` の書き方は取り出さない。
+    /// NB_VERSION がバージョン名か、直下のノートブックが zahyou_v<メジャーバージョン>.ipynb の 1 つだけかも見る。
+    /// 正式版どうしでバージョンを上げたとき(7 → 8)の、README・マニュアルの前のバージョンの文字の残りは見ない(配っている前のバージョンの事実として
     /// 正しい所があるため。docs/release-v7.md 2 節の grep で探す)。
     #[test]
     fn version_in_docs_matches_cargo() {
@@ -1676,7 +1677,7 @@ mod tests {
                         bad.push(format!("{rel}:{}: {tok}", line_no + 1));
                     }
                 }
-                // 版名の形(「v8-beta.1」。窓の題・NB_VERSION・タグ)は版名と比べる
+                // バージョン名の形(「v8-beta.1」。ウィンドウのタイトル・NB_VERSION・タグ)はバージョン名と比べる
                 for tok in beta_labels(line) {
                     seen += 1;
                     if tok != expected_label() {
@@ -1689,7 +1690,7 @@ mod tests {
         if env!("CARGO_PKG_VERSION_PRE").starts_with("beta") {
             assert!(seen >= 4, "β のバージョンの文字が見つからない({seen} 個)。抽出のしかたが壊れていないか");
         }
-        // ノートブック版の見出しの版は、β でも正式版でも画面と同じ版名
+        // ノートブック版の見出しのバージョンは、β でも正式版でも画面と同じバージョン名
         let label = expected_label();
         let nb = std::fs::read_to_string(repo.join("dev").join("nb_main.py")).unwrap();
         assert!(nb.contains(&format!("NB_VERSION = \"{label}\"")), "dev/nb_main.py の NB_VERSION が {label} でない");
@@ -1698,10 +1699,10 @@ mod tests {
             engine.contains(&format!("NB_VERSION = \"{label}\"")),
             "zahyou_engine.py の NB_VERSION が {label} でない(python dev/build_nb.py で作り直す)"
         );
-        // 配るノートブックは直下の zahyou_v<大きな版>.ipynb(dev/build_nb.py と make_release_assets.py が版から名前を決める)
+        // 配るノートブックは直下の zahyou_v<メジャーバージョン>.ipynb(dev/build_nb.py と make_release_assets.py がバージョンから名前を決める)
         let nb_name = format!("zahyou_v{}.ipynb", env!("CARGO_PKG_VERSION_MAJOR"));
         assert!(repo.join(&nb_name).is_file(), "直下に {nb_name} が無い(バージョンを上げたら git mv で改名する。docs/release-v7.md 2 節)");
-        // 前の版の名前が残っていない(改名せずに build_nb.py で新しく作ると、前のものが残って 2 つになる)
+        // 前のバージョンの名前が残っていない(改名せずに build_nb.py で新しく作ると、前のものが残って 2 つになる)
         let mut nbs: Vec<String> = std::fs::read_dir(&repo)
             .unwrap()
             .filter_map(|e| e.ok()?.file_name().into_string().ok())
@@ -1721,8 +1722,8 @@ mod tests {
         );
     }
 
-    /// 行の中の、版名の形のβの版「v数-beta.数」「v数.数-beta.数」をすべて返す(頭の v は必須。v の前が英数字なら
-    /// 別の語の一部とみなして拾わない)。数 3 つの形(「v8.0.0-beta.1」)は beta_versions が拾うので、ここでは拾わない。
+    /// 行の中の、バージョン名の形のβのバージョン「v数-beta.数」「v数.数-beta.数」をすべて返す(頭の v は必須。v の前が英数字なら
+    /// 別の語の一部とみなして取り出さない)。数 3 つの形(「v8.0.0-beta.1」)は beta_versions が取り出すので、ここでは取り出さない。
     fn beta_labels(line: &str) -> Vec<&str> {
         let b = line.as_bytes();
         let mut out = Vec::new();
@@ -1755,11 +1756,11 @@ mod tests {
     #[test]
     fn beta_labels_finds_only_short_labels() {
         assert_eq!(beta_labels("タイトル zahyou v8-beta.1 (β版)。/tag/v8-beta.12) と v8.1-beta.2"), vec!["v8-beta.1", "v8-beta.12", "v8.1-beta.2"]);
-        // 数 3 つの形・v の無いもの・語の一部・数でないβの番号は拾わない
+        // 数 3 つの形・v の無いもの・語の一部・数でないβの番号は取り出さない
         assert!(beta_labels("v8.0.0-beta.1 と 8-beta.1 と dev8-beta.1 と v8-beta.N と v8-beta.1a").is_empty());
     }
 
-    /// 行の中の「数.数.数-beta.数」をすべて返す(前後が英数字・"." なら別の語の一部とみなして拾わない)。
+    /// 行の中の「数.数.数-beta.数」をすべて返す(前後が英数字・"." なら別の語の一部とみなして取り出さない)。
     fn beta_versions(line: &str) -> Vec<&str> {
         let b = line.as_bytes();
         let mut out = Vec::new();
@@ -1845,14 +1846,14 @@ mod tests {
 }
 
 /// Python 基準実装(rs/testdata/gen_pipeline.py が作った pipeline_*.json)との突き合わせ。
-/// JSON が無ければ SKIP と出して通す。手元の試験画像が要る試験も、無ければ SKIP。
+/// JSON が無ければ SKIP と出して通す。手元のテスト画像が要るテストも、無ければ SKIP。
 #[cfg(test)]
 pub(crate) mod pyref {
     use super::*;
     use serde_json::Value;
     use std::sync::Mutex as StdMutex;
 
-    /// rs/testdata の場所(本物のワークスペースでも、本物のファイルを #[path] で読む作業用の写しでも見つける)。
+    /// rs/testdata の場所(本物のワークスペースでも、本物のファイルを #[path] で読む作業用のコピーでも見つける)。
     pub(crate) fn testdata() -> Option<PathBuf> {
         let here = Path::new(file!());
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -2126,8 +2127,8 @@ pub(crate) mod pyref {
         );
     }
 
-    /// ログの見出し "  zahyou <版>   <画像名>" の版を "v*" にする(ほかの行はそのまま)。
-    /// 基準値(pipeline_run.json・run_solver.json)は Python 版の "v7-dev" の頃に作ったもの。版名そのものは
+    /// ログの見出し "  zahyou <バージョン>   <画像名>" のバージョンを "v*" にする(ほかの行はそのまま)。
+    /// 基準値(pipeline_run.json・run_solver.json)は Python 版の "v7-dev" の頃に作ったもの。バージョン名そのものは
     /// tests::version_text で確かめる。
     pub(crate) fn mask_version(l: &str) -> String {
         let body = l.trim_start_matches('\n');
@@ -2168,7 +2169,7 @@ pub(crate) mod pyref {
             {
                 continue;
             }
-            // zahyou-net はノートブック用の言い回し「INPUT_MODE='COORDS' で」を外した(net の係の報告)
+            // zahyou-net はノートブック用の言い回し「INPUT_MODE='COORDS' で」を外した(zahyou-net 側の報告)
             if l.starts_with("  ❌ オフラインでは '") {
                 out.push(l.replace("。 INPUT_MODE='COORDS' で", "。"));
                 continue;
@@ -2182,7 +2183,7 @@ pub(crate) mod pyref {
                 out.push(format!("{}所要時間      : X 秒", &l[..i]));
                 continue;
             }
-            // 見出しの版名(基準値は Python 版の "v7-dev")
+            // 見出しのバージョン名(基準値は Python 版の "v7-dev")
             out.push(mask_version(l));
         }
         out
@@ -2207,7 +2208,7 @@ pub(crate) mod pyref {
         Some(head)
     }
 
-    /// pipeline_run.json の試験画像をそろえる(手元の画像の sha256 が同じときだけ)。(WCS を足した版, そのままの版, 作業フォルダー)
+    /// pipeline_run.json のテスト画像をそろえる(手元の画像の sha256 が同じときだけ)。(WCS を足した画像, そのままの画像, 作業フォルダー)
     /// 画像のパス("$ZAHYOU_TEST_IMAGES/…")は resolve_image と同じ決まりでこの PC のパスにする。
     pub(crate) fn run_images(d: &Value, tag: &str) -> Option<(PathBuf, PathBuf, PathBuf)> {
         if d.get("skipped").is_some() {
@@ -2265,7 +2266,7 @@ pub(crate) mod pyref {
         Ok(tried(None))
     }
 
-    /// 試験用の cache.json(目標 1 件、機材の記憶は with_rig のときだけ)。
+    /// テスト用の cache.json(目標 1 件、機材の記憶は with_rig のときだけ)。
     pub(crate) fn write_cache(path: &Path, with_rig: bool) {
         let mut c = serde_json::json!({"targets": {DEFAULT_TARGET: {"ra": 61.91199157844, "dec": 41.98626242835, "name": DEFAULT_TARGET}}, "rigs": {}});
         if with_rig {
@@ -2569,7 +2570,7 @@ pub(crate) mod pyref {
             assert_eq!(res.status_text(), "解けませんでした。ログを見てください。");
         }
         // 解法が panic しても、結果の error に入れて返す
-        // (標準エラーに「試験のための panic」と出るのは panic の既定の表示。試験は通っている)
+        // (標準エラーに「テストのための panic」と出るのは panic の既定の表示。テストは通っている)
         if let Some(d) = load("pipeline_run.json")
             && let Some((_, plain, dir2)) = run_images(&d, "panic")
         {
@@ -2679,8 +2680,8 @@ pub(crate) mod pyref {
     fn home_dir() -> PathBuf {
         std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from).unwrap_or_default()
     }
-    /// "$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を base からの相対で実際のパスに。`Downloads/…` がそこに無ければ、同じ並びの控え
-    /// (作者の PC の `Documents/claude/zahyou/testdata/images/` の下。Downloads を整理するので写してある。2026-10-29)も見る
+    /// "$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を base からの相対で実際のパスに。`Downloads/…` がそこに無ければ、同じ並びのコピー
+    /// (作者の PC の `Documents/claude/zahyou/testdata/images/` の下。Downloads を整理するのでコピーしてある。2026-10-29)も見る
     /// (dev/test_solver_real.py の images_path と同じ決まり)。
     fn images_path(base: PathBuf, rest: &str) -> PathBuf {
         let p = rest.split('/').fold(base.clone(), |b, s| b.join(s));
@@ -2746,7 +2747,7 @@ pub(crate) mod pyref {
         out
     }
 
-    /// 試行のはしごの行か(時刻しだいで変わるので、"advice" の場面では比べない)。
+    /// 段階的な試行の行か(時刻しだいで変わるので、"advice" の場面では比べない)。
     fn ladder_line(l: &str) -> bool {
         let t = l.trim_start_matches('\n');
         (t.starts_with("  [") && t.contains("(最大 "))
@@ -2762,7 +2763,7 @@ pub(crate) mod pyref {
             .filter(|l| !(advice_only && ladder_line(l)))
             .map(|l| match l.find("所要時間      : ") {
                 Some(i) => format!("{}所要時間      : X 秒", &l[..i]),
-                // 見出しの版名(基準値は Python 版の "v7-dev")も伏せる
+                // 見出しのバージョン名(基準値は Python 版の "v7-dev")も伏せる
                 None => mask_seconds(&mask_version(l)),
             })
             .collect()
@@ -2780,10 +2781,10 @@ pub(crate) mod pyref {
     }
 
     /// 本物の解法を通した run() のログ・結果を、Python の run()(sv_solve も本物)と比べる
-    /// (app/testdata/run_solver.json。gen_run_solver.py が作る)。画像・星図データが手元に無い場面は SKIP。
-    /// 時刻で変わる数(所要時間・「(最大 N 秒)」・小数の秒)だけを伏せる。締め切りで打ち切る場面("advice")は
-    /// 試行のはしごの行を除いて、深い検出・事前のログ・解けなかったときの案内を比べる。
-    /// 既定では、締め切りまで探す 2 場面(焦点距離の書き違い・ピンぼけ。Rust でも 20〜30 秒)を飛ばす。
+    /// (app/testdata/run_solver.json。gen_run_solver.py が作る)。画像・インデックスファイルが手元に無い場面は SKIP。
+    /// 時刻で変わる数(所要時間・「(最大 N 秒)」・小数の秒)だけを伏せる。タイムアウトで打ち切る場面("advice")は
+    /// 段階的な試行の行を除いて、ディープ検出・事前のログ・解けなかったときの案内を比べる。
+    /// 既定では、タイムアウトまで探す 2 場面(焦点距離の書き違い・ピンぼけ。Rust でも 20〜30 秒)を飛ばす。
     /// 全部は `cargo test -p zahyou run_solver_vs_python_all -- --ignored --nocapture`。
     #[test]
     fn run_solver_vs_python() {
@@ -2797,13 +2798,13 @@ pub(crate) mod pyref {
     }
 
     /// 同じ目録(index_catalog が覚えているもの)をいくつかの解析が同時に使っても止まらない。
-    /// 以前は、索引を開くときの木の検査(rayon で並列)を錠を持ったまま走らせていたので、rayon の作業スレッドが
-    /// 待つ間に横取りした仕事が同じ索引を開こうとして止まった(zahyou-index の IndexFile::data と解法の Store::data)。
-    /// 解析は 1 回ごとに索引の mmap を放すので、毎回開き直す。止まったら 180 秒で失敗にする(スレッドは残るが試験は終わる)。
+    /// 以前は、インデックスを開くときの木の検査(rayon で並列)をロックを持ったまま走らせていたので、rayon の作業スレッドが
+    /// 待つ間に横取りした仕事が同じインデックスを開こうとして止まった(zahyou-index の IndexFile::data と解法の Store::data)。
+    /// 解析は 1 回ごとにインデックスの mmap を放すので、毎回開き直す。止まったら 180 秒で失敗にする(スレッドは残るがテストは終わる)。
     #[test]
     fn concurrent_runs_do_not_deadlock() {
         const ROUNDS: usize = 5;
-        // 同じ画像を同時に解く(同じ索引を同時に開くときに止まっていた)。ほかの画像も混ぜる
+        // 同じ画像を同時に解く(同じインデックスを同時に開くときに止まっていた)。ほかの画像も混ぜる
         let images = [
             "$ZAHYOU_TEST_IMAGES/Downloads/Capture_00001 00_10_33.fits",
             "$ZAHYOU_TEST_IMAGES/Downloads/Capture_00001 00_10_33.fits",
@@ -2848,7 +2849,7 @@ pub(crate) mod pyref {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// 締め切りまで探す場面(Rust でも 20 秒以上かかる)。
+    /// タイムアウトまで探す場面(Rust でも 20 秒以上かかる)。
     const SLOW_SCENES: [&str; 2] = ["orig_focal_short", "defocus_rig"];
 
     fn run_solver_cases(include_slow: bool) {
@@ -2917,7 +2918,7 @@ pub(crate) mod pyref {
             }
             match (r.get("summary"), res.summary.as_ref()) {
                 (Some(ps), Some(sm)) => {
-                    // 解の WCS は Python と 1e-6 px で同じ(解法の係の試験)。まとめはそれより粗く比べる
+                    // 解の WCS は Python と 1e-6 px で同じ(解法のクレートのテスト)。まとめはそれより粗く比べる
                     let dra = (sm.center_ra - ps["ra"].as_f64().unwrap()).abs() * sm.center_dec.to_radians().cos();
                     let ddec = (sm.center_dec - ps["dec"].as_f64().unwrap()).abs();
                     if dra.max(ddec) * 3600.0 > 1e-3
@@ -2976,7 +2977,7 @@ pub(crate) mod pyref {
         eprintln!("本物の解法つきの run(): {n_runs} 場面・{n_lines} 行が Python と同じ(時刻の数を除く)");
     }
 
-    /// sha256(試験画像が基準値を作ったときと同じかを見るだけ。依存を足さないよう自前で書く)。
+    /// sha256(テスト画像が基準値を作ったときと同じかを見るだけ。依存を足さないよう自前で書く)。
     pub(crate) mod sha2_like {
         const K: [u32; 64] = [
             0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98,

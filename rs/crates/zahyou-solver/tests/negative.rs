@@ -1,22 +1,22 @@
-//! 解けてはいけない星野・画像(設計書 7・9 節): 締め切りまで探して解なし、締め切りの超過 1 秒以内
+//! 解けてはいけない星野・画像(設計書 7・9 節): タイムアウトまで探して解なし、タイムアウトの超過 1 秒以内
 //! (dev/solver_truth.json の criteria.negative_overrun_s)。
 //!
 //! - 乱数の星野: rs/testdata/solver_synth.json の rand60・rand300・rand_hint(Python の solver_synth が種で作ったもの)と、
 //!   ここで作る一様乱数の星 150 個(Python の test_solver_core case_08 と同じ形)
-//! - 実写の陰性(ピンぼけ・光条)と dev/tcase の乱数の星野の画像: solver_real.json の検出の星(深い・標準)で
+//! - 実写の陰性(ピンぼけ・光条)と dev/tcase の乱数の星野の画像: solver_real.json の検出の星(ディープ・標準)で
 //!   Python の試行と同じ条件(全天・スケールの範囲)、画像が手元にあれば利用者の経路(zahyou-image → solve_offline)も
 //! - 合成の乱数の星野と実写の陰性で Python が quad を試し尽くしたもの(rand_hint・tcase_few)は、試した quad と仮説の数も
 //!   Python と同じか。合成の乱数の星野は最初の 24 個の仮説も比べる(探す順が同じか)
 //!
-//! 締め切り 30 秒の --ignored では、Python が 15 秒の締め切りで止まった画像でも Rust は quad を試し尽くすことが多い
-//! (そのときは「締め切りとの差」が負になる)。
-//! - 解の判定の条件(設計書 3.7 節の 6): tcase_dense の深い検出の星は、tune-up の一致の増えと試した数の値上げのどちらかが
+//! タイムアウト 30 秒の --ignored では、Python が 15 秒のタイムアウトで止まった画像でも Rust は quad を試し尽くすことが多い
+//! (そのときは出力の「締め切りとの差」が負になる)。
+//! - 解の判定の条件(設計書 3.7 節の 6): tcase_dense のディープ検出の星は、tune-up の一致の増えと試した数の値上げのどちらかが
 //!   あれば最後まで探して解なし、両方を外すと前と同じ誤った解(仮説 16,187,319 個目)に届くか(negative_dense_accept_rule)
 //!
 //! ```text
-//! cargo test -p zahyou-solver --test negative -- --nocapture             短い締め切り(8 秒)で代表だけ
-//! cargo test -p zahyou-solver --test negative -- --ignored --nocapture   全部(締め切り 30 秒。14 分ほど)
-//! ZAHYOU_NEG_DEADLINE=60 …                                                締め切りを変える
+//! cargo test -p zahyou-solver --test negative -- --nocapture             短いタイムアウト(8 秒)で代表だけ
+//! cargo test -p zahyou-solver --test negative -- --ignored --nocapture   全部(タイムアウト 30 秒。14 分ほど)
+//! ZAHYOU_NEG_DEADLINE=60 …                                                タイムアウトを変える
 //! ```
 
 mod common;
@@ -34,7 +34,7 @@ fn neg_deadline(default: f64) -> f64 {
     std::env::var("ZAHYOU_NEG_DEADLINE").ok().and_then(|s| s.parse().ok()).unwrap_or(default)
 }
 
-/// 擬似乱数(xorshift64*。試験の星野を作るだけ)。
+/// 擬似乱数(xorshift64*。テストの星野を作るだけ)。
 pub struct Rng(u64);
 impl Rng {
     pub fn new(seed: u64) -> Rng {
@@ -110,7 +110,7 @@ fn synth_random(names: &[&str], deadline: f64, label: &str) {
         let (r, dt, trace) = solve_traced(&req, &cat, &Params::default(), deadline, &buf);
         let r = r.map(|o| o.map(|d| d.solution));
         judge(&format!("{name}(締め切り {deadline} 秒)"), r, dt, deadline, &buf.tail(1), &mut bad);
-        // 探す順も Python と同じか: Python が quad を試し尽くした(unsolved)なら trace の全部、締め切りで
+        // 探す順も Python と同じか: Python が quad を試し尽くした(unsolved)なら trace の全部、タイムアウトで
         // 止まった(deadline)なら最初の仮説だけを比べる(Rust が同じ数まで記録していれば)
         let py = &c["python"];
         if let Some(t) = &trace {
@@ -157,16 +157,16 @@ fn negative_synth_all() {
 
 /// tune-up と試した数の条件(設計書 3.7 節の 6)を外すと出る誤った解。
 ///
-/// tcase_dense(dev/tcase/dense.fits。乱数の密な星野)の深い検出の星 400 個は、全天ブラインドで仮説 16,187,319 個目に
-/// index-4112(三角形の索引)の誤った解に届いていた。4 点の検証は対数オッズ 18.7・一致 5 で、tune-up(同じ星への当て直し)で
+/// tcase_dense(dev/tcase/dense.fits。乱数の密な星野)のディープ検出の星 400 個は、全天ブラインドで仮説 16,187,319 個目に
+/// index-4112(三角形のインデックス)の誤った解に届いていた。4 点の検証は対数オッズ 18.7・一致 5 で、tune-up(同じ星への再フィット)で
 /// 22.773709888689385 に上がり、ln(1e9) = 20.72 を超えた。一致は 5 のままだった(2026-10-24 に見つけた。それまでは
-/// 締め切り 30 秒に届かない機械の速さに隠れていた)。
+/// タイムアウト 30 秒に届かないマシンの速さに隠れていた)。
 const DENSE_FALSE_INDEX: &str = "index-4112";
 const DENSE_FALSE_LOGODDS_BITS: u64 = 4627103447142662977; // 22.773709888689385
 const DENSE_FALSE_NMATCH: usize = 5;
 const DENSE_FALSE_HYPS: u64 = 16_187_319;
 
-/// tcase_dense の深い検出の星を、Python の試行と同じ条件(全天ブラインド・試行のスケールの範囲)で。
+/// tcase_dense のディープ検出の星を、Python の試行と同じ条件(全天ブラインド・試行のスケールの範囲)で。
 fn dense_deep_request() -> Option<SolveRequest> {
     let doc = load_testdata("solver_real.json")?;
     let img = doc["images"].as_array()?.iter().find(|i| i["name"].as_str() == Some("tcase_dense"))?.clone();
@@ -186,8 +186,8 @@ fn dense_deep_request() -> Option<SolveRequest> {
 
 /// 解の判定の 2 つの条件が、それぞれ単独でも tcase_dense の誤った解を止め、両方を外すと前と同じ誤った解に届くか。
 ///
-/// 条件ごとに締め切りまで(既定 180 秒。この機械では約 28 秒で quad を試し尽くす)探し、仮説 16,187,319 個目を
-/// 越えたところまで試したことも確かめる(越える前に締め切りが来たら、確かめられなかったとして失敗にする)。
+/// 条件ごとにタイムアウトまで(既定 180 秒。このマシンでは約 28 秒で quad を試し尽くす)探し、仮説 16,187,319 個目を
+/// 越えたところまで試したことも確かめる(越える前にタイムアウトしたら、確かめられなかったとして失敗にする)。
 /// 止めたときは、探索の終わりの行に、見送ったその候補のまとめ(条件ごとの文・最大 22.8)が付くことも確かめる。
 /// 両方を外したときは、系列・対数オッズのビット・一致の数・仮説の番号まで前と同じ誤った解になる
 /// (探す順が変わっていないことと、止めているのがこの 2 つの条件であることの確かめ)。
@@ -332,7 +332,7 @@ fn real_stars(tags: Option<&[&str]>, deadline: f64, label: &str) {
 
 #[test]
 fn negative_real_stars_quick() {
-    // capture_005514(締め切りまで探す)と tcase_few(星 6〜7 個。quad を試し尽くすので数も Python と比べる)
+    // capture_005514(タイムアウトまで探す)と tcase_few(星 6〜7 個。quad を試し尽くすので数も Python と比べる)
     real_stars(Some(&["capture_005514", "tcase_few"]), neg_deadline(8.0), "negative_real_stars_quick");
 }
 
@@ -342,7 +342,7 @@ fn negative_real_stars_all() {
     real_stars(None, neg_deadline(30.0), "negative_real_stars_all");
 }
 
-/// 実写の陰性を利用者の経路で(画像が手元にあるときだけ)。solve_offline の全体の締め切りを守るか。
+/// 実写の陰性を利用者の経路で(画像が手元にあるときだけ)。solve_offline の全体のタイムアウトを守るか。
 #[test]
 #[ignore]
 fn negative_real_offline_all() {

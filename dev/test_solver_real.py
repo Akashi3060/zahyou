@@ -2,8 +2,8 @@
 
 docs/design-native-solver.md の 7 節・8 節。合格の基準(solver_truth.json の criteria):
   中心のずれ 2″ 以内(0.5 px のほうが大きければそれ)、画素スケール 0.2 %、回転(配列の +y の位置角)0.1°、
-  鏡像(配列座標の det CD の符号)の一致。陰性の画像(ピンぼけ・光条・乱数の星野)は締め切りまで探して解なし、
-  締め切りの超過 1 秒以内。画像はリポジトリに入れていない(手元に無ければ SKIP)。
+  鏡像(配列座標の det CD の符号)の一致。陰性の画像(ピンぼけ・光条・乱数の星野)はタイムアウトまで探して解なし、
+  タイムアウトからの超過 1 秒以内。画像はリポジトリに入れていない(手元に無ければ SKIP)。
   正解ファイルの path は、リポジトリからの相対パス(dev/tcase は test_robust.py が作る)か、
   $ZAHYOU_TEST_IMAGES/ で始まるパス(環境変数 ZAHYOU_TEST_IMAGES。無ければホームフォルダー)。
   陽性の画像が 1 枚も解かれなかった(全部 SKIP)ときは、最後にそう出して終了コード 2 で終わる
@@ -11,15 +11,15 @@ docs/design-native-solver.md の 7 節・8 節。合格の基準(solver_truth.js
 
   python dev/test_solver_real.py             利用者の経路: load_image_any → preprocess →
                                              detect_sources(min_sources=60) → solve_offline(ヒントなし・焦点距離なし)
-  python dev/test_solver_real.py --direct    sv_solve を直接(同じ検出の星。12 個未満なら深い検出の星)
+  python dev/test_solver_real.py --direct    sv_solve を直接(同じ検出の星。12 個未満ならディープ検出の星)
   python dev/test_solver_real.py --both      両方
   python dev/test_solver_real.py --engine    利用者の経路を、組み立てたエンジン(直下の zahyou_engine.py)で。
                                              GUI と同じく 1 つの名前空間へ exec する(--engine パス で別のファイル)
-  --deadline 60(1 枚の締め切り [秒])  --case real_orig,tcase_*  --quick(代表 8 枚)  --json 結果.json
+  --deadline 60(1 枚のタイムアウト [秒])  --case real_orig,tcase_*  --quick(代表 8 枚)  --json 結果.json
   --index-dir C:\\AstrometryData(環境変数 ZAHYOU_INDEX_DIR でも)  --truth 正解.json  --verbose(解析のログ)
 
 基準の画像 real_orig は、目標 UCAC4 660-021020 をヒント(半径 5°)にした解き方(real_orig+hint)も試し、
-目標までのずれ(1.583′・0.918′ 東・1.290′ 北)も比べる。最初の 4 項目は正解ファイルと物差しの自己検査で、
+目標までのずれ(1.583′・0.918′ 東・1.290′ 北)も比べる。最初の 4 項目は正解ファイルと指標の自己検査で、
 エンジンが無くても走る。記憶ファイル(cache.json)は使わない(ZAHYOU_CACHE を空の一時ファイルに向ける)。
 """
 import argparse
@@ -58,13 +58,13 @@ REPO = os.path.dirname(HERE)
 IMAGES_VAR = "$ZAHYOU_TEST_IMAGES/"
 
 
-# Downloads の試験画像の控え(作者の PC では Downloads を整理するので、試験が読む元の画像を同じ並びで写してある。2026-10-29)
+# Downloads のテスト画像のコピー(作者の PC では Downloads を整理するので、テストが読む元の画像を同じ並びでコピーしてある。2026-10-29)
 TEST_IMAGES_COPY = ("Documents", "claude", "zahyou", "testdata", "images")
 
 
 def images_path(rest):
     """"$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を実際のパスに。ZAHYOU_TEST_IMAGES(無ければホームフォルダー)からの相対で、
-    Downloads/… がそこに無ければ、同じ並びの控え(TEST_IMAGES_COPY の下)も見る。"""
+    Downloads/… がそこに無ければ、同じ並びのコピー(TEST_IMAGES_COPY の下)も見る。"""
     base = os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~")
     parts = rest.split("/")
     p = os.path.join(base, *parts)
@@ -89,7 +89,7 @@ def record(name, ok, msg, rec=None):
     print(f"  {tag}  {name}  {msg}", flush=True)
 
 
-# ------------------------------------------------------------------ 物差し ---
+# ------------------------------------------------------------------ 指標 ---
 
 def header_from_cards(cards):
     """solver_truth.json の wcs(カードの dict)か fits.Header から astropy の WCS。"""
@@ -167,7 +167,7 @@ def describe(cmp):
 
 
 def offsets_arcmin(c_ra, c_dec, ra, dec):
-    """中心から目標までの (全角距離, 東, 北)(分角)。astropy の spherical_offsets_to と同じ式。"""
+    """中心から目標までの (角距離, 東, 北)(分角)。astropy の spherical_offsets_to と同じ式。"""
     a0, d0, a, d = map(math.radians, (c_ra, c_dec, ra, dec))
     da = a - a0
     x = math.cos(d) * math.cos(da) * math.cos(d0) + math.sin(d) * math.sin(d0)
@@ -226,7 +226,7 @@ def selfcheck_file(doc):
 
 
 def selfcheck_measure(doc):
-    """R01: 正解の WCS(カード)を astropy で読み、同じ物差しで測ると truth と同じ値になること。
+    """R01: 正解の WCS(カード)を astropy で読み、同じ指標で測ると truth と同じ値になること。
     記録されていた値(oracle の center・pa・scale)との差も出す(scale は記録が CD の値、こちらは中心の値)。"""
     bad = []
     worst = {"center": 0.0, "scale": 0.0, "rot": 0.0}
@@ -271,8 +271,8 @@ def tan_header(t, W, H):
 
 
 def selfcheck_fake(doc):
-    """R02: 偽のソルバーで物差しを確かめる。正解から作ったヘッダー・正解の WCS そのもの → PASS、
-    許容を超えてずらしたもの → その項目だけ FAIL。陰性は「解なし → PASS、解あり・締め切り超過 → FAIL」。"""
+    """R02: 偽のソルバーで指標を確かめる。正解から作ったヘッダー・正解の WCS そのもの → PASS、
+    許容を超えてずらしたもの → その項目だけ FAIL。陰性は「解なし → PASS、解あり・タイムアウト超過 → FAIL」。"""
     crit = doc["criteria"]
     bad = []
     n = 0

@@ -176,7 +176,7 @@ def build(scale, src, out_dir, level=1):
 
 
 def add_base_readme(base_zip, out_dir):
-    """配布中の基本セットの zip を out_dir へ写し、README を足す(追記なので FITS の中身・圧縮・並びはそのまま)。"""
+    """配布中の基本セットの zip を out_dir へコピーし、README を足す(追記なので FITS の中身・圧縮・並びはそのまま)。"""
     with zipfile.ZipFile(base_zip) as z:
         names = [i.filename for i in z.infolist()]
     fits = [n for n in names if n.endswith(".fits")]

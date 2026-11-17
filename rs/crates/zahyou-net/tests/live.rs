@@ -1,4 +1,4 @@
-//! 本物の外のサービスに問い合わせる試験。
+//! 本物の外のサービスに問い合わせるテスト。
 //!
 //! - 天体名(Sesame + VizieR)は 1 回だけ実際に引く。つながらなければ SKIP
 //! - GitHub の Releases と nova.astrometry.net への疎通は `cargo test -- --ignored` で手動のときだけ
@@ -67,7 +67,7 @@ fn nova_reachable_live() {
     assert!(ok);
 }
 
-/// 5206 の 48 タイルの大きさを本物の置き場所に HEAD で聞く(落とさない)。手で走らせるときだけ。
+/// 5206 の 48 タイルの大きさを本物の置き場所に HEAD で聞く(ダウンロードはしない)。手で走らせるときだけ。
 #[test]
 #[ignore]
 fn remote_sizes_live() {

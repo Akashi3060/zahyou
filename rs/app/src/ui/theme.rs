@@ -153,7 +153,7 @@ pub fn visuals(th: &Theme) -> Visuals {
     w.noninteractive.bg_stroke = Stroke::new(1.0_f32, th.border);
     w.noninteractive.fg_stroke = Stroke::new(1.0_f32, th.ink);
     w.noninteractive.corner_radius = r;
-    // 押せる部品。ボタンの地は weak_bg_fill、チェックの箱の地は bg_fill
+    // 押せる部品。ボタンの地は weak_bg_fill、チェックボックスの地は bg_fill
     w.inactive.weak_bg_fill = th.btn;
     w.inactive.bg_fill = th.entry;
     w.inactive.bg_stroke = Stroke::new(1.0_f32, th.border);

@@ -73,7 +73,7 @@ pub fn run_button(text: &str) -> egui::Button<'static> {
     egui::Button::new(RichText::new(text.to_string()).font(fonts::bold(pt(11.0))))
 }
 
-/// 枠(ttk.LabelFrame)。題は枠線の上に重ねて描く。中身の Ui を返す関数を受け取る。
+/// 枠(ttk.LabelFrame)。タイトルは枠線の上に重ねて描く。中身の Ui を返す関数を受け取る。
 pub fn group<R>(ui: &mut Ui, th: &Theme, title: &str, add: impl FnOnce(&mut Ui) -> R) -> (R, Rect) {
     let font = fonts::bold(pt(9.0));
     let galley = ui.painter().layout_no_wrap(format!(" {title} "), font, th.accent);
@@ -88,7 +88,7 @@ pub fn group<R>(ui: &mut Ui, th: &Theme, title: &str, add: impl FnOnce(&mut Ui) 
         add(ui)
     });
     let rect = inner.response.rect;
-    // 題の下の線を背景色で消してから文字を置く
+    // タイトルの下の線を背景色で消してから文字を置く
     let tpos = pos2(rect.min.x + 8.0, rect.min.y - half);
     let bg = Rect::from_min_size(tpos, galley.size());
     ui.painter().rect_filled(bg, 0.0, th.bg);
@@ -155,7 +155,7 @@ pub fn table(ui: &mut Ui, th: &Theme, rows: &[(&str, Option<bool>, String)]) {
 
 /// スクロールできる欄。つまみは ttk と同じく枠線の色で、溝は trough の色で描く。
 ///
-/// egui のつまみは部品の地の色(bg_fill)で塗るが、その色はチェックの箱の地と同じなので、
+/// egui のつまみは部品の地の色(bg_fill)で塗るが、その色はチェックボックスの地と同じなので、
 /// スクロールの欄の外側でだけ色を差し替え、中身では元に戻す。
 pub fn scroll<R>(ui: &mut Ui, th: &Theme, area: egui::ScrollArea, add: impl FnOnce(&mut Ui) -> R) -> R {
     ui.scope(|ui| {

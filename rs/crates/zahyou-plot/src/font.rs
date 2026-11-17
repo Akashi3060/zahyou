@@ -86,7 +86,7 @@ impl Fonts {
         Ok(Fonts { regular, bold, description: desc })
     }
 
-    /// ファイルを直接指定する(試験・ほかの環境用)。
+    /// ファイルを直接指定する(テスト・ほかの環境用)。
     pub fn from_files(regular: (&Path, u32), bold: Option<(&Path, u32)>) -> Result<Fonts, PlotError> {
         let r = load_face(regular.0, regular.1)?;
         let b = match bold {

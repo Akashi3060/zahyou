@@ -7,10 +7,10 @@ use std::sync::{Arc, OnceLock, RwLock};
 use crate::Params;
 use crate::parts::{box_order, field_order};
 
-/// 有効面積を数える画像の区切り(10 × 10。Python の SV_AREA_GRID)。
+/// 有効面積を数える画像の格子(10 × 10。Python の SV_AREA_GRID)。
 pub(crate) const AREA_GRID: usize = 10;
 
-/// 検証の並びを錠なしで引く表の大きさ(箱の数 nw・nh がこれ未満のもの)。
+/// 検証の並びをロックなしで引く表の大きさ(箱の数 nw・nh がこれ未満のもの)。
 const SMALL_BOXES: usize = 32;
 
 /// 検証の一様化の並び(箱 nw × nh)と、その逆引き。
@@ -43,13 +43,13 @@ pub(crate) struct Field {
     /// 画像の中心 ((W−1)/2, (H−1)/2) と、対角の半分
     pub center: [f64; 2],
     pub half_diag: f64,
-    /// 検証の並び(箱 nw × nh)。小さい箱の数は錠なしの表(仮説ごとに引くので、並列で取り合わないように)、
-    /// 大きいものは錠つきの表に覚える
+    /// 検証の並び(箱 nw × nh)。小さい箱の数はロックなしの表(仮説ごとに引くので、並列で取り合わないように)、
+    /// 大きいものはロックつきの表に覚える
     vorder_small: Vec<OnceLock<VOrder>>,
     vorder: RwLock<HashMap<(usize, usize), Arc<VOrder>>>,
 }
 
-/// [`Field::verify_order`] の戻り値(表から借りたものか、錠つきの表から分けてもらったもの)。
+/// [`Field::verify_order`] の戻り値(表から借りたものか、ロックつきの表から分けてもらったもの)。
 pub(crate) enum VOrderRef<'a> {
     Borrowed(&'a VOrder),
     Shared(Arc<VOrder>),

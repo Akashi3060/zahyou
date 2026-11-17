@@ -4,7 +4,7 @@
 //! - run_tab.rs / env_tab.rs / help_tab.rs   各タブの並べ方
 //! - figure.rs / scene.rs   図の表示(テクスチャ・拡大・移動・目盛り)
 //! - bridge.rs     解析(pipeline)と図(zahyou-plot)とのつなぎ目
-//! - survey.rs     星図データの状態調べ(準備タブ)
+//! - survey.rs     インデックスファイルの状態調べ(準備タブ)
 //! - settings.rs   gui.json(v6 と同じキー)
 //! - theme.rs / style.rs / fonts.rs / widgets.rs   見た目
 //! - worker.rs     重い処理のワーカー(busy・mpsc・中止・panic の受け止め)

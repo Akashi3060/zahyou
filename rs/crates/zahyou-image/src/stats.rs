@@ -1,24 +1,24 @@
 //! numpy / astropy と同じ値になる統計の部品。
 //!
-//! Python 版は float32 の配列を numpy で集計している。numpy の縮約は配列を 8192 個(バッファーの大きさ)ずつに
-//! 区切り、区切りごとのペアワイズ和(8 本の部分和・128 個で打ち切り)を、恒等元 0 から先頭の区切りの順に足す。
+//! Python 版は float32 の配列を numpy で集計している。numpy の縮約は配列を 8192 個(バッファーの大きさ)ずつの
+//! ブロックに分け、ブロックごとのペアワイズ和(8 本の部分和・128 個で打ち切り)を、恒等元 0 に先頭のブロックから順に足す。
 //! 平均・分散は float32 の和を float64 で割って float32 に丸める。
 //! σ クリップの境界も float32 で計算される(NEP 50: float32 × Python の float は float32)。
-//! ここではその順序を 1 つずつ写して、ビット単位で同じ値を出す(gen_image.py の image_kernels.json で確かめる)。
-//! 速さのため、区切りごとの和と中央値の選択(ヒストグラム 2 回)は rayon で並列にする。並列にしても
+//! ここではその順序を 1 つずつ再現して、ビット単位で同じ値を出す(gen_image.py の image_kernels.json で確かめる)。
+//! 速さのため、ブロックごとの和と中央値の選択(ヒストグラム 2 回)は rayon で並列にする。並列にしても
 //! 足す順序は変わらないので結果は同じ。
 
 use rayon::prelude::*;
 
-/// numpy の縮約の区切り(np.getbufsize() の既定値)
+/// numpy の縮約のブロックの大きさ(np.getbufsize() の既定値)
 const NP_BUF: usize = 8192;
-/// これより長い配列は区切りごとの和を並列に計算する
+/// これより長い配列はブロックごとの和を並列に計算する
 const PAR_SUM_MIN: usize = 1 << 16;
 /// これより長い配列は中央値をヒストグラムで選ぶ(短いものは並べ替えの選択)
 const RADIX_MIN: usize = 1 << 15;
 /// 並列の処理単位(要素数)
 const CHUNK: usize = 1 << 16;
-/// σ クリップの読みを並列にする塊の最小(8192 の倍数。和の区切りがそろう)
+/// σ クリップの読みを並列にする塊の最小(8192 の倍数。和のブロックの境目がそろう)
 const SUPER_MIN: usize = NP_BUF * 8;
 
 /// σ クリップの読みを並列にする塊の大きさ(8192 の倍数)。塊ごとに 65536 個のヒストグラムを持つので、
@@ -41,7 +41,7 @@ fn merge_hists(hs: &[&Vec<u32>]) -> Vec<u32> {
     out
 }
 
-/// float32 の大小と同じ順になる 32 bit の鍵(負の数はビットを反転、正の数は符号ビットを立てる)。
+/// float32 の大小と同じ順になる 32 bit のキー(負の数はビットを反転、正の数は符号ビットを立てる)。
 #[inline]
 pub(crate) fn f32_key(x: f32) -> u32 {
     let b = x.to_bits();
@@ -53,7 +53,7 @@ pub(crate) fn key_to_f32(k: u32) -> f32 {
     if k & 0x8000_0000 != 0 { f32::from_bits(k & 0x7FFF_FFFF) } else { f32::from_bits(!k) }
 }
 
-/// numpy の pairwise_sum(float32、各要素に `f` をかけてから足す)。1 区切り(8192 個以下)に使う。
+/// numpy の pairwise_sum(float32、各要素に `f` をかけてから足す)。1 ブロック(8192 個以下)に使う。
 #[inline]
 fn pw_map<F: Fn(f32) -> f32 + Sync>(a: &[f32], f: &F) -> f32 {
     let n = a.len();
@@ -87,7 +87,7 @@ fn pw_map<F: Fn(f32) -> f32 + Sync>(a: &[f32], f: &F) -> f32 {
     }
 }
 
-/// numpy の縮約(float32): 8192 個ずつのペアワイズ和を、0 から先頭の区切りの順に足す。
+/// numpy の縮約(float32): 8192 個ずつのペアワイズ和を、0 に先頭のブロックから順に足す。
 fn np_sum_map<F: Fn(f32) -> f32 + Sync>(a: &[f32], f: &F) -> f32 {
     let mut res = 0.0f32;
     if a.len() >= PAR_SUM_MIN {
@@ -108,7 +108,7 @@ pub fn sum_f32(a: &[f32]) -> f32 {
     np_sum_map(a, &|x| x)
 }
 
-/// float64 のペアワイズ和(`np.sum` の float64 版)。
+/// float64 のペアワイズ和(float64 に対する `np.sum`)。
 pub fn sum_f64(a: &[f64]) -> f64 {
     fn pw(a: &[f64]) -> f64 {
         let n = a.len();
@@ -202,7 +202,7 @@ fn hist16<F: Fn(u32) -> Option<u32> + Sync>(a: &[f32], bin: F) -> Vec<u32> {
         )
 }
 
-/// 大きい配列: 鍵の上位 16 bit と下位 16 bit のヒストグラムで、k 番目と k+1 番目を正確に選ぶ。
+/// 大きい配列: キーの上位 16 bit と下位 16 bit のヒストグラムで、k 番目と k+1 番目を正確に選ぶ。
 fn select_radix(a: &[f32], k: usize) -> (f32, f32) {
     let n = a.len();
     let h1 = hist16(a, |key| Some(key >> 16));
@@ -295,12 +295,12 @@ pub(crate) fn filter_ordered<P: Fn(f32) -> bool + Sync>(a: &[f32], keep: P) -> V
     filter_with_counts(a, keep, &counts)
 }
 
-/// 区切り CHUNK ごとの、条件を満たす要素の数。
+/// CHUNK 個ずつのブロックごとの、条件を満たす要素の数。
 fn count_kept<P: Fn(f32) -> bool + Sync>(a: &[f32], keep: &P) -> Vec<usize> {
     a.par_chunks(CHUNK).map(|c| c.iter().filter(|&&x| keep(x)).count()).collect()
 }
 
-/// 書き先 out(長さ Σcounts)を、区切りごとの書き場所(長さ counts[i])に分ける。
+/// 書き先 out(長さ Σcounts)を、ブロックごとの書き場所(長さ counts[i])に分ける。
 fn split_parts<'a>(out: &'a mut [f32], counts: &[usize]) -> Vec<&'a mut [f32]> {
     let mut parts: Vec<&mut [f32]> = Vec::with_capacity(counts.len());
     let mut rest: &mut [f32] = out;
@@ -312,7 +312,7 @@ fn split_parts<'a>(out: &'a mut [f32], counts: &[usize]) -> Vec<&'a mut [f32]> {
     parts
 }
 
-/// `filter_ordered` の書き出し(区切り CHUNK ごとの個数を数え済みのとき)。書き先はちょうどの長さで新しく作る。
+/// `filter_ordered` の書き出し(CHUNK 個ずつのブロックごとの個数を数え済みのとき)。書き先はちょうどの長さで新しく作る。
 fn filter_with_counts<P: Fn(f32) -> bool + Sync>(a: &[f32], keep: P, counts: &[usize]) -> Vec<f32> {
     let total: usize = counts.iter().sum();
     let mut out = vec![0.0f32; total];
@@ -370,8 +370,8 @@ pub fn sigma_clipped_std(data: &[f32]) -> f32 {
     clip_core(data, false).std
 }
 
-/// 大きい配列の 1 回目の読み: numpy と同じ和(8192 個ずつのペアワイズ和を順に足す)と、鍵の上位 16 bit のヒストグラム。
-/// 区切りの塊(super_len 個 = 8192 の倍数)ごとに並列に計算し、和は先頭の区切りから順に足す。
+/// 大きい配列の 1 回目の読み: numpy と同じ和(8192 個ずつのペアワイズ和を順に足す)と、キーの上位 16 bit のヒストグラム。
+/// ブロックをまとめた塊(super_len 個 = 8192 の倍数)ごとに並列に計算し、和は先頭のブロックから順に足す。
 fn pass_sum_hist(cur: &[f32]) -> (f32, Vec<u32>) {
     let parts: Vec<(Vec<f32>, Vec<u32>)> = cur
         .par_chunks(super_len(cur.len()))
@@ -488,7 +488,7 @@ fn median_std_big(cur: &[f32], sum: f32, h1: &[u32]) -> (f32, f32) {
     ((s as f64 / 2.0) as f32, std)
 }
 
-/// 中央値・ヒストグラムを読む回数を減らした版(pass_sum_hist + median_std_big)を使う長さ。
+/// 中央値・ヒストグラムを読む回数を減らしたバージョン(pass_sum_hist + median_std_big)を使う長さ。
 /// median_finite_f32 がヒストグラムで選ぶ長さ(kth_pair の select_radix)と同じ範囲。
 #[inline]
 fn is_big(n: usize) -> bool {
@@ -504,7 +504,7 @@ fn n_parts(n: usize) -> usize {
 }
 
 fn clip_core(data: &[f32], full: bool) -> ClipStats {
-    // 残す値の配列は回ごとにちょうどの長さで新しく作り、作り終えてから前の配列を捨てる(2026-10-24 までの版と同じ確保の仕方)。
+    // 残す値の配列は回ごとにちょうどの長さで新しく作り、作り終えてから前の配列を捨てる(2026-10-24 までのバージョンと同じ確保の仕方)。
     // 同時に生きるのは、書き出しの瞬間の新旧 2 本か、統計の読みの間の 1 本 + ヒストグラム((塊の数 + 2) × 256 KiB、
     // 20 スレッドで最大 42 本 = 10.5 MiB)のどちらか。使い終えた配列を次の書き先に取っておく形(配列 2 本の使い回し)は、
     // 3 回目からの統計の読みで配列 2 本とヒストグラムが重なり、私有メモリの最大がヒストグラムの分だけ増えるので採らない。
@@ -512,12 +512,12 @@ fn clip_core(data: &[f32], full: bool) -> ClipStats {
     let mut owned: Option<Vec<f32>> = if all_finite { None } else { Some(filter_ordered(data, |x| x.is_finite())) };
     // 直近に境界を計算した配列の std と、大きい配列ならその回の (中心, 和)。最後に変化が無かったときに使い回す
     let mut last: Option<(f32, Option<(f32, f32)>)> = None;
-    // ループの最後の統計の読みが大きい配列の版だったときの塊の数(clip_finish で最後の読みのメモリを比べる)
+    // ループの最後の統計の読みが大きい配列用のバージョンだったときの塊の数(clip_finish で最後の読みのメモリを比べる)
     let mut last_parts: Option<usize> = None;
     for _ in 0..5 {
         let cur: &[f32] = owned.as_deref().unwrap_or(data);
         let size = cur.len();
-        // 大きい配列は読む回数を減らした版(値は同じ)。小さい配列はそのまま
+        // 大きい配列は読む回数を減らしたバージョン(値は同じ)。小さい配列はそのまま
         let (cen, sd, sum) = if is_big(size) {
             last_parts = Some(n_parts(size));
             let (sum, h1) = pass_sum_hist(cur);
@@ -545,7 +545,7 @@ fn clip_core(data: &[f32], full: bool) -> ClipStats {
 }
 
 /// σ クリップの最後の値。cur は最後の配列、last は収束して抜けたときのその回の (std, 大きい配列なら (中心, 和))、
-/// last_parts はループの最後の統計の読みが大きい配列の版だったときの塊の数。
+/// last_parts はループの最後の統計の読みが大きい配列用のバージョンだったときの塊の数。
 fn clip_finish(
     cur: &[f32],
     full: bool,
@@ -564,8 +564,8 @@ fn clip_finish(
         Some((sd, _)) => ClipStats { mean: f32::NAN, median: f32::NAN, std: sd },
         // 5 回で収束しなかった大きい配列: 最後の配列の中央値・std・平均を 2 回の読みで出す(値は上と同じ理由で同じ)。
         // メモリ: ループの最後(5 回目)の読みは、cur より長い 1 つ前の配列とヒストグラム (last_parts + 2) 本を持っていた。
-        // cur の塊の数がそれ以下なら、この読み(cur + (塊の数 + 2) 本)はそれより小さく、前の版の最大を超えない。
-        // 塊の数は長さに単調でない(n_parts)ので、超えるときは前の版と同じ計算にする(値は同じ)
+        // cur の塊の数がそれ以下なら、この読み(cur + (塊の数 + 2) 本)はそれより小さく、前のバージョンの最大を超えない。
+        // 塊の数は長さに単調でない(n_parts)ので、超えるときは前のバージョンと同じ計算にする(値は同じ)
         None if full && is_big(n) && last_parts.is_some_and(|p| n_parts(n) <= p) => {
             let (sum, h1) = pass_sum_hist(cur);
             let (med, sd) = median_std_big(cur, sum, &h1);
@@ -622,7 +622,7 @@ mod tests {
         }
     }
 
-    /// 2026-10-24 までの clip_core(最後の平均・中央値・std を毎回別々に計算し直す版)。
+    /// 2026-10-24 までの clip_core(最後の平均・中央値・std を毎回別々に計算し直すバージョン)。
     /// 照合の基準。戻り値の 2 つ目は回った回数と、収束して抜けたか。
     fn clip_core_ref(data: &[f32], full: bool) -> (ClipStats, (usize, bool)) {
         fn filter_ref<P: Fn(f32) -> bool + Sync>(a: &[f32], keep: P, counts: &[usize]) -> Vec<f32> {
@@ -695,8 +695,8 @@ mod tests {
 
     #[test]
     fn clip_matches_reference() {
-        // 最後の値を使い回す枝(収束して抜けた大きい配列・5 回回り切った大きい配列)を含め、前の版とビット単位で同じ。
-        // 5 回で収束しない大小の配列・途中で収束する配列・非有限値混じり・同じ値ばかり・区切りの前後の長さ
+        // 最後の値を使い回す枝(収束して抜けた大きい配列・5 回回り切った大きい配列)を含め、前のバージョンとビット単位で同じ。
+        // 5 回で収束しない大小の配列・途中で収束する配列・非有限値混じり・同じ値ばかり・ブロックの大きさやしきい値の前後の長さ
         let mut cases: Vec<Vec<f32>> = Vec::new();
         for &n in &[0usize, 1, 2, 7, 100, 8191, 8192, 8193, 32767, 32768, 32769, 65535, 65536, 65537, 200_001] {
             let mut r = rng(n as u64 + 3);
@@ -755,12 +755,12 @@ mod tests {
     #[test]
     fn clip_finish_both_paths_match() {
         // 5 回で収束しなかった大きい配列の最後の計算: 2 回の読み(塊の数が前の読み以下のとき)と、
-        // 前の版と同じ計算(塊が増えるとき)のどちらを通っても、前の版の値とビット単位で同じ
+        // 前のバージョンと同じ計算(塊が増えるとき)のどちらを通っても、前のバージョンの値とビット単位で同じ
         let mut r = rng(17);
         for n in [RADIX_MIN, 65_536, 200_001, 655_360, 655_361, 1_310_720] {
             let a: Vec<f32> = (0..n).map(|_| ((r() + r() + r() - 1.5) * 7.0 + 30.0) as f32).collect();
             let want = ClipStats { mean: mean_f32(&a), median: median_finite_f32(&a), std: std_f32(&a) };
-            // last_parts = MAX なら 2 回の読み、Some(0) と None なら前の版と同じ計算
+            // last_parts = MAX なら 2 回の読み、Some(0) と None なら前のバージョンと同じ計算
             for lp in [Some(usize::MAX), Some(0), None] {
                 let got = clip_finish(&a, true, None, lp);
                 assert_eq!(got.mean.to_bits(), want.mean.to_bits(), "mean n={n} {lp:?}");
@@ -781,7 +781,7 @@ mod tests {
 
     #[test]
     fn unmasked_matches_nan_marking() {
-        // 前処理の最後の σ: 前の版はマスクの画素を NaN にしてから NaN でないものを集めていた。
+        // 前処理の最後の σ: 前のバージョンはマスクの画素を NaN にしてから NaN でないものを集めていた。
         // マスクでない位置に NaN が無ければ配列が同じ、あっても σ クリップ(最初に非有限値を順序を保って除く)は同じ
         let mut r = rng(8);
         for (n, with_nan) in [(1000usize, false), (300_000, false), (300_000, true), (65_536, true)] {

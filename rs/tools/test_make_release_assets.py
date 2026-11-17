@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""make_release_assets.py の試験(標準ライブラリの unittest だけで動く)。
+"""make_release_assets.py のテスト(標準ライブラリの unittest だけで動く)。
 
     python -B rs/tools/test_make_release_assets.py
 
 release ビルドの exe があれば(環境変数 ZAHYOU_RELEASE_EXE、無ければ CARGO_TARGET_DIR か rs/target の release)、
-その版情報が rs/Cargo.toml の版と合うかも確かめる。無ければその試験は SKIP。
+そのバージョン情報が rs/Cargo.toml のバージョンと合うかも確かめる。無ければそのテストは SKIP。
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ import make_release_assets as mra  # noqa: E402
 
 
 def string_struct(key: str, value: str) -> bytes:
-    """StringFileInfo の String 構造を 1 つ作る(試験用)。4 バイト境界に置く前提"""
+    """StringFileInfo の String 構造を 1 つ作る(テスト用)。4 バイト境界に置く前提"""
     k = key.encode("utf-16-le") + b"\x00\x00"
     v = value.encode("utf-16-le") + b"\x00\x00"
     head_len = 6 + len(k)
@@ -39,7 +39,7 @@ def fixed_info(ver: tuple[int, int, int, int], prerelease: bool) -> bytes:
 
 
 def fake_exe(file_ver: str, product_ver: str, ver4=(7, 0, 0, 0), prerelease=True) -> bytes:
-    """版情報らしいバイト列(本物の PE ではない。読み取りの試験用)"""
+    """バージョン情報らしいバイト列(本物の PE ではない。読み取りのテスト用)"""
     blob = b"MZ" + b"\x00" * 62 + b"junk" * 16
     for key, value in (("ProductName", "zahyou"), ("FileVersion", file_ver), ("ProductVersion", product_ver),
                        ("OriginalFilename", "zahyou.exe")):
@@ -75,7 +75,7 @@ class NameTest(unittest.TestCase):
         self.assertEqual(mra.notebook_asset_name("8.1.2"), "zahyou_v8.ipynb")
 
     def test_version_label(self):
-        # 版名は末尾の 0 の部分を省く(rs/app/build.rs の version_label と同じ決まり)
+        # バージョン名は末尾の 0 の部分を省く(rs/app/build.rs の version_label と同じ決まり)
         for version, label in (("7.0.0", "v7"), ("8.0.0", "v8"), ("10.0.0", "v10"), ("8.0.0-beta.1", "v8-beta.1"),
                                ("7.1.0", "v7.1"), ("7.0.1", "v7.0.1"), ("7.1.2-rc.1", "v7.1.2-rc.1")):
             self.assertEqual(mra.version_label(version), label, version)
@@ -106,7 +106,7 @@ class PeTest(unittest.TestCase):
         self.assertEqual(s["OriginalFilename"], "zahyou.exe")
 
     def test_ignores_loose_text(self):
-        # 構造に入っていない "FileVersion" の文字(wType が 1 でない・境界がずれている)は拾わない
+        # 構造に入っていない "FileVersion" の文字(wType が 1 でない・境界がずれている)は読み取らない
         loose = b"\x00\x00\x00\x00" + b"\x01\x00\x09\x00\x07\x00" + "FileVersion".encode("utf-16-le") + b"\x00\x00" + "x".encode("utf-16-le")
         data = loose + fake_exe("7.0.0", "v7.0.0", prerelease=False)
         self.assertEqual(mra.pe_version_strings(data)["FileVersion"], "7.0.0")
@@ -182,7 +182,7 @@ class PathsTest(unittest.TestCase):
         self.assertEqual(len(homes), len({key(h) for h in homes}), "区切りだけが違うものは 1 つに")
 
     def test_main_refuses_exe_with_home(self):
-        # ホームのパスが残った exe なら、ほかの検査を飛ばしても資産を書かない
+        # ホームのパスが残った exe なら、ほかの検査を飛ばしてもアセットを書かない
         with tempfile.TemporaryDirectory() as t:
             exe = Path(t) / "zahyou.exe"
             exe.write_bytes(b"MZ\x00" + (mra.home_dirs()[0] + r"\.cargo\registry\src\x.rs").encode())
@@ -243,14 +243,14 @@ class NotebookTest(unittest.TestCase):
         self.assertEqual(mra.notebook_version(mra._norm(e.read_text(encoding="utf-8"))), "v7-beta.2")
         self.assertEqual(mra.check_notebook_version(e, "7.0.0-beta.2"), [])
         self.assertIn("NB_VERSION", mra.check_notebook_version(e, "7.0.0-beta.3")[0])
-        # 版名は末尾の 0 を省いた形。省かない書き方("v7.0.0-beta.2")は食い違いとして止める
+        # バージョン名は末尾の 0 を省いた形。省かない書き方("v7.0.0-beta.2")は食い違いとして止める
         e.write_bytes(b'x = 1\r\nNB_VERSION = "v7.0.0-beta.2"\r\n')
         self.assertIn("NB_VERSION", mra.check_notebook_version(e, "7.0.0-beta.2")[0])
         e.write_bytes(b"x = 1\n")
         self.assertTrue(mra.check_notebook_version(e, "7.0.0-beta.2"))
 
     def test_real_notebook_version(self):
-        # 直下の zahyou_engine.py の見出しの版が rs/Cargo.toml の版と同じ
+        # 直下の zahyou_engine.py の見出しのバージョンが rs/Cargo.toml のバージョンと同じ
         self.assertEqual(mra.check_notebook_version(mra.REPO_DIR / "zahyou_engine.py", mra.cargo_version()), [])
 
 
@@ -315,12 +315,12 @@ class AssembleTest(unittest.TestCase):
         self.assertEqual(list(p.files), ["zahyou.exe", "zahyou_v7.ipynb", "zahyou_engine.py",
                                          "zahyou-manual-v4.pdf", "LICENSE.txt", "THIRD-PARTY-NOTICES.md"])
         self.assertEqual(p.files["zahyou_v7.ipynb"], mra.REPO_DIR / "zahyou_v7.ipynb")
-        # 大きな版が上がれば、元も配る名前も上がる
+        # メジャーバージョンが上がれば、元も配る名前も上がる
         p = mra.plan_assets(Path("zahyou.exe"), "8.0.0", "v4")
         self.assertEqual(p.files["zahyou_v8.ipynb"], mra.REPO_DIR / "zahyou_v8.ipynb")
 
     def test_repo_notebook_exists(self):
-        # 今の版の直下のノートブックが実際にあり、dev/build_nb.py が書き換える ROOT_NB と同じ名前
+        # 今のバージョンの直下のノートブックが実際にあり、dev/build_nb.py が書き換える ROOT_NB と同じ名前
         repo_nb = mra.notebook_repo_path(mra.cargo_version())
         self.assertTrue(repo_nb.is_file(), repo_nb)
         import importlib.util
@@ -388,7 +388,7 @@ class RealExeTest(unittest.TestCase):
         self.assertTrue(mra.notices_embedded(exe.read_bytes(), (mra.RS_DIR / "THIRD-PARTY-NOTICES.md").read_bytes()))
 
     def test_no_home_path(self):
-        # 手順書 4 節の --remap-path-prefix を付けて建てた exe なら 0 か所
+        # 手順書 4 節の --remap-path-prefix を付けてビルドした exe なら 0 か所
         exe = find_release_exe()
         self.assertEqual(mra.check_paths(exe), [], str(exe))
 

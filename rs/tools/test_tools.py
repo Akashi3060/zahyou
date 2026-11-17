@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""rs/tools の試験(標準ライブラリの unittest だけで動く)。
+"""rs/tools のテスト(標準ライブラリの unittest だけで動く)。
 
     python -B rs/tools/test_tools.py
 
@@ -41,7 +41,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE."""
 
-# Apache-2.0 の本文の代わり(見分けの目印と、付録の判定に要るところだけ)
+# Apache-2.0 の本文の代わり(種類の判定に使う文と、付録の判定に要るところだけ)
 APACHE_HEAD = """                              Apache License
                         Version 2.0, January 2004
                      http://www.apache.org/licenses/
@@ -186,7 +186,7 @@ class TextTest(unittest.TestCase):
 
 
 def fake_metadata(root: Path, extra_license: str | None = None) -> dict:
-    """ワークスペース app → a(通常)→ pm(proc-macro)→ q、app → b(ビルド)、app → d(試験)の依存の形"""
+    """ワークスペース app → a(通常)→ pm(proc-macro)→ q、app → b(ビルド)、app → d(テスト)の依存の形"""
     def pkg(name, lic, kind="lib", text=None, build_deps=()):
         d = root / name
         d.mkdir(parents=True, exist_ok=True)
@@ -237,7 +237,7 @@ class DepsTest(unittest.TestCase):
     def test_classify(self):
         deps = cd.classify(fake_metadata(self.dir))
         names = [p.name for p in deps.runtime]
-        self.assertEqual(names, ["a", "pm", "q"])  # b(ビルド)・d(試験)・cc(ビルド)は入らない
+        self.assertEqual(names, ["a", "pm", "q"])  # b(ビルド)・d(テスト)・cc(ビルド)は入らない
         self.assertEqual(deps.build_only, 2)
         self.assertEqual(deps.dev_only, 1)
         ct = {p.name for p in deps.runtime if p.compile_time_only}
@@ -257,7 +257,7 @@ class DepsTest(unittest.TestCase):
         self.assertEqual(col.warnings, [])
 
     def test_notice_included(self):
-        # Apache-2.0 の NOTICE はどこにも捨てずに載せる(試験のフォルダーの中のものは exe に入らないので拾わない)
+        # Apache-2.0 の NOTICE はどこにも捨てずに載せる(テストのフォルダーの中のものは exe に入らないので集めない)
         meta = fake_metadata(self.dir)
         (self.dir / "q" / "NOTICE").write_text("q includes software developed at Example Corp.\n", encoding="utf-8")
         (self.dir / "q" / "tests").mkdir()

@@ -136,7 +136,7 @@ impl Wcs {
         self.iwc_to_pix_in(inv2(&self.cd), xi, eta, false)
     }
 
-    /// `iwc_to_pix` の、逆変換があっても順変換をニュートン法で解く版(Python の `exact=True`)。
+    /// `iwc_to_pix` の、逆変換があっても順変換をニュートン法で解くバージョン(Python の `exact=True`)。
     pub fn iwc_to_pix_exact(&self, xi: f64, eta: f64) -> Option<(f64, f64)> {
         self.iwc_to_pix_in(inv2(&self.cd), xi, eta, true)
     }
@@ -164,7 +164,7 @@ impl Wcs {
         self.xyz_to_pix_in(&self.frame(), v, false)
     }
 
-    /// `xyz_to_pix` の、SIP をいつもニュートン法で解く版(Python の `exact=True`)。
+    /// `xyz_to_pix` の、SIP をいつもニュートン法で解くバージョン(Python の `exact=True`)。
     pub fn xyz_to_pix_exact(&self, v: Vec3) -> Option<(f64, f64)> {
         self.xyz_to_pix_in(&self.frame(), v, true)
     }
@@ -179,7 +179,7 @@ impl Wcs {
         self.xyz_to_pix(radec_to_xyz(ra_deg, dec_deg))
     }
 
-    /// `radec_to_pix` の、SIP をいつもニュートン法で解く版。
+    /// `radec_to_pix` の、SIP をいつもニュートン法で解くバージョン。
     pub fn radec_to_pix_exact(&self, ra_deg: f64, dec_deg: f64) -> Option<(f64, f64)> {
         self.xyz_to_pix_exact(radec_to_xyz(ra_deg, dec_deg))
     }

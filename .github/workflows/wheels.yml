@@ -1,4 +1,4 @@
-# ノートブック版の拡張モジュール zahyou-native(rs/py)の wheel を Windows・Mac・Linux 向けに建てる。
+# ノートブック版の拡張モジュール zahyou-native(rs/py)の wheel を Windows・Mac・Linux 向けにビルドする。
 # ビルドした wheel は「zahyou-native-wheels」という名前の成果物に入る。Release に添えるのは人の作業
 # (docs/release-v7.md の 6 節: gh run download → make_release_assets.py --wheels)。このワークフローは Release に触れない。
 name: wheels

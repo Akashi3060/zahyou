@@ -9,7 +9,7 @@ dev/build_nb.py と同じ順にメモリ上でつないで使う(ファイルは
 CANCEL_EVENT を置く(立てない)。図は描くが表示しない。
 
 場面ごとに run() のログ・解けたか・結果のまとめ・ずれ・覚えた機材の画素スケール・かかった秒を書く。
-Rust の試験(app/src/pipeline.rs の run_solver_vs_python)は同じ画像・同じ設定で本物の解法を通し、
+Rust のテスト(app/src/pipeline.rs の run_solver_vs_python)は同じ画像・同じ設定で本物の解法を通し、
 時刻の入る数だけを伏せてログを 1 行ずつ比べる。
 
 画像のパスは dev/solver_truth.json と同じ決まり: "$ZAHYOU_TEST_IMAGES/…"(既定はホームフォルダー)か、
@@ -53,7 +53,7 @@ RIG_KEY = "ZWO ASI290MM||968x548|bin2|f"
 RIG_SCALE = 1.461614244726863
 
 # (名前, 画像, 設定の上書き, 機材の記憶を入れておくか, 比べ方)
-#   比べ方 "all" = ログを全部(時刻の数だけ伏せる)、"advice" = 試行のはしごは時刻で変わるので、はしごの外と案内だけ
+#   比べ方 "all" = ログを全部(時刻の数だけ伏せる)、"advice" = 段階的な試行の行は時刻で変わるので、それ以外の行と案内だけ
 BASE = dict(INPUT_MODE="STAR_NAME", TARGET_STAR_NAME=TARGET, RA_INPUT_STR="04h 07m 38.877s",
             DEC_INPUT_STR="+41d 59m 10.512s", FOCAL_LENGTH_MM=None, SOLVE_MODE="OFFLINE",
             ONLINE_TIMEOUT=120, OFFLINE_TIMEOUT=300, USE_TARGET_AS_HINT=True, SEARCH_RADIUS_DEG=5.0,
@@ -64,7 +64,7 @@ SCENES = [
     ("orig_blind", ORIG, {"INPUT_MODE": "NONE"}, False, "all"),
     ("orig_coords_nohint", ORIG, {"INPUT_MODE": "COORDS", "USE_TARGET_AS_HINT": False}, False, "all"),
     ("orig_focal", ORIG, {"FOCAL_LENGTH_MM": 818.0}, False, "all"),
-    # 焦点距離の書き違い(狭いスケールで全天を探して外れ、スケール全域で解ける。外れる試行は時刻しだいで締め切りに当たる)
+    # 焦点距離の書き違い(狭いスケールで全天を探して外れ、スケール全域で解ける。外れる試行は時刻しだいでタイムアウトになる)
     ("orig_focal_short", ORIG, {"FOCAL_LENGTH_MM": 2500.0, "INPUT_MODE": "NONE"}, False, "advice"),
     ("orig_rig", ORIG, {"INPUT_MODE": "NONE"}, True, "all"),
     ("flip_star", "dev/realcase/real_flip.fits", {}, False, "all"),
@@ -89,13 +89,13 @@ SCENES = [
 ]
 
 
-# Downloads の試験画像の控え(作者の PC では Downloads を整理するので、試験が読む元の画像を同じ並びで写してある。2026-10-29)
+# Downloads のテスト画像のコピー(作者の PC では Downloads を整理するので、テストが読む元の画像を同じ並びでコピーしてある。2026-10-29)
 TEST_IMAGES_COPY = ("Documents", "claude", "zahyou", "testdata", "images")
 
 
 def images_path(rest):
     """"$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を実際のパスに。ZAHYOU_TEST_IMAGES(無ければホームフォルダー)からの相対で、
-    Downloads/… がそこに無ければ、同じ並びの控え(TEST_IMAGES_COPY の下)も見る。"""
+    Downloads/… がそこに無ければ、同じ並びのコピー(TEST_IMAGES_COPY の下)も見る。"""
     base = os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~")
     parts = rest.split("/")
     p = os.path.join(base, *parts)

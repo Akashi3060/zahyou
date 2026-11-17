@@ -1,4 +1,4 @@
-//! 照合データを使わない試験: 壊れた入力でパニックしない・極と赤経 0h の折り返し・描いた PNG の向きと配色。
+//! 照合データを使わないテスト: 壊れた入力でパニックしない・極と赤経 0h の折り返し・描いた PNG の向きと配色。
 
 use std::path::PathBuf;
 
@@ -6,7 +6,7 @@ use zahyou_image::{Image2D, Source};
 use zahyou_plot::*;
 use zahyou_wcs::{Sip, Wcs, fit_sip_inverse, radec_to_xyz};
 
-/// 整数の擬似乱数(試験を毎回同じにする)。
+/// 整数の擬似乱数(テストを毎回同じにする)。
 struct Rng(u64);
 impl Rng {
     fn next(&mut self) -> f64 {
@@ -77,7 +77,7 @@ fn check_figure(fig: &Figure, what: &str) {
     }
 }
 
-/// 配置: 軸・目盛りの文字・軸名・題が図の中に収まり、題は軸にも目盛りの文字にも重ならない。
+/// 配置: 軸・目盛りの文字・軸名・タイトルが図の中に収まり、タイトルは軸にも目盛りの文字にも重ならない。
 fn check_layout(fig: &Figure, fonts: Option<&Fonts>, what: &str) {
     let opts = RenderOptions { width: 800, ..Default::default() };
     let l = layout_with(fig, &opts, fonts);
@@ -287,7 +287,7 @@ fn rendered_png_orientation_and_theme() {
             let i = (sy as usize * r.width as usize + sx as usize) * 4;
             r.data[i]
         };
-        // 画像の行 3(白)と行 26(黒)。格子・印の無い所(x = 5)
+        // 画像の行 3(白)と行 26(黒)。格子・マーカーの無い所(x = 5)
         // (明るい行が 2 割あるので σ クリップで何も捨てられず、伸張の幅が広い。明暗の差だけを見る)
         assert!(px(5.0, 3.0) as i32 > px(5.0, 26.0) as i32 + 40, "flip_y={flip}: {} / {}", px(5.0, 3.0), px(5.0, 26.0));
         let (_, s_white) = bx.to_screen(5.0, 3.0);

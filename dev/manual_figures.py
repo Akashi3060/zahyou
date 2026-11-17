@@ -290,7 +290,7 @@ class AppWindow(Flowable):
         c.saveState()
         w, h = self.width, self.height
 
-        # --- 窓 ---------------------------------------------------------
+        # --- ウィンドウ ---------------------------------------------------
         c.setStrokeColor(colors.HexColor("#9AA7B4"))
         c.setFillColor(colors.HexColor("#F4F6F8"))
         c.setLineWidth(1.0)

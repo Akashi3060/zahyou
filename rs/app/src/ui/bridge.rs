@@ -103,7 +103,7 @@ pub fn api_key_problem(s: &Settings) -> Option<&'static str> {
     (s.solve == Solve::Online && s.api_key.usable().is_none()).then_some(super::app::ONLINE_NEEDS_KEY)
 }
 
-/// 解析を 1 回通す(ワーカーから呼ぶ)。図は画面に描く形まで直しておく(縮小の段づくりも済ませる)。
+/// 解析を 1 回通す(ワーカーから呼ぶ)。図は画面に描く形まで直しておく(縮小の段階づくりも済ませる)。
 ///
 /// `debug_wcs` を渡すと、オフライン解析の代わりにそのファイルの WCS を「解」として返す
 /// (隠しの引数 --debug-wcs。解法と切り離して結果の画面を確かめるため)。
@@ -143,10 +143,10 @@ pub fn run(p: &pipeline::RunParams, debug_wcs: Option<&Path>, cancel: &AtomicBoo
     }
 }
 
-/// 解析の結果から図を抜き出して画面の形にする。図は写さずに移す(r.figures は空になる)。
+/// 解析の結果から図を抜き出して画面の形にする。図はコピーせずに移す(r.figures は空になる)。
 ///
-/// 以前は `r.figures.iter()` で回して `Arc::new(f.clone())` で図を丸ごと写していた。rgba は幅×高さ×4 バイト
-/// (24 MP で 96 MB、北が上の図は回転の外接矩形のぶん大きくなる)で、写す間は元と写しが両方メモリにあった。
+/// 以前は `r.figures.iter()` で回して `Arc::new(f.clone())` で図を丸ごとコピーしていた。rgba は幅×高さ×4 バイト
+/// (24 MP で 96 MB、北が上の図は回転の外接矩形のぶん大きくなる)で、コピーする間は元とコピーが両方メモリにあった。
 /// 中身は同じ値を移すだけなので、画面の形(figure_to_scene)も保存(save_figure が読む source)もバイト単位で同じ。
 /// 前提: RunResult の numbers()・detail()・status_text() は figures を読まない(pipeline.rs。offsets・summary・
 /// seconds・cancelled・wcs だけ)。r から図を読む処理をこの後に足すと空になっているので、足すならこの前に置く。
@@ -280,7 +280,7 @@ fn grid_set(g: &zahyou_plot::Grid) -> GridSet {
     }
 }
 
-/// zahyou-plot の図 → 画面に描く形(縮小の段もここで作る。ワーカーで呼ぶ)
+/// zahyou-plot の図 → 画面に描く形(縮小の段階もここで作る。ワーカーで呼ぶ)
 pub fn figure_to_scene(f: &zahyou_plot::Figure) -> Scene {
     let mut s = Scene::empty();
     s.title = f.title.clone();
@@ -329,7 +329,7 @@ pub fn save_figure(f: &zahyou_plot::Figure, path: &Path, dark: bool, view: Optio
     zahyou_plot::save_png(f, &opts, path).map_err(|e| e.to_string())
 }
 
-/// 解析が開いている索引ファイルを手放させる(落とし直す前に。Windows では mmap 中のファイルを置き換えられない)
+/// 解析が開いているインデックスファイルを手放させる(ダウンロードし直す前に。Windows では mmap 中のファイルを置き換えられない)
 pub fn release_indexes() {
     pipeline::release_index_catalog();
 }
@@ -497,15 +497,15 @@ mod plot_tests {
         assert!((s.regrid.as_ref().unwrap())([5.0, 5.0, 0.0, 1.0]).is_none(), "幅 0 の範囲は作らない");
     }
 
-    /// 旧版の図の受け渡し(図を丸ごと写していた)。take_figures と同じ結果になるかを見る参照実装
+    /// 旧版の図の受け渡し(図を丸ごとコピーしていた)。take_figures と同じ結果になるかを見る参照実装
     fn figures_by_clone(r: &pipeline::RunResult) -> Vec<FigureOut> {
         r.figures.iter().map(|f| FigureOut { scene: Arc::new(figure_to_scene(f)), source: Arc::new(f.clone()) }).collect()
     }
 
-    /// 画像の段ごとの (大きさ, 画素)
+    /// 画像の段階ごとの (大きさ, 画素)
     type LevelPixels = Vec<([usize; 2], Vec<Color32>)>;
 
-    /// 画面の形の中身を比べられる形にする(画像の段の画素は別に返す。regrid は関数なので同じ範囲で呼んだ結果)
+    /// 画面の形の中身を比べられる形にする(画像の段階の画素は別に返す。regrid は関数なので同じ範囲で呼んだ結果)
     fn scene_dump(s: &Scene) -> (String, LevelPixels) {
         let text = format!(
             "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
@@ -549,7 +549,7 @@ mod plot_tests {
         assert!(before.0.is_some() && before.1.is_some(), "比べる値が空");
         assert_eq!(new.len(), old.len());
         for (i, (n, o)) in new.iter().zip(&old).enumerate() {
-            // 写していない(rgba の領域がそのまま)
+            // コピーしていない(rgba の領域がそのまま)
             assert_eq!(n.source.rgba.as_ptr(), ptrs[i], "図 {i} をコピーしている");
             // 保存に使う元の図も、画面の形も、旧版とバイト単位で同じ(f64 の Debug は往復できる最短の表記)
             assert_eq!(format!("{:?}", n.source), format!("{:?}", o.source), "図 {i}");

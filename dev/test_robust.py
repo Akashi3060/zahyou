@@ -1,8 +1,8 @@
 """どんな画像でも「星のリストが作れる」ことを確認するテスト。
 
 星のリストは 2 つ。detect_sources (図に緑の丸で出す星) と detect_sources_deep
-(解析エンジンに渡す、暗い星まで拾った星)。各ケースで両方を確かめる。
-34 番以降は深い検出だけのケース (暗い星・雑音だけ・十字のホットピクセル・位置の精度・実写)。
+(解析エンジンに渡す、暗い星まで検出した星)。各ケースで両方を確かめる。
+34 番以降はディープ検出だけのケース (暗い星・雑音だけ・十字のホットピクセル・位置の精度・実写)。
 
 ここで書き出す tcase/*.fits の一部は test_solver_real.py の陰性の画像 (sha256 で照合) なので、
 共通の乱数 rng を使う順番を変えないこと。新しいケースは自分の seed を使う。
@@ -23,13 +23,13 @@ rng = np.random.default_rng(20260831)
 TMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tcase")
 # 手元の実写 (あるときだけ走る)。test_solver_real.py と同じく ZAHYOU_TEST_IMAGES (無ければホームフォルダー) から
 IMAGES = os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~")
-# Downloads の試験画像の控え(作者の PC では Downloads を整理するので、試験が読む元の画像を同じ並びで写してある。2026-10-29)
+# Downloads のテスト画像のコピー(作者の PC では Downloads を整理するので、テストが読む元の画像を同じ並びでコピーしてある。2026-10-29)
 TEST_IMAGES_COPY = ("Documents", "claude", "zahyou", "testdata", "images")
 
 
 def images_path(rest):
     """"$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を実際のパスに。ZAHYOU_TEST_IMAGES(無ければホームフォルダー)からの相対で、
-    Downloads/… がそこに無ければ、同じ並びの控え(TEST_IMAGES_COPY の下)も見る。"""
+    Downloads/… がそこに無ければ、同じ並びのコピー(TEST_IMAGES_COPY の下)も見る。"""
     base = os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~")
     parts = rest.split("/")
     p = os.path.join(base, *parts)
@@ -91,7 +91,7 @@ def match_planted(src, planted, tol):
 def check(name, path, expect_sources=8, planted=None, tol=2.0, expect_fail=False):
     """
     標準の検出で expect_sources 個以上・純度 80% 以上 (planted があるとき)。
-    深い検出も同じ数・同じ純度を求める (解析エンジンに渡す星が図の星より劣らないこと)。
+    ディープ検出も同じ数・同じ純度を求める (解析エンジンに渡す星が図の星より劣らないこと)。
     """
     try:
         b = zc.load_image_any(path)
@@ -341,7 +341,7 @@ def case_starless_noise():
     sub, mask, sigma, _ = zc.preprocess(b.data)
     src, thr = zc.detect_sources(sub, mask, sigma)
     deep, u = zc.detect_sources_deep(sub, mask, sigma)
-    # ノイズだけの画像で大量に「星」を作らないこと。深い検出は偽の極大が 2 個ほどに
+    # ノイズだけの画像で大量に「星」を作らないこと。ディープ検出は偽の極大が 2 個ほどに
     # なるしきい値を選ぶので、数個まで (ポアソン分布で 9 個以上になる見込みは 0.03%)
     ok = len(src) < 40 and len(deep) <= 8
     RESULTS.append(("26 ノイズだけ (曇天) → 誤検出が暴走しない", ok,
@@ -392,7 +392,7 @@ def case_spaces_in_name():
 
 
 def case_star_chart():
-    """星図 (白地に黒い星)。明暗が逆なので、そのままでは 1 つも拾えない。"""
+    """星図 (白地に黒い星)。明暗が逆なので、そのままでは 1 つも検出できない。"""
     img, pl = make_field()
     v = (img - img.min()) / max(float(np.ptp(img)), 1e-6)
     inv = ((1.0 - v) * 255.0).astype(np.uint8)          # 白地に黒い星
@@ -408,7 +408,7 @@ def case_real_star_chart():
         check("33 実物の星図 (40 分角)", p2, expect_sources=50)
 
 
-# ---------------------------------------------------- 深い検出だけのケース ---
+# ---------------------------------------------------- ディープ検出だけのケース ---
 # 共通の rng は使わない (上の tcase/*.fits が変わらないように)。名前は既存のケースの後に並べる。
 
 def _detect_both(img):
@@ -420,7 +420,7 @@ def _detect_both(img):
 
 
 def case_zz34_deep_faint():
-    """暗い星 (頂が雑音の 2〜6 倍) だけの星野。深い検出は標準より多く、純度を保って拾う。"""
+    """暗い星 (頂が雑音の 2〜6 倍) だけの星野。ディープ検出は標準より多く、純度を保って検出する。"""
     img, pl = make_field(n=60, noise=12.0, peak=(25, 70), fwhm=3.5, seed=34)
     std, deep, info = _detect_both(img)
     ms, ns = match_planted(std, pl, 2.0)
@@ -449,8 +449,8 @@ def case_zz35_deep_noise():
 def case_zz36_deep_hot_cross():
     """
     ベイヤーの補間で十字に広がったホットピクセル (中心と上下左右)。前処理の 1 画素だけの
-    ホットピクセル消しにはかからないので、深い検出は「鋭さ」で捨てる。
-    (標準の検出はこれを星として拾う。図の星はこのケースの対象外)
+    ホットピクセル消しにはかからないので、ディープ検出は「鋭さ」で捨てる。
+    (標準の検出はこれを星として検出する。図の星はこのケースの対象外)
     """
     img, pl = make_field(seed=36)
     r = np.random.default_rng(1036)
@@ -471,7 +471,7 @@ def case_zz36_deep_hot_cross():
 
 
 def case_zz37_deep_position():
-    """深い検出の位置の精度。植えた星 (FWHM 3 px) との差の中央値が 0.05 px 以下。"""
+    """ディープ検出の位置の精度。植えた星 (FWHM 3 px) との差の中央値が 0.05 px 以下。"""
     errs = []
     for seed in (37, 137):
         img, pl = make_field(seed=seed)
@@ -487,7 +487,7 @@ def case_zz37_deep_position():
 
 
 def case_zz38_deep_real_few_stars():
-    """実写の 3I (星の少ない画像)。標準の検出は 8 個。深い検出で 12 個以上。手元にあるときだけ。"""
+    """実写の 3I (星の少ない画像)。標準の検出は 8 個。ディープ検出で 12 個以上。手元にあるときだけ。"""
     p = images_path("Downloads/02013I_00010 20_47_25.fits")
     if not os.path.exists(p):
         return

@@ -247,7 +247,7 @@ impl SipTerms {
     }
 }
 
-/// 出力の画素 → 入力の画素の写し(行ごとに使う下ごしらえ)。
+/// 出力の画素 → 入力の画素の変換(行ごとに使う事前計算)。
 struct Mapper {
     out_r: Vec3,
     out_e: Vec3,
@@ -371,7 +371,7 @@ pub fn reproject_interp(img: &Image2D, wcs_in: &Wcs, wcs_out: &Wcs, width_out: u
     Image2D { width: width_out, height: height_out, data: out }
 }
 
-/// `reproject_interp` を zahyou-wcs の関数だけで素直に書いたもの(試験で速い版と比べる)。往復の検査も行う。
+/// `reproject_interp` を zahyou-wcs の関数だけで素直に書いたもの(テストで速いバージョンと比べる)。往復の検査も行う。
 #[doc(hidden)]
 pub fn reproject_interp_reference(
     img: &Image2D,
@@ -437,7 +437,7 @@ mod tests {
     #[test]
     fn fast_path_matches_reference() {
         use zahyou_wcs::fit_sip_inverse;
-        // 強くゆがんだ SIP 3 次(逆変換あり・なし)と TAN で、速い版と素直な版が同じ値になる
+        // 強くゆがんだ SIP 3 次(逆変換あり・なし)と TAN で、速いバージョンと素直なバージョンが同じ値になる
         let (w, h) = (300usize, 200usize);
         let data: Vec<f32> = (0..w * h).map(|i| ((i * 7919) % 1000) as f32 + (i % w) as f32 * 0.5).collect();
         let img = Image2D::new(w, h, data).unwrap();

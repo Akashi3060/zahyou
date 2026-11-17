@@ -2,21 +2,21 @@
 //!
 //! 1. 星のリストで(画像が無くても回る): rs/testdata/solver_real.json に Python 基準実装の検出の星
 //!    (load_image_any → preprocess → detect_sources_deep / detect_sources(min_sources=60))と、solve_offline と同じ
-//!    試行のはしごを sv_solve で順に解いた結果が入っている。同じ星・同じ条件で zahyou_solver::solve を呼び、
-//!    Python と同じ答え(同じ索引・対数オッズ 1e-6・一致数・最終の WCS 1e-6 px・試した quad の数・仮説の数)か、
+//!    段階的な試行を sv_solve で順に解いた結果が入っている。同じ星・同じ条件で zahyou_solver::solve を呼び、
+//!    Python と同じ答え(同じインデックス・対数オッズ 1e-6・一致数・最終の WCS 1e-6 px・試した quad の数・仮説の数)か、
 //!    Python が quad を試し尽くして解けなかった試行は Rust も解なしか、を確かめる。解法の crate が trace を出せれば
-//!    途中の値(解いた quad の 4 点・束ごとの数・最初の 24 個の仮説の WCS と対数オッズ)も Python と比べる。続いて正解(solver_truth.json の
+//!    途中の値(解いた quad の 4 点・バッチごとの数・最初の 24 個の仮説の WCS と対数オッズ)も Python と比べる。続いて正解(solver_truth.json の
 //!    truth。criteria に criteria_override を重ね、accept に truth_tan があればそれも合格)に対して設計書 8 節の基準。
 //! 2. 利用者の経路で(画像が手元にあるときだけ): zahyou-image で読み込み・前処理・検出(min_sources 60)をして
 //!    zahyou_solver::solve_offline。正解の基準と、基準の画像は目標までのずれ(1.583′・0.918′ 東・1.290′ 北)も。
-//!    Rust の深い検出は Python と同じとは限らない(この試験は正解とだけ比べる)。
+//!    Rust のディープ検出は Python と同じとは限らない(このテストは正解とだけ比べる)。
 //!
 //! ```text
 //! cargo test -p zahyou-solver --test real -- --nocapture             基準の画像 real_orig(+ヒント)だけ
 //! cargo test -p zahyou-solver --test real -- --ignored --nocapture   全部
 //! ```
 //! 画像は $ZAHYOU_TEST_IMAGES(既定はホームフォルダー)かリポジトリからの相対(zahyou-rs に無ければ ZAHYOU_PY_REPO)。
-//! 星図データ・基準値・画像が無いものは SKIP。解けてはいけない画像は tests/negative.rs。
+//! インデックスファイル・基準値・画像が無いものは SKIP。解けてはいけない画像は tests/negative.rs。
 
 mod common;
 
@@ -78,7 +78,7 @@ fn check_offsets(base: &Value, wcs: &zahyou_wcs::Wcs, w: usize, h: usize) -> Res
     if d <= 2.0 / 60.0 + 5e-4 { Ok(msg) } else { Err(msg) }
 }
 
-/// 星のリストで、試行のはしごを Python と同じ順に解く。
+/// 星のリストで、段階的な試行を Python と同じ順に解く。
 fn stars_case(img: &Value, truth_doc: &Value, bad: &mut Vec<String>) {
     let name = img["name"].as_str().unwrap_or("?");
     if let Some(why) = img.get("skipped").and_then(|v| v.as_str()) {
@@ -182,7 +182,7 @@ fn stars_case(img: &Value, truth_doc: &Value, bad: &mut Vec<String>) {
             _ => row("----", &label, &format!("Python は {status}(突き合わせない)")),
         }
         if sol.is_some() {
-            break; // 解けたらはしごを降りない(solve_offline と同じ)
+            break; // 解けたら残りの試行はしない(solve_offline と同じ)
         }
     }
 }

@@ -2,7 +2,7 @@
 //! `plot_original`・`plot_north_up`・`_draw_markers`・`clip_arrow_to_boundary`・`report_offsets`・`wcs_summary` を移したもの。
 //!
 //! 図は「画像の RGBA」と「画像の座標で書いた表示リスト」で持つ。描く側(PNG の書き出しは render.rs、画面は app)は
-//! 画像の座標 → 画面の座標の写しだけを決めればよい。線の太さ・印の大きさ・文字の大きさは pt(1/72 インチ。画面の上で一定)。
+//! 画像の座標 → 画面の座標の変換だけを決めればよい。線の太さ・マーカーの大きさ・文字の大きさは pt(1/72 インチ。画面の上で一定)。
 //!
 //! 色と大きさは Python 版と同じ:
 //! - 格子: deepskyblue の破線、0.9 pt、不透明度 0.65(matplotlib の破線 [3.7, 1.6] × 線幅)
@@ -151,7 +151,7 @@ pub enum Prim {
     },
 }
 
-/// 線と印の大きさ(pt。Python 版の値)。
+/// 線とマーカーの大きさ(pt。Python 版の値)。
 pub mod style {
     use super::{Color, named};
 
@@ -180,7 +180,7 @@ pub mod style {
     pub const ARROW_EDGE: f32 = 1.0;
     pub const TARGET_TEXT_SIZE: f32 = 12.0;
     pub const TARGET_TEXT_OFFSET: [f32; 2] = [14.0, 14.0];
-    /// 題(size=14)
+    /// タイトル(size=14)
     pub const TITLE_SIZE: f32 = 14.0;
     /// 目盛りの文字・軸名(rcParams の medium = 10 pt)
     pub const TICK_LABEL_SIZE: f32 = 10.0;
@@ -192,7 +192,7 @@ pub mod style {
     pub const TICK_PAD: f32 = 3.5;
     /// 枠の線(axes.linewidth)
     pub const FRAME_WIDTH: f32 = 0.8;
-    /// 題と枠のすき間(axes.titlepad)
+    /// タイトルと枠のすき間(axes.titlepad)
     pub const TITLE_PAD: f32 = 6.0;
 }
 
@@ -217,7 +217,7 @@ pub struct Figure {
     pub rgba: Vec<u8>,
     /// true なら行 0 を画面の上に(Python の invert_yaxis)。false なら行 0 が画面の下(origin="lower")
     pub flip_y: bool,
-    /// 題(2 行。"\n" で区切る)
+    /// タイトル(2 行。"\n" で区切る)
     pub title: String,
     /// 表示リスト(描く順。格子 → 星 → 中心 → 矢印 → 目標の円 → TARGET)
     pub prims: Vec<Prim>,
@@ -340,7 +340,7 @@ impl Offsets {
     }
 }
 
-/// 「撮影時の向き」の題。目標があれば `目標: 04h07m38.88s +41d59m10.54s`、無ければ「目標未指定 (中心のみ表示)」。
+/// 「撮影時の向き」のタイトル。目標があれば `目標: 04h07m38.88s +41d59m10.54s`、無ければ「目標未指定 (中心のみ表示)」。
 pub fn title_original(target: Option<(f64, f64)>) -> String {
     let sub = match target {
         Some((ra, dec)) => format!("目標: {}", hmsdms(ra, dec, 2)),
@@ -349,7 +349,7 @@ pub fn title_original(target: Option<(f64, f64)>) -> String {
     format!("撮影時の向き\n{sub}")
 }
 
-/// 「北が上・東が左」の題。`距離 1.58′ | RA 0.92′(東) Dec 1.29′(北)`。目標が無ければ 2 行目は「目標未指定 (中心のみ表示)」。
+/// 「北が上・東が左」のタイトル。`距離 1.58′ | RA 0.92′(東) Dec 1.29′(北)`。目標が無ければ 2 行目は「目標未指定 (中心のみ表示)」。
 pub fn title_north_up(center: (f64, f64), target: Option<(f64, f64)>) -> String {
     match target {
         Some(t) => {
@@ -582,7 +582,7 @@ pub fn figure_original(
 
 /// 図 2「北が上・東が左」(Python の `plot_north_up`)。画像を描き直すので重い(24 メガ画素で 1 秒弱)。
 ///
-/// 題のずれは、元の画像の中心から目標まで(Python と同じ)。中心の × は描き直した画像の中心に置く。
+/// タイトルに出すずれは、元の画像の中心から目標まで(Python と同じ)。中心の × は描き直した画像の中心に置く。
 pub fn figure_north_up(img: &Image2D, wcs: &Wcs, target: Option<(f64, f64)>) -> Result<Figure, PlotError> {
     check_image(img)?;
     let nu = reproject_north_up(img, wcs)?;

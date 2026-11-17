@@ -1,22 +1,22 @@
-"""solver_core.py(自前ソルバーの解法)の試験。docs/design-native-solver.md の 3 節と 8 節。
+"""solver_core.py(自前ソルバーの解法)のテスト。docs/design-native-solver.md の 3 節と 8 節。
 
-部品: 星の並べ替え、newpoint の quad 作り(= 総当たり)、画像側のコード = 索引のコード(索引の星を既知の WCS で
-画像へ投影して quad を作り、正準化したコードの code_ball で元の quad が引けること。両方の向き・三角形の索引も)、
-4 点の当てはめ、小さい円の検索、検証の対数オッズ(真の WCS は ≥ ln 1e9、乱数の WCS は低い)、合成星野を解く、
-締め切り・中止・cancel() の間隔、trace の中身、ヒントのタイルの絞り込みで仮説が減らないこと、改良(広い視野の
+部品: 星の並べ替え、newpoint の quad 作り(= 総当たり)、画像側のコード = インデックスのコード(インデックスの星を既知の WCS で
+画像へ投影して quad を作り、正準化したコードの code_ball で元の quad が引けること。両方の向き・三角形のインデックスも)、
+4 点のフィット、小さい円の検索、検証の対数オッズ(真の WCS は ≥ ln 1e9、乱数の WCS は低い)、合成星野を解く、
+タイムアウト・中止・cancel() の間隔、trace の中身、ヒントのタイルの絞り込みで仮説が減らないこと、改良(広い視野の
 中心と、quad に偽の星が入った仮説)。
 実写の回帰: dev/solver_truth.json の正解(WSL の astrometry.net)と比べる。解けるべき画像はブラインド・ヒントあり
 (正解の中心から 0.5° ずらした点、半径 5°)・スケール既知(±25%)で、中心 2″(0.5 px のほうが大きければそれ)、
-スケール 0.2%、回転 0.1°、鏡像の一致。解けてはいけない画像は締め切り(60 秒)まで探して解なし、超過 1 秒以内。
+スケール 0.2%、回転 0.1°、鏡像の一致。解けてはいけない画像はタイムアウト(60 秒)まで探して解なし、超過 1 秒以内。
 
   python dev/test_solver_core.py            全部(解けてはいけない画像はブラインドだけ)
   python dev/test_solver_core.py --unit     部品だけ
   python dev/test_solver_core.py --real     実写の回帰だけ
   --full(解けてはいけない画像もヒントあり・スケール既知で)  --deadline 60  --case 名前の一部,…
-  --json 結果.json  --detect main|dev(星の検出に使う zahyou_core。既定は git の main の版を写して使う。
+  --json 結果.json  --detect main|dev(星の検出に使う zahyou_core。既定は git の main のバージョンをコピーして使う。
   dev の zahyou_core は書き換え中のことがあるため。正解もその検出の星で作られている)
 
-C:\\AstrometryData(環境変数 ZAHYOU_INDEX_DIR)が無ければ索引を使う項目は SKIP、画像が無ければ SKIP。
+C:\\AstrometryData(環境変数 ZAHYOU_INDEX_DIR)が無ければインデックスを使う項目は SKIP、画像が無ければ SKIP。
 """
 import argparse
 import copy
@@ -62,7 +62,7 @@ def record(name, ok, msg, rec=None):
 
 
 def catalog():
-    """テスト全体で使い回す SvIndexCatalog(索引が無ければ None)。"""
+    """テスト全体で使い回す SvIndexCatalog(インデックスが無ければ None)。"""
     if not _CAT:
         cat = sc.SvIndexCatalog(DATA) if os.path.isdir(DATA) else None
         _CAT.append(cat if cat is not None and cat.files else None)
@@ -86,7 +86,7 @@ def run_case(name, fn, *ids):
     record(name, ok, f"{msg}  [{time.perf_counter() - t0:.1f} s]")
 
 
-# ------------------------------------------------------------------ 物差し ---
+# ------------------------------------------------------------------ 指標 ---
 
 def cd_of(scale_arcsec, rot_deg, mirror):
     """CD(度/px)。mirror = False は配列座標で det CD < 0(FITS の向きの普通の空)、True は det CD > 0。"""
@@ -125,7 +125,7 @@ CRIT = dict(center_arcsec=2.0, center_px=0.5, scale_rel=0.002, rot_deg=0.1)
 
 
 def synth(cat, indexid, ra, dec, scale, W, H, rot, mirror, n=60, noise=0.25, drop=0.0, fake=0, seed=0):
-    """索引の星から正解つきの星野を作る(sweep の小さい順 = 明るい順に n 個、位置に雑音、欠けと偽の星)。
+    """インデックスの星から正解つきの星野を作る(sweep の小さい順 = 明るい順に n 個、位置に雑音、欠けと偽の星)。
 
     戻り値 (xy, flux, 正解の SvWcs)。flux は明るい順の順位から作る(偽の星はばらばらの順位に混ぜる)。
     """
@@ -234,15 +234,15 @@ def case_02_newpoint():
 
 
 def _quads_of(f, r, k):
-    """索引 f の quad を k 個(乱数)。"""
+    """インデックス f の quad を k 個(乱数)。"""
     ids = r.integers(0, f.nquads, k)
     return ids, f.quad_stars(ids), f.star_xyz(f.quad_stars(ids).reshape(-1)).reshape(k, f.dimquads, 3)
 
 
 def case_03_codes():
-    """画像側のコード = 索引のコード。索引の quad の星を既知の WCS で画像へ投影し、A, B と C, D の並びを乱数で
+    """画像側のコード = インデックスのコード。インデックスの quad の星を既知の WCS で画像へ投影し、A, B と C, D の並びを乱数で
     入れ替えた画像の quad から sv_field_codes → sv_code_variants → code_ball で、元の quad が正しい星の対応で
-    引けること。WCS の接点は quad の中心から |AB| の 0〜0.5 倍ずらす。鏡像の印は det CD > 0 と一致すること。"""
+    引けること。WCS の接点は quad の中心から |AB| の 0〜0.5 倍ずらす。鏡像のフラグは det CD > 0 と一致すること。"""
     cat = catalog()
     r = np.random.default_rng(3)
     files = [cat.series[5206][int(r.integers(0, len(cat.series[5206])))], cat.series[5202][7],
@@ -291,7 +291,7 @@ def case_03_codes():
                 j = row[a]
                 if b != qids[j]:
                     continue
-                # perm[a] = 索引の A, B, C, D に対応する画像の quad の列 → 画像の星の本当の番号(列 cols の逆)
+                # perm[a] = インデックスの A, B, C, D に対応する画像の quad の列 → 画像の星の本当の番号(列 cols の逆)
                 local = np.array(truth_cols[j])[perm[a]]
                 if np.array_equal(local, np.arange(dq)):
                     if bool(mirror[a]) == mir[j]:
@@ -310,7 +310,7 @@ def case_03_codes():
 
 
 def case_04_similarity():
-    """sv_fit_similarity_many(仮説の束でまとめて)= solver_wcs.sv_fit_similarity(1 組ずつ)。"""
+    """sv_fit_similarity_many(仮説のバッチでまとめて)= solver_wcs.sv_fit_similarity(1 組ずつ)。"""
     r = np.random.default_rng(4)
     H = 300
     F = np.zeros((H, 4, 2))
@@ -405,7 +405,7 @@ def _solve_synth(cat, iid, W, H, s, mirror, seed, **kw):
 
 
 def case_07_synth_solve():
-    """合成星野を解く: 4 星(普通・鏡像、ブラインド・ヒント)と三角形の索引だけの広い視野。解の対数オッズは
+    """合成星野を解く: 4 星(普通・鏡像、ブラインド・ヒント)と三角形のインデックスだけの広い視野。解の対数オッズは
     sv_verify_wcs に解の quad を渡した値と一致すること。"""
     cat = catalog()
     msgs = []
@@ -436,8 +436,8 @@ def case_07_synth_solve():
 
 
 def case_08_deadline():
-    """締め切り: 乱数の星野(解は無い)をブラインドで 3 秒 → None、超過 1 秒以内、cancel() の間隔 0.2 秒以内。
-    締め切りが過ぎていれば即座に None。"""
+    """タイムアウト: 乱数の星野(解は無い)をブラインドで 3 秒 → None、超過 1 秒以内、cancel() の間隔 0.2 秒以内。
+    タイムアウトの時刻を過ぎていれば即座に None。"""
     cat = catalog()
     r = np.random.default_rng(8)
     W, H = 968, 548
@@ -514,9 +514,9 @@ def case_10_trace():
 
 
 def _ref_accumulate(row, s2row, NRh, ref_xy, logbg, d, bail):
-    """検証の積み上げを 1 つずつ素直に(調べ物ノート 4.4 と solver_core の _sv_accumulate の説明どおり)。
+    """検証の積み上げを 1 つずつ素直に(調査メモ 4.4 と solver_core の _sv_accumulate の説明どおり)。
 
-    row: 画像の星の位置 (NT, 2)(詰め物は nan)、s2row: σ² (NT,)、ref_xy: その仮説の参照星 (NR, 2)。
+    row: 画像の星の位置 (NT, 2)(パディングは nan)、s2row: σ² (NT,)、ref_xy: その仮説の参照星 (NR, 2)。
     戻り値 (best, nmatch, ndistract, nconflict)(best のときの数)。
     """
     lnfg0 = math.log((1.0 - d) / (2.0 * math.pi * NRh))
@@ -618,7 +618,7 @@ def case_11_accumulate():
 
 def case_12_hint_tiles():
     """ヒントのタイルの絞り込み(_sv_hint_tiles): 絞る前のタイル(catalog.select)全部に照合しても、ヒントの判定を
-    通る仮説は絞った後のタイルからしか出ないこと。画像の quad は乱数の星から作る(当たりが索引のあちこちに散る)。
+    通る仮説は絞った後のタイルからしか出ないこと。画像の quad は乱数の星から作る(当たりがインデックスのあちこちに散る)。
     ヒントはタイルの角・赤経 0°・極・乱数の位置、半径 1° と 5°、スケールは不明(全域)と既知。"""
     cat = catalog()
     r = np.random.default_rng(12)
@@ -665,12 +665,12 @@ def case_12_hint_tiles():
 
 
 def case_13_refine():
-    """改良(_sv_refine): (1) 広い視野(段 4116 だけ、1200×800・85.7″/px = 短辺 19°、スケール既知)を解いて、
-    中心 0.5 px・スケール 0.05 %・回転 0.1° 以内(反復で CRPIX を当てた点の重心に置いていた版は、種 139 で
+    """改良(_sv_refine): (1) 広い視野(index-4116 だけ、1200×800・85.7″/px = 短辺 19°、スケール既知)を解いて、
+    中心 0.5 px・スケール 0.05 %・回転 0.1° 以内(反復で CRPIX をフィットに使った点の重心に置いていたバージョンは、種 139 で
     中心 9.8 px・スケール −1.5 % だった。点が画像の片側に寄ると接点の違う TAN になるため)。
     (2) 正しい quad の C 星を 3.4 px ずらした仮説(偽の星が quad に入った形。合成星野 few20 と同じ)を改良して、
     中心 0.3 px・スケール 0.1 %・回転 0.1° 以内で対数オッズ ≥ ln 1e9。比べるため、quad の星を重み 1 で入れた
-    当て直し(tune-up の形)の値も出す。"""
+    再フィット(tune-up の形)の値も出す。"""
     cat = catalog()
     msgs = []
     ok = True
@@ -777,8 +777,8 @@ def _synth_region(cat, fov, ra, dec, seed, region, W=2000, H=1300, rot=20.0, mir
 def case_14_wide_lopsided():
     """広い視野(2000×1300、短辺 26°〜39° = 40°・60° の横幅、正解は歪みなしの TAN)で、星が全面・左 1/3・
     左 1/3 × 上 1/2 にある合成星野をスケール既知(×0.8〜1.25)で解き、画像の中心のずれが 0.5 px 以内。
-    (改良の反復で CRPIX を一致した星の重心に置いていた版は、40° の全面で中心 5〜6 px、60° の左 1/3 で 7〜15 px
-    ずれた解を「解けた」として返した。接点の動かし直しが 3 回で打ち切りだった版は、60° の左 1/3 × 上 1/2 で
+    (改良の反復で CRPIX を一致した星の重心に置いていたバージョンは、40° の全面で中心 5〜6 px、60° の左 1/3 で 7〜15 px
+    ずれた解を「解けた」として返した。接点の動かし直しが 3 回で打ち切りだったバージョンは、60° の左 1/3 × 上 1/2 で
     1〜2.6 px 残した)"""
     cat = catalog()
     runs = [(40.0, 2, "all"), (40.0, 5, "all"), (60.0, 3, "all"), (40.0, 1, "left"), (60.0, 1, "left"),
@@ -804,7 +804,7 @@ def case_14_wide_lopsided():
 
 def case_15_sip_decision():
     """SIP を付けるかの判定: (1) 歪みなしの TAN で星が左 1/3 だけの 1.1° の星野(5 枚)には SIP を付けず、
-    tweak_order 2 の解が 1 の解と同じ(「自由度で割った残差が少しでも下がれば採る」版は 4 割ほどで SIP を付け、
+    tweak_order 2 の解が 1 の解と同じ(「自由度で割った残差が少しでも下がれば採る」バージョンは 4 割ほどで SIP を付け、
     星の無い側の隅が 7〜13 px 動いた)。(2) 2 次の歪み(隅で約 4 px)がある全面の 5° の星野(3 枚)には付き、
     隅のずれが TAN のときより小さく 1 px 以内。"""
     cat = catalog()
@@ -850,8 +850,8 @@ def case_15_sip_decision():
 
 
 def case_16_deadline_in_refine():
-    """solve を超えた仮説の改良の途中で締め切りが来ても、見つかった解を返す(改良に入った直後に締め切りを置き直す。
-    捨てていた版は None を返した)。改良を済ませた解は締め切りなしの解と同じ。"""
+    """solve を超えた仮説の改良の途中でタイムアウトになっても、見つかった解を返す(改良に入った直後にタイムアウトの時刻を置き直す。
+    捨てていたバージョンは None を返した)。改良を済ませた解はタイムアウトなしの解と同じ。"""
     cat = catalog()
     xy, fl, truth, s = _synth_region(cat, 1600 * 2.0 / 3600.0, 75.0, 35.0, 21, "all", W=1600, H=1000, rot=-35.0)
     base = sc.sv_solve(xy, fl, 1600, 1000, cat, scale_lo=1.6, scale_hi=2.5, hint=(75.0, 35.0, 2.0),
@@ -879,9 +879,9 @@ def case_16_deadline_in_refine():
 
 
 def case_17_corrupt_index():
-    """中身の壊れた索引(大きさとヘッダーは正しい。index-4116 の星の木の葉の範囲を入れ替えたもの、quad の表の
+    """中身の壊れたインデックス(大きさとヘッダーは正しい。index-4116 の星の木の葉の範囲を入れ替えたもの、quad の表の
     星番号を 1 万か所化けさせたもの)があっても sv_solve は例外を出さず、そのファイルを目録の problems へ回して、
-    ほかの索引で解く(壊れていない 4116 なら 4116 で解ける画像)。"""
+    ほかのインデックスで解く(壊れていない 4116 なら 4116 で解ける画像)。"""
     import shutil
     import test_solver_index as tsi
     cat = catalog()
@@ -915,7 +915,7 @@ def case_17_corrupt_index():
 
 
 def case_18_scale_point_hint_values():
-    """スケールを 1 つの値で渡しても解ける(4 点の当てはめのスケールの判定に許容が無かった版は、quad を
+    """スケールを 1 つの値で渡しても解ける(4 点のフィットのスケールの判定に許容が無かったバージョンは、quad を
     全部試して None)。ヒントの値がおかしい(半径が負・NaN・赤緯が ±90° の外)なら ValueError。"""
     cat = catalog()
     xy, fl, truth, s = _synth_region(cat, 1600 * 2.0 / 3600.0, 75.0, 35.0, 21, "all", W=1600, H=1000, rot=-35.0)
@@ -936,7 +936,7 @@ def case_18_scale_point_hint_values():
 
 def case_19_check_interval_hint():
     """ヒントあり・スケール既知(1.5〜2.5″/px)の乱数の星野 150 個(解は無い)で、cancel() の間隔が 0.2 秒以内
-    (索引 1 本の照合の途中で確かめていなかった版は、束のコード 4 万個の照合で 0.44 秒あいた)。"""
+    (インデックス 1 本の照合の途中で確かめていなかったバージョンは、バッチのコード 4 万個の照合で 0.44 秒あいた)。"""
     cat = catalog()
     r = np.random.default_rng(9)
     W, H = 1200, 800
@@ -1065,7 +1065,7 @@ UNIT = [
 # ------------------------------------------------------------------ 実写 ---
 
 def load_detector():
-    """星の検出に使う zahyou_core(既定は git の main の版を一時フォルダーに写して読む)。"""
+    """星の検出に使う zahyou_core(既定は git の main のバージョンを一時フォルダーにコピーして読む)。"""
     if ARGS.detect == "main":
         try:
             src = subprocess.run(["git", "-C", REPO, "show", "main:dev/zahyou_core.py"], capture_output=True,
@@ -1084,13 +1084,13 @@ def load_detector():
     return m, "dev"
 
 
-# Downloads の試験画像の控え(作者の PC では Downloads を整理するので、試験が読む元の画像を同じ並びで写してある。2026-10-29)
+# Downloads のテスト画像のコピー(作者の PC では Downloads を整理するので、テストが読む元の画像を同じ並びでコピーしてある。2026-10-29)
 TEST_IMAGES_COPY = ("Documents", "claude", "zahyou", "testdata", "images")
 
 
 def images_path(rest):
     """"$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を実際のパスに。ZAHYOU_TEST_IMAGES(無ければホームフォルダー)からの相対で、
-    Downloads/… がそこに無ければ、同じ並びの控え(TEST_IMAGES_COPY の下)も見る。"""
+    Downloads/… がそこに無ければ、同じ並びのコピー(TEST_IMAGES_COPY の下)も見る。"""
     base = os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~")
     parts = rest.split("/")
     p = os.path.join(base, *parts)
@@ -1110,11 +1110,11 @@ def image_path(e):
 
 
 def detect(zc, path):
-    """標準の検出(detect_sources(min_sources=60))。12 個未満なら 2×2 にまとめた深い検出((2x+0.5, 2y+0.5) に戻す)。
-    (正解を作ったときの main の段取りを写したもの。今の zahyou_core の detect_sources_deep とは別物で、
-    この試験は検出ではなく sv_solve を確かめるためにこれを使う)
+    """標準の検出(detect_sources(min_sources=60))。12 個未満なら 2×2 にまとめたディープ検出((2x+0.5, 2y+0.5) に戻す)。
+    (正解を作ったときの main の段取りを書き写したもの。今の zahyou_core の detect_sources_deep とは別物で、
+    このテストは検出ではなく sv_solve を確かめるためにこれを使う)
 
-    戻り値 (xy, flux, W, H, どちらを使ったか, 標準の数, 深い数)。
+    戻り値 (xy, flux, W, H, どちらを使ったか, 標準の数, ディープ検出の数)。
     """
     from astropy.stats import sigma_clipped_stats
     b = zc.load_image_any(path)

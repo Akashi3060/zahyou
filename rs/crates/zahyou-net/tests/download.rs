@@ -1,4 +1,4 @@
-//! 星図データを落とす処理の試験(localhost のサーバーと小さな偽のファイルだけを使う)。
+//! インデックスファイルをダウンロードする処理のテスト(localhost のサーバーと小さな偽のファイルだけを使う)。
 mod common;
 
 use common::*;
@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use zahyou_net::*;
 
-/// 落とす試験の既定: 区切り 4 KiB(小さなファイルでも何度も Range を頼む)、待ち時間 1 ms。
-/// 偽の索引ファイルは表を持たないので、zahyou-index の検査は外す(軽い検査だけ)
+/// ダウンロードのテストの既定: セグメント 4 KiB(小さなファイルでも何度も Range を頼む)、待ち時間 1 ms。
+/// 偽のインデックスファイルは表を持たないので、zahyou-index の検査は外す(軽い検査だけ)
 fn opts(base: &str) -> FetchOptions<'static> {
     FetchOptions {
         validate: None,
@@ -92,13 +92,13 @@ fn fetch_with_range_and_skip_existing() {
     assert_eq!(r.res.total_bytes, total);
     assert_eq!(r.last_progress, Some((total, total)), "進み具合が 100% で終わる");
     assert_files(&dest, &m);
-    // 区切りごとの Range
+    // セグメントごとの Range
     let gets: Vec<String> = srv.requests().iter().filter(|q| q.method == "GET").filter_map(|q| q.header("range").map(String::from)).collect();
     assert!(gets.contains(&"bytes=0-4095".to_string()) && gets.contains(&"bytes=4096-8191".to_string()), "{gets:?}");
     assert!(r.log.iter().any(|l| l.contains("3 ファイル /") && l.contains("へダウンロードします")));
     assert!(r.log.iter().any(|l| l == "  完了: 3/3 ファイル"));
 
-    // もう一度: すべて落ちている(HEAD だけ)
+    // もう一度: すべてダウンロード済み(HEAD だけ)
     srv.clear();
     let r = run(&dest, &o, &names(), None);
     assert!(r.res.ok);
@@ -219,7 +219,7 @@ fn fetch_from_python_http_server() {
         return;
     };
     let dest = temp_dir("pyserve-dest");
-    // 途中まで落ちた .part(http.server は Range に応えないので最初から落とし直す)
+    // 途中までダウンロードした .part(http.server は Range に応えないので最初からダウンロードし直す)
     std::fs::write(dest.join("index-5206-01.fits.part"), &m["/lite/index-5206-01.fits"][..3000]).unwrap();
     let o = FetchOptions { segment: 8 << 20, ..opts(&py.url()) };
     let t = std::time::Instant::now();
@@ -249,7 +249,7 @@ fn plan_and_recommend_examples() {
     assert_eq!(plan_size(&[4107, 5206, 5205], &d), 1_144_345_941);
 }
 
-/// 既定の設定では zahyou-index の検査も通す: 形だけの偽物は落としたあとで消され、本物(手元にあれば)は通る。
+/// 既定の設定では zahyou-index の検査も通す: 形だけの偽物はダウンロードしたあとで消され、本物(手元にあれば)は通る。
 #[test]
 fn fetch_default_validates_with_zahyou_index() {
     let mut m: HashMap<String, Vec<u8>> = HashMap::new();
@@ -295,7 +295,7 @@ fn fetch_default_validates_with_zahyou_index() {
     }
 }
 
-/// 空き容量が足りなければ、落とし始める前にやめる(HEAD で 10 PB のふりをするサーバー)。
+/// 空き容量が足りなければ、ダウンロードし始める前にやめる(HEAD で 10 PB のふりをするサーバー)。
 #[test]
 fn fetch_stops_when_disk_is_too_small() {
     let srv = TestServer::start(|r| {
@@ -315,8 +315,8 @@ fn fetch_stops_when_disk_is_too_small() {
     assert!(!dest.join("index-5206-00.fits.part").exists());
 }
 
-/// 速さの物差し(手で走らせるとき): ZAHYOU_NET_BENCH_BASE の `<base>/lite/index-5206-NN.fits` を
-/// ZAHYOU_NET_BENCH_DEST へ落とす。Python 版と同じサーバー・同じファイルで比べる(scratch の bench_fetch.py)。
+/// 速さのベンチマーク(手で走らせるとき): ZAHYOU_NET_BENCH_BASE の `<base>/lite/index-5206-NN.fits` を
+/// ZAHYOU_NET_BENCH_DEST へダウンロードする。Python 版と同じサーバー・同じファイルで比べる(scratch の bench_fetch.py)。
 #[test]
 #[ignore]
 fn fetch_bench_local() {

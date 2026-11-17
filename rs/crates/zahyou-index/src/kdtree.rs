@@ -13,12 +13,12 @@ use rayon::prelude::*;
 use crate::layout::{KdType, TreeLayout};
 use crate::pyfmt::float_repr;
 
-/// 開くときの表の検査を並列にする区切り(u32 で 64 KiB = mmap のページ 16 枚)。
+/// 開くときの表の検査を並列にするチャンクの大きさ(u32 で 64 KiB = mmap のページ 16 枚)。
 const CHECK_CHUNK: usize = 16384;
 
 /// 葉の前ふるい(実数に戻す前に、木の単位で距離を見て遠いものを捨てる)を使ってよい木の範囲の表の値。
 /// 前ふるいの余裕の根拠(丸め誤差の上限)はこの範囲を前提にしている(code_far・star_far の説明)。
-/// 本物の索引は minval ≈ −1〜0・scale ≈ 2^31〜2^32(u32)か 2^15〜2^16(u16)で、どれもこの中に入る。
+/// 本物のインデックスは minval ≈ −1〜0・scale ≈ 2^31〜2^32(u32)か 2^15〜2^16(u16)で、どれもこの中に入る。
 const PREFILTER_MINVAL_MAX: f64 = 4.0;
 const PREFILTER_SCALE_MIN: f64 = 64.0;
 const PREFILTER_SCALE_MAX: f64 = 68_719_476_736.0; // 2^36
@@ -140,7 +140,7 @@ impl TreeMeta {
             KdType::U32 => u32::MAX as f64,
         };
 
-        // 範囲の表: minval[D], maxval[D], scale(小さいので写して読む)
+        // 範囲の表: minval[D], maxval[D], scale(小さいのでコピーして読む)
         let rb = sub(bytes, lay.range, 8 * (2 * d as u64 + 1))?;
         let rng: Vec<f64> = rb
             .as_chunks::<8>().0.iter()
@@ -176,7 +176,7 @@ impl TreeMeta {
         };
         let t = meta.view(bytes)?;
 
-        // 表の全件を見る検査は、時間の大半が mmap のページの初回の読み込みなので、区切って並列にする
+        // 表の全件を見る検査は、時間の大半が mmap のページの初回の読み込みなので、チャンクに分けて並列にする
         // (4107 で 0.9 → 0.5 ms。結果は 1 本のスレッドで見たときと同じ)
         //
         // lr: 葉 k は lr[k−1]+1 … lr[k]。単調(空の葉は許す)で、最後がデータの数 − 1
@@ -270,7 +270,7 @@ pub(crate) fn ball_visit<S: KdInt, const D: usize>(
     }
     // 今の節点 f を持ってたどる。子が両方通るときだけ右をスタックに積んで左へ進み、片方だけなら積まずにその子へ進む
     // (節点ごとに積んで降ろすのをやめる)。左の部分木を全部たどってから右へ進むのは、左右とも積んで左から降ろす形と
-    // 同じなので、葉を知らせる順(左から)も、子の箱と距離の式も今までと同じ(試験 ball_visit_matches_reference)
+    // 同じなので、葉を知らせる順(左から)も、子の箱と距離の式も今までと同じ(テスト ball_visit_matches_reference)
     stack.clear();
     let mut f = root;
     loop {
@@ -376,7 +376,7 @@ fn code_far<T: KdInt, const D: usize>(row: &[T], qt: &[f64; D], t2: f64) -> bool
 /// コード木: 問い合わせ q(実数)から radius 以内のデータの番号を out に足す(昇順)。
 ///
 /// 最終判定は Python 版と同じ式・同じ順(実数 c = minval + 整数/scale、Σ(c − q)² ≤ radius²)。prefilter は
-/// 葉の前ふるい([`code_far`])を使うか(本番は meta.prefilter_ok。試験は false でも同じ答えになることを確かめる)。
+/// 葉の前ふるい([`code_far`])を使うか(本番は meta.prefilter_ok。テストは false でも同じ答えになることを確かめる)。
 #[allow(clippy::too_many_arguments)] // 木の表(mmap のビュー)と作業用の領域をそのまま渡すため
 pub(crate) fn ball_query<S: KdInt, T: KdInt, const D: usize>(
     meta: &TreeMeta,
@@ -432,7 +432,7 @@ thread_local! {
 /// には 4 目盛りの余裕があり、丸めは prefilter_allowed の範囲(|minval| ≤ 4、64 ≤ scale ≤ 2^36、整数 < 2^32、
 /// |x| ≥ √(1 − 2/64) なので正規化も安定)では 1e-3 目盛りに届かない(行・qt・o の計算の誤差は
 /// 2^-53 × (2^32 + 2·4·2^36) 程度で 1e-4 目盛り、chord·scale ≤ 2^37 の相対誤差 1e-15 も 1e-4 目盛り)。
-/// だから実数の判定で入る星を捨てることは無く、答えは前ふるいなしと同じ。単位ベクトルでない星(壊れた索引)は
+/// だから実数の判定で入る星を捨てることは無く、答えは前ふるいなしと同じ。単位ベクトルでない星(壊れたインデックス)は
 /// ノルムの条件で捨てずに、今までどおり実数の判定にかける(Python 版も正規化してから判定する)。
 #[inline(always)]
 #[allow(clippy::neg_cmp_op_on_partial_ord)] // NaN は「遠くない」(捨てない)側へ倒す
@@ -453,7 +453,7 @@ fn star_far<T: KdInt>(row: &[T], qt: &[f64; 3], r2: f64, o: &[f64; 3], s2: f64, 
     (n2 - s2).abs() <= tol
 }
 
-/// 星の円錐の問い合わせ 1 回ぶんの値(葉の前に 1 回だけ計算する。試験も同じ値を使う)。
+/// 星の円錐の問い合わせ 1 回ぶんの値(葉の前に 1 回だけ計算する。テストも同じ値を使う)。
 struct ConeQuery {
     /// 正規化済みの中心(実数)
     c: [f64; 3],
@@ -506,7 +506,7 @@ impl ConeQuery {
 ///
 /// 判定は Python 版と同じ(星を実数に戻して長さ 1 に正規化し、Σ(s − c)² ≤ chord²)。f に渡す単位ベクトルは
 /// その判定に使った値そのもの(= star_unit。IndexData::star_xyz と同じ値)。prefilter は葉の前ふるい([`star_far`])を
-/// 使うか(本番は meta.prefilter_ok。試験は false でも同じ答えになることを確かめる)。
+/// 使うか(本番は meta.prefilter_ok。テストは false でも同じ答えになることを確かめる)。
 #[allow(clippy::too_many_arguments)] // 木の表(mmap のビュー)をそのまま渡すため
 pub(crate) fn cone_visit<S: KdInt, T: KdInt>(
     meta: &TreeMeta,
@@ -550,7 +550,7 @@ pub(crate) fn star_unit<T: KdInt>(meta: &TreeMeta, row: &[T]) -> [f64; 3] {
 }
 
 
-/// 変える前の ball_visit(節点ごとに子を積んで降ろす形)。試験で、今の形と葉を知らせる順がまったく同じことを確かめる。
+/// 変える前の ball_visit(節点ごとに子を積んで降ろす形)。テストで、今の形と葉を知らせる順がまったく同じことを確かめる。
 #[cfg(test)]
 pub(crate) fn ball_visit_ref<S: KdInt, const D: usize>(
     meta: &TreeMeta,
@@ -630,7 +630,7 @@ pub(crate) fn ball_visit_ref<S: KdInt, const D: usize>(
 mod tests {
     use super::*;
 
-    /// 試験用の乱数(xorshift。種を決めれば毎回同じ)。
+    /// テスト用の乱数(xorshift。種を決めれば毎回同じ)。
     pub(crate) struct Rng(pub u64);
 
     impl Rng {
@@ -658,7 +658,7 @@ mod tests {
         [v[0] / n, v[1] / n, v[2] / n]
     }
 
-    /// 表を持たない、変換の値だけの TreeMeta(前ふるいの式の試験用)。
+    /// 表を持たない、変換の値だけの TreeMeta(前ふるいの式のテスト用)。
     fn meta_with(minval: [f64; 4], scale: f64, d: usize) -> TreeMeta {
         TreeMeta {
             ndim: d,
@@ -691,7 +691,7 @@ mod tests {
     /// 星の前ふるいの余裕: 範囲の端(|minval| ≤ 4、64 ≤ scale ≤ 2^36)と、単位ベクトルから ±1.2 目盛り伸び縮みした星
     /// (ノルムの条件 2/scale の境目をまたぐ)、円錐の境目(星までの弦 = chord × (1 ± 5e-7))で、実数の判定で入る星を
     /// star_far が捨てないこと。正規化の動きが 1 目盛りを超えて効く場合(木の単位で chord·scale + 1 より遠いのに入る)も
-    /// 十分な数を通ること(余裕を 1 目盛りに縮めると落とす場合を、ちゃんと試している)。
+    /// 十分な数を通ること(余裕を 1 目盛りに縮めると捨ててしまう場合を、ちゃんと試している)。
     #[test]
     fn star_prefilter_never_drops_a_star_in_the_cone() {
         let mut rng = Rng(0x9E37_79B9_7F4A_7C15);

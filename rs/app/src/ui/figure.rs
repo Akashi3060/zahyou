@@ -1,11 +1,11 @@
 //! 図を画面に描く(v6 の FigureCanvasTkAgg + ツールバーに当たる)。
 //!
-//! - 画像はテクスチャ。縮小の段(scene::Pyramid)から表示の倍率に合うものを選び、
-//!   GPU の上限(既定 8192 px)を超える段はタイルに分ける
-//! - 座標格子・目盛り・印・矢印・文字は毎回 Painter で描く(拡大しても線が太らず、文字もにじまない)
+//! - 画像はテクスチャ。縮小の段階(scene::Pyramid)から表示の倍率に合うものを選び、
+//!   GPU の上限(既定 8192 px)を超える段階はタイルに分ける
+//! - 座標格子・目盛り・マーカー・矢印・文字は毎回 Painter で描く(拡大しても線が太らず、文字もにじまない)
 //! - 拡大・移動したら、格子と目盛りを今の表示の範囲で作り直す(WCSAxes と同じ。作り直す関数は zahyou-plot)
 //! - 操作: 全体・戻る・進む・移動・拡大(matplotlib のツールバーと同じ 5 つ)。ホイールでも拡大縮小できる
-//! - 大きさ(線・印・文字)は pt。v6 は図を dpi 100 で貼っていたので、1 pt = 100/72 px で描く
+//! - 大きさ(線・マーカー・文字)は pt。v6 は図を dpi 100 で貼っていたので、1 pt = 100/72 px で描く
 
 use std::sync::Arc;
 
@@ -20,7 +20,7 @@ use super::theme::Theme;
 
 /// 1 pt の画面の大きさ(v6 の図は dpi 100)
 pub const PT: f32 = 100.0 / 72.0;
-/// 題・目盛りの文字・軸名の大きさ(pt。matplotlib の既定と Python 版の設定)
+/// タイトル・目盛りの文字・軸名の大きさ(pt。matplotlib の既定と Python 版の設定)
 const TITLE_PT: f32 = 14.0;
 const TICK_LABEL_PT: f32 = 10.0;
 const AXIS_LABEL_PT: f32 = 10.0;
@@ -66,9 +66,9 @@ pub enum FigAction {
     Save,
 }
 
-/// 1 段ぶんのテクスチャ(タイルに分けたもの)
+/// 1 段階ぶんのテクスチャ(タイルに分けたもの)
 struct LevelTex {
-    /// (テクスチャ, 段の画素での範囲 [x0, y0, x1, y1])
+    /// (テクスチャ, 段階の画素での範囲 [x0, y0, x1, y1])
     tiles: Vec<(TextureHandle, [usize; 4])>,
 }
 
@@ -90,7 +90,7 @@ pub struct FigureView {
     key: String,
 }
 
-/// 画面の点 = 画素の点の写し
+/// 画面の点 = 画素の点の写像
 #[derive(Clone, Copy)]
 struct Map {
     v: View,
@@ -224,14 +224,14 @@ impl FigureView {
         action
     }
 
-    /// 図の外枠の中に、題・軸・画像・格子・印を描く(操作もここで受ける)。
+    /// 図の外枠の中に、タイトル・軸・画像・格子・マーカーを描く(操作もここで受ける)。
     pub fn paint(&mut self, ui: &mut Ui, rect: Rect, th: &Theme) {
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, th.fig_bg);
         let fg = th.fig_fg;
         let scene = self.scene.clone();
 
-        // --- 余白(題・目盛り・軸名)。全体表示の目盛りの文字で決める(拡大で枠が揺れないように) ---
+        // --- 余白(タイトル・目盛り・軸名)。全体表示の目盛りの文字で決める(拡大で枠が揺れないように) ---
         let tick_font = FontId::proportional(TICK_LABEL_PT * PT);
         let lab_font = FontId::proportional(AXIS_LABEL_PT * PT);
         let mut ext = [0.0f32; 4]; // 下・右・上・左
@@ -277,7 +277,7 @@ impl FigureView {
         ap.rect_filled(ax, 0.0, th.ax_bg);
         self.paint_image(ui, &ap, ax, v);
 
-        // --- 座標格子・印 -----------------------------------------------------
+        // --- 座標格子・マーカー -------------------------------------------------
         let regrid = self.grid();
         let grid: &GridSet = regrid.as_deref().unwrap_or(&scene.home);
         for p in &grid.lines {
@@ -319,7 +319,7 @@ impl FigureView {
             painter.galley(r.min, galley, fg);
         }
 
-        // --- 軸名・題 -------------------------------------------------------------
+        // --- 軸名・タイトル -------------------------------------------------------
         for a in &scene.axis_labels {
             let galley = painter.layout_no_wrap(a.text.clone(), lab_font.clone(), fg);
             let sz = galley.size();
@@ -457,7 +457,7 @@ impl FigureView {
         }
     }
 
-    /// 画像を描く(表示の倍率に合う段を選び、見えているタイルだけ)。
+    /// 画像を描く(表示の倍率に合う段階を選び、見えているタイルだけ)。
     fn paint_image(&mut self, ui: &Ui, p: &egui::Painter, ax: Rect, v: View) {
         let Some(pyr) = self.scene.image.as_ref() else {
             return;
@@ -474,7 +474,7 @@ impl FigureView {
         let f = (1usize << k) as f64;
         let flip = self.scene.flip_y;
         for (tex, [tx0, ty0, tx1, ty1]) in &level.tiles {
-            // 段の画素 (i, j) は原寸の [i*f - 0.5, (i+1)*f - 0.5] を覆う
+            // 段階の画素 (i, j) は原寸の [i*f - 0.5, (i+1)*f - 0.5] を覆う
             let x_lo = *tx0 as f64 * f - 0.5;
             let x_hi = (*tx1 as f64 * f - 0.5).min(pyr.width as f64 - 0.5);
             let y_lo = *ty0 as f64 * f - 0.5;
@@ -604,13 +604,13 @@ fn paint_arrow(p: &egui::Painter, from: Pos2, to: Pos2, color: Color32, tail: f3
     p.add(Shape::convex_polygon(vec![to, base + n * (head_w / 2.0), base - n * (head_w / 2.0)], color, st));
 }
 
-/// 段 1 つをテクスチャに上げる(GPU の上限を超えればタイルに分ける)。
+/// 段階 1 つをテクスチャに上げる(GPU の上限を超えればタイルに分ける)。
 ///
-/// 上限に収まる段は Arc をそのまま egui に渡す(以前は `img.clone()` で段を丸ごと写していた。画面のスレッドで、
-/// 段を初めて出すフレームに 24 MP の原寸なら 96 MB、61 MP を OpenGL で 1 枚に貼るなら 240 MB)。
+/// 上限に収まる段階は Arc をそのまま egui に渡す(以前は `img.clone()` で段階を丸ごとコピーしていた。画面のスレッドで、
+/// 段階を初めて出すフレームに 24 MP の原寸なら 96 MB、61 MP を OpenGL で 1 枚に貼るなら 240 MB)。
 /// GPU へ上げる画素は同じ ColorImage の pixels で、値は変わらない(egui-wgpu は Cow::Borrowed で借りて書く)。
-/// 上限を超える段のタイルは、今までどおり行を集めて写す(ワーカーで前もってタイルに分ける案は採らない:
-/// 分ける瞬間に段 0 が二重になり、GPU の上限をワーカーが知らないため)。
+/// 上限を超える段階のタイルは、今までどおり行を集めてコピーする(ワーカーで前もってタイルに分ける案は採らない:
+/// 分ける瞬間に段階 0 が二重になり、GPU の上限をワーカーが知らないため)。
 fn upload_level(ctx: &egui::Context, img: &Arc<egui::ColorImage>, name: &str) -> LevelTex {
     let max_side = ctx.input(|i| i.max_texture_side).clamp(512, 16384);
     let tile = max_side.min(4096);
@@ -683,7 +683,7 @@ mod tests {
     fn 大きな画像はタイルに分ける() {
         let ctx = egui::Context::default();
         // 既定の上限(2048 などの小さな値)より大きい画像
-        // 画素は位置ごとに違う値にして、タイルの中身も元の段の切り出しと同じか見る
+        // 画素は位置ごとに違う値にして、タイルの中身も元の段階の切り出しと同じか見る
         let (w, h) = (5000usize, 300usize);
         let px: Vec<Color32> = (0..w * h).map(|i| Color32::from_rgb(i as u8, (i >> 8) as u8, (i >> 16) as u8)).collect();
         let img = Arc::new(egui::ColorImage::new([w, h], px));
@@ -712,7 +712,7 @@ mod tests {
         let t = upload_level(&ctx, &img, "s");
         assert_eq!(t.tiles.len(), 1);
         assert_eq!(t.tiles[0].1, [0, 0, 300, 200]);
-        // egui へ渡した画像は段そのもの(同じ Arc。以前の img.clone() のような写しが無い)
+        // egui へ渡した画像は段階そのもの(同じ Arc。以前の img.clone() のようなコピーが無い)
         let out = ctx.run(input(), |_| {});
         let d = out.textures_delta.set.iter().find(|(id, _)| *id == t.tiles[0].0.id()).expect("縮小の段階が GPU へ転送されていない");
         let egui::ImageData::Color(up) = &d.1.image;

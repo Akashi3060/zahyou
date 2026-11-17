@@ -1,6 +1,6 @@
 //! Python 基準実装(dev/solver_index.py)の結果(rs/testdata/index_*.json、gen_index.py が作る)との突き合わせ。
 //!
-//! 星図データ(C:\AstrometryData。ZAHYOU_INDEX_DIR で変えられる)か基準値が無ければ SKIP と出して通す(Windows 以外でも。表を開くのは Windows だけ)。
+//! インデックスファイル(C:\AstrometryData。ZAHYOU_INDEX_DIR で変えられる)か基準値が無ければ SKIP と出して通す(Windows 以外でも。表を開くのは Windows だけ)。
 
 mod common;
 
@@ -97,7 +97,7 @@ fn hex(s: &str) -> Vec<u8> {
     (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
 }
 
-/// Python 版の試験(case_02)と同じ壊れたファイルを tmp に作る。
+/// Python 版のテスト(case_02)と同じ壊れたファイルを tmp に作る。
 fn make_broken(tmp: &Path, junk: &[u8]) {
     let cp = |tag: &str, name: &str| {
         let p = tmp.join(name);
@@ -287,7 +287,7 @@ fn code_ball_matches_python_and_bruteforce() {
                 let mine: Vec<u64> = got.iter().filter(|p| p.0 as usize == j).map(|p| p.1 as u64).collect();
                 assert_eq!(mine, u64s(w), "{tag} r={radius} 問 {j}");
             }
-            // 総当たりと(同じ判定の式。帯で絞る版と、先頭の何問かは全点と)
+            // 総当たりと(同じ判定の式。帯で絞ったものと、先頭の何問かは全点と)
             let rr = radius * radius;
             let brute: Vec<Vec<u32>> = qq
                 .par_chunks_exact(dim)

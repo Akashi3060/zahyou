@@ -1,19 +1,19 @@
-//! zahyou の図: 伸張、赤経赤緯の格子・目盛り・印・矢印の表示リスト、北が上の再投影、PNG の書き出し。
+//! zahyou の図: 伸張、赤経赤緯の格子・目盛り・マーカー・矢印の表示リスト、北が上の再投影、PNG の書き出し。
 //!
 //! Python 版 `dev/zahyou_plot.py`(matplotlib + astropy の WCSAxes + reproject)と同じ図を作る。
-//! 値は Python 版と同じになるように、計算の順序と途中の型まで写してある(`rs/testdata/gen_plot.py` の値で確かめる)。
+//! 値は Python 版と同じになるように、計算の順序と途中の型までそろえてある(`rs/testdata/gen_plot.py` の値で確かめる)。
 //!
 //! - norm.rs       伸張(`_norm`: 3σ クリップの中央値・σ、99.9 パーセント点、AsinhStretch(1.0))と灰色の色表
 //! - sexa.rs       60 進の文字列(astropy の `Angle.to_string`・`SkyCoord.to_string("hmsdms")`)
 //! - axes.rs       赤経赤緯の格子・目盛り・目盛りの文字(WCSAxes の選び方)
-//! - figure.rs     図 2 枚の表示リスト・題・ずれ・解析結果の文(`plot_original`・`plot_north_up`・`report_offsets`・`wcs_summary`)
+//! - figure.rs     図 2 枚の表示リスト・タイトル・ずれ・解析結果の文(`plot_original`・`plot_north_up`・`report_offsets`・`wcs_summary`)
 //! - reproject.rs  北が上・東が左への描き直し(`reproject_interp` と同じ双一次補間)
-//! - render.rs     tiny-skia で PNG に(余白・目盛りの文字・題の置き方は matplotlib に合わせる)。
+//! - render.rs     tiny-skia で PNG に(余白・目盛りの文字・タイトルの置き方は matplotlib に合わせる)。
 //!   拡大・移動した範囲の書き出し(`RenderOptions::view`)と、描かずに配置だけを求める `layout_with` も
 //! - font.rs       游ゴシックの読み込みと文字の塗り(ab_glyph。フォントは同梱しない)
 //!
 //! 画素は 0 始まり(x = 列、y = 行)、画素の中心が整数。`Figure::flip_y` が true なら行 0 を画面の上に描く
-//! (Python の `invert_yaxis`)。大きさ(線の太さ・印・文字)は pt で、表示の拡大に関係なく一定。
+//! (Python の `invert_yaxis`)。大きさ(線の太さ・マーカー・文字)は pt で、表示の拡大に関係なく一定。
 
 #![forbid(unsafe_code)]
 

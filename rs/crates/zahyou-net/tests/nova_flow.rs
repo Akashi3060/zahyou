@@ -1,4 +1,4 @@
-//! nova.astrometry.net の手順の試験。localhost に偽の nova を立て、送った要求の並びと本文を
+//! nova.astrometry.net の手順のテスト。localhost に偽の nova を立て、送った要求の並びと本文を
 //! Python 版(astroquery を差し替えて記録したもの、testdata/net_python.json)と比べる。本物の nova へは送らない。
 mod common;
 
@@ -229,7 +229,7 @@ fn sends_publicly_visible_n_with_source_list_and_image() {
     assert_private(&rj, "画像");
     assert!(rj.contains("\"center_ra\": 10.5") && rj.contains("\"session\": \"s\""), "手がかり・session が消えた");
 
-    // 呼ぶ側が publicly_visible = "y" を渡しても、送るのは "n"(窓口の関数そのもので)
+    // 呼ぶ側が publicly_visible = "y" を渡しても、送るのは "n"(クライアントのメソッドそのもので)
     srv.clear();
     let mut c = client(&srv);
     c.login("K", &|| false).unwrap();
@@ -362,7 +362,7 @@ fn api_key_is_never_logged() {
         }
         _ => panic!("失敗するはず: {}", r.is_ok()),
     }
-    // 画像を送る道(状態の問い合わせの失敗の文にキー → ログでは伏せる。そのあと時間切れ)
+    // 画像を送る経路(状態の問い合わせの失敗の文にキー → ログでは伏せる。そのあと時間切れ)
     let req2 = OnlineRequest { sources: None, ..req.clone() };
     let r2 = solve_online_with(&mut client(&srv), &req2, &|| false, &|m| log.lock().unwrap().push(m.into()));
     assert!(matches!(&r2, Err(NetError::Failed(m)) if m.contains("終わりませんでした") && !m.contains(KEY)));

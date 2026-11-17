@@ -1,17 +1,17 @@
-//! 描画方式の物差し(隠しの起動 `--bench-ui`。docs/rust-port.md の「描画方式の実測と決定」)。
+//! 描画方式のベンチマーク(隠しの起動 `--bench-ui`。docs/rust-port.md の「描画方式の実測と決定」)。
 //!
 //!   zahyou.exe --bench-ui <画像> [--glow|--dx12] [--gpu display|low|high|warp] [--mem lean|perf]
 //!              [--no-vsync] [--no-hw] [--cycles 2] [--idle 3] [--hold 2] [--size 1180x780] [--out 結果.json]
 //!
-//! 本物の窓に、解析の結果と同じ形の図(撮影時の向き: 画像・座標格子・星の丸 300 個・中心の ×・矢印・目標)を出し、
+//! 本物のウィンドウに、解析の結果と同じ形の図(撮影時の向き: 画像・座標格子・星の丸 300 個・中心の ×・矢印・目標)を出し、
 //! 拡大(zoom: 全体 → 3 倍)・移動(pan: 3 倍のまま画像の上を回る)・全体表示との行き来(home)を決まったフレーム数だけ
-//! 自動で繰り返す。段ごとに、フレームの間隔(垂直同期の待ちを含む)と 1 フレームの処理時間(eframe の cpu_usage。
+//! 自動で繰り返す。段階ごとに、フレームの間隔(垂直同期の待ちを含む)と 1 フレームの処理時間(eframe の cpu_usage。
 //! 垂直同期の待ちを除いた、更新・三角形への分解・GPU への受け渡しの時間)の中央値・99 パーセンタイル・最大を JSON に書く。
-//! 1 周目は縮小の段のテクスチャを初めて GPU に上げるので重く、2 周目は上げ終わったあとの値になる。
+//! 1 周目は縮小の段階のテクスチャを初めて GPU に上げるので重く、2 周目は上げ終わったあとの値になる。
 //!
 //! メモリ(私有・working set)・CPU 時間・GPU メモリは外から測る(このプロセスは自分のメモリを読めない。unsafe を
-//! 書かないため)。外の記録と突き合わせられるよう、段の始まりと終わりを UNIX 時刻 [ms] で書く。DX12 なら wgpu の
-//! 割り当て器の報告(GPU メモリの塊の確保量)も段の終わりごとに書く。
+//! 書かないため)。外の記録と突き合わせられるよう、段階の始まりと終わりを UNIX 時刻 [ms] で書く。DX12 なら wgpu の
+//! アロケーターの報告(GPU メモリの塊の確保量)も段階の終わりごとに書く。
 //!
 //! - 画像に WCS があればそれを、無ければ仮の TAN(1.5″/px)で座標格子を描く。星の丸は決まった擬似乱数の位置
 //!   (検出はしない。読み込みを軽くするため)
@@ -32,37 +32,37 @@ use super::figure::{FigureView, View};
 use super::theme::{self, Theme, ThemeName};
 use crate::{APP_VER, RENDER_INFO, RenderChoice, describe_renderer, process_elapsed_ms};
 
-/// 物差しの終わりのコード(0 = 最後まで測れた)
+/// ベンチマークの終了コード(0 = 最後まで測れた)
 static CODE: AtomicI32 = AtomicI32::new(0);
 
 /// これを超えたら打ち切る [秒](WARP で 61 メガ画素を動かしても収まる長さ)
 const TIMEOUT_S: u64 = 600;
 
-/// 段の動き
+/// 段階の動き
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Motion {
-    /// 画像なしで待つ(窓を出しただけ)
+    /// 画像なしで待つ(ウィンドウを出しただけ)
     Idle,
     /// 画像を読み込んで図にし、最初の 3 フレームを描くまで
     Load,
     /// 全体表示のまま待つ
     Hold,
-    /// 全体 → 3 倍の拡大まで少しずつ(縮小の段を順に替える)
+    /// 全体 → 3 倍の拡大まで少しずつ(縮小の段階を順に替える)
     Zoom,
-    /// 3 倍の拡大のまま画像の上を回る(原寸の段のタイルを渡り歩く)
+    /// 3 倍の拡大のまま画像の上を回る(原寸の段階のタイルを渡り歩く)
     Pan,
     /// 全体表示と 1/4 の範囲を 15 フレームごとに行き来する
     Home,
 }
 
-/// 段 1 つの予定
+/// 段階 1 つの予定
 #[derive(Clone, Debug)]
 struct Step {
     name: String,
     motion: Motion,
-    /// フレーム数で決まる段(Zoom・Pan・Home)
+    /// フレーム数で決まる段階(Zoom・Pan・Home)
     frames: usize,
-    /// 時間で決まる段(Idle・Hold)[秒]
+    /// 時間で決まる段階(Idle・Hold)[秒]
     seconds: f64,
 }
 
@@ -75,7 +75,7 @@ impl Step {
     }
 }
 
-/// 物差しの段の並び
+/// ベンチマークの段階の並び
 fn plan(idle_s: f64, cycles: usize, hold_s: f64) -> Vec<Step> {
     let mut v = vec![Step::secs("idle", Motion::Idle, idle_s), Step::secs("load", Motion::Load, 0.0), Step::secs("hold_loaded", Motion::Hold, 1.0)];
     for c in 1..=cycles {
@@ -87,7 +87,7 @@ fn plan(idle_s: f64, cycles: usize, hold_s: f64) -> Vec<Step> {
     v
 }
 
-/// 段 1 つの記録
+/// 段階 1 つの記録
 #[derive(Default)]
 struct Rec {
     name: String,
@@ -95,11 +95,11 @@ struct Rec {
     t1_unix_ms: f64,
     t0_ms: f64,
     t1_ms: f64,
-    /// フレームの間隔 [ms](その段で描いたフレームから次のフレームまで)
+    /// フレームの間隔 [ms](その段階で描いたフレームから次のフレームまで)
     interval_ms: Vec<f64>,
     /// 1 フレームの処理時間 [ms](垂直同期の待ちを除く)
     work_ms: Vec<f64>,
-    /// DX12 の割り当て器の報告(段の終わり)
+    /// DX12 のアロケーターの報告(段階の終わり)
     alloc: Option<Value>,
 }
 
@@ -197,11 +197,11 @@ struct BenchApp {
     cur: usize,
     step_frames: usize,
     step_started: Instant,
-    /// 前のフレームを描き始めた時刻と、その段の番号
+    /// 前のフレームを描き始めた時刻と、その段階の番号
     last_frame: Option<(Instant, usize)>,
     loader: Option<Receiver<Result<LoadedScene, String>>>,
     fig: Option<FigureView>,
-    /// 図を出してから描いたフレーム数(読み込みの段の終わりの判定)
+    /// 図を出してから描いたフレーム数(読み込みの段階の終わりの判定)
     shown: usize,
     image_info: Value,
     device: Option<wgpu::Device>,
@@ -248,7 +248,7 @@ impl BenchApp {
         }
     }
 
-    /// 段の終わりを見て次へ進める(最後なら記録を書いて閉じる)
+    /// 段階の終わりを見て次へ進める(最後なら記録を書いて閉じる)
     fn advance(&mut self, ctx: &egui::Context) {
         loop {
             let Some(step) = self.steps.get(self.cur) else {
@@ -305,7 +305,7 @@ impl BenchApp {
         }
     }
 
-    /// 段の動きに合わせて図の表示の範囲を決める
+    /// 段階の動きに合わせて図の表示の範囲を決める
     fn drive_view(&mut self, ctx: &egui::Context) {
         let Some(step) = self.steps.get(self.cur) else {
             return;
@@ -357,7 +357,7 @@ impl BenchApp {
             });
     }
 
-    /// 記録を書いて窓を閉じる
+    /// 記録を書いてウィンドウを閉じる
     fn finish(&mut self, ctx: &egui::Context) {
         if self.finished {
             return;
@@ -421,7 +421,7 @@ impl BenchApp {
 impl eframe::App for BenchApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let now = Instant::now();
-        // 前のフレームの間隔と処理時間(cpu_usage は前のフレームの値)を、前のフレームの段に入れる
+        // 前のフレームの間隔と処理時間(cpu_usage は前のフレームの値)を、前のフレームの段階に入れる
         if let Some((t, k)) = self.last_frame.take()
             && let Some(r) = self.recs.get_mut(k)
         {
@@ -476,7 +476,7 @@ fn write_report(out: Option<&Path>, v: &Value) {
     }
 }
 
-/// 描画方式の物差し(`--bench-ui <画像>`)
+/// 描画方式のベンチマーク(`--bench-ui <画像>`)
 pub fn run(args: &[String]) -> i32 {
     let image = args.iter().position(|a| a == "--bench-ui").and_then(|i| args.get(i + 1)).filter(|s| !s.starts_with("--")).cloned();
     let out = arg_value(args, "--out").map(PathBuf::from);
@@ -484,7 +484,7 @@ pub fn run(args: &[String]) -> i32 {
         write_report(out.as_deref(), &json!({"bench": "ui", "error": "使い方: zahyou.exe --bench-ui <画像> [--glow|--dx12] [--gpu display|low|high|warp] [--mem lean|perf] [--no-vsync] [--no-hw] [--cycles N] [--out f.json]"}));
         return 2;
     };
-    // 利用者の設定には触れない(この物差しは設定を読まないが、念のため)
+    // 利用者の設定には触れない(このベンチマークは設定を読まないが、念のため)
     super::cli::isolate_settings();
     let choice = RenderChoice::from_args(args);
     let num = |key: &str, default: f64| arg_value(args, key).and_then(|s| s.trim().parse::<f64>().ok()).filter(|v| v.is_finite() && *v >= 0.0).unwrap_or(default);
@@ -564,7 +564,7 @@ pub fn run(args: &[String]) -> i32 {
         Ok(Err(e)) => e.to_string(),
         Err((msg, detail)) => format!("{msg} ({})", detail.join(" / ")),
     };
-    // 窓を開けなかった(物差しは何も描いていない)
+    // ウィンドウを開けなかった(ベンチマークは何も描いていない)
     write_report(
         out.as_deref(),
         &json!({

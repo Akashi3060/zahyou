@@ -16,11 +16,11 @@ Python 基準実装は既定でこのリポジトリの dev/zahyou_core.py(環�
                        test_robust.py が作る)か、$ZAHYOU_TEST_IMAGES/(環境変数。無ければホームフォルダー)からの相対。
                        dev/tcase がリポジトリに無ければ $ZAHYOU_DEV/tcase、隣の Python 版のリポジトリ ../zahyou/dev/tcase の順に探す
 
-照合の約束(Rust の試験 crates/zahyou-image/tests/{kernels,formats,pipeline}.rs と同じ):
+照合の約束(Rust のテスト crates/zahyou-image/tests/{kernels,formats,pipeline}.rs と同じ):
   - ハッシュ ahash(a): float32 は NaN を 0x7fc00000 にそろえた 32 bit の値 b_i(bool・uint8 は 0/1・値)について
     Σ (b_i + 1) * (i * 0x9E3779B97F4A7C15 + 0x632BE59BD9B4E019)  (mod 2^64)。16 進 16 桁の文字列
-  - 星は明るい順の上位 50 個の (x, y, flux, peak, area, elong, fwhm, snr)。深い検出は全部の星の (x, y) も持つ(xy)。
-    深い検出は info(s_psf・s・u・雑音・候補の数・捨てた理由ごとの数・鋭さの上限。秒は除く)も持つ
+  - 星は明るい順の上位 50 個の (x, y, flux, peak, area, elong, fwhm, snr)。ディープ検出は全部の星の (x, y) も持つ(xy)。
+    ディープ検出は info(s_psf・s・u・雑音・候補の数・捨てた理由ごとの数・鋭さの上限。秒は除く)も持つ
 """
 import base64
 import gzip
@@ -529,13 +529,13 @@ def sources_list(found, n=50):
              float(c["elong"]), float(c["fwhm"]), float(c["snr"])] for c in found[:n]]
 
 
-# Downloads の試験画像の控え(作者の PC では Downloads を整理するので、試験が読む元の画像を同じ並びで写してある。2026-10-29)
+# Downloads のテスト画像のコピー(作者の PC では Downloads を整理するので、テストが読む元の画像を同じ並びでコピーしてある。2026-10-29)
 TEST_IMAGES_COPY = ("Documents", "claude", "zahyou", "testdata", "images")
 
 
 def images_path(rest):
     """"$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を実際のパスに。ZAHYOU_TEST_IMAGES(無ければホームフォルダー)からの相対で、
-    Downloads/… がそこに無ければ、同じ並びの控え(TEST_IMAGES_COPY の下)も見る。"""
+    Downloads/… がそこに無ければ、同じ並びのコピー(TEST_IMAGES_COPY の下)も見る。"""
     base = os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~")
     parts = rest.split("/")
     p = os.path.join(base, *parts)
@@ -571,7 +571,7 @@ def tcase_dir():
 
 
 def deep_record(sub, mask, sigma):
-    """深い検出の結果(上位 50 個の全部の値・全部の星の (x, y)・info)と、かかった秒数。"""
+    """ディープ検出の結果(上位 50 個の全部の値・全部の星の (x, y)・info)と、かかった秒数。"""
     info = {}
     t0 = time.perf_counter()
     found, thr = zc.detect_sources_deep(sub, mask, sigma, info=info)

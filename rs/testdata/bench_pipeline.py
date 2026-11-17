@@ -1,11 +1,11 @@
 """
-zahyou.exe --bench と同じ段を Python 版(基準実装)で測る。同じ機械・同じ画像で比べるための物差し。
+zahyou.exe --bench と同じ段階を Python 版(基準実装)で測る。同じマシン・同じ画像で比べるためのベンチマーク。
 
   set ZAHYOU_BENCH_DIR=<フォルダー>
   zahyou.exe --bench --out rust.json          (合成画像 synth_6000x4000.fits をそのフォルダーに作って残す)
   python -B bench_pipeline.py <フォルダー>\\synth_6000x4000.fits [実写.fits ...] [--out py.json] [--repeat 3]
 
-段: 読み込み(load_image_any)・前処理(preprocess)・検出(detect_sources, min_sources=60)・
+段階: 読み込み(load_image_any)・前処理(preprocess)・検出(detect_sources, min_sources=60)・
 北が上の再投影(plot_north_up の reproject_interp まで、block_size=(512, 512))・
 図 2 枚(plot_original + plot_north_up。matplotlib は描くのを savefig まで遅らせるので、ここは図の組み立て)・
 PNG(2 枚を savefig。dpi 100)。WCS は画像のヘッダーのもの(合成画像は TAN の WCS を持つ)。

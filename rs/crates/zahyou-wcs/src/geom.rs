@@ -97,7 +97,7 @@ pub fn tan_project(s: Vec3, r: Vec3) -> Option<(f64, f64)> {
     tan_project_with(s, r, east, north)
 }
 
-/// 基底を先に計算しておく版(同じ接点で多数の点を投影するとき)。
+/// 基底を先に計算しておくバージョン(同じ接点で多数の点を投影するとき)。
 #[inline]
 pub fn tan_project_with(s: Vec3, r: Vec3, east: Vec3, north: Vec3) -> Option<(f64, f64)> {
     let w = dot(s, r);
@@ -113,7 +113,7 @@ pub fn tan_deproject(xi: f64, eta: f64, r: Vec3) -> Vec3 {
     tan_deproject_with(xi, eta, r, east, north)
 }
 
-/// 基底を先に計算しておく版(`tan_deproject` と同じ式)。
+/// 基底を先に計算しておくバージョン(`tan_deproject` と同じ式)。
 #[inline]
 pub fn tan_deproject_with(xi: f64, eta: f64, r: Vec3, east: Vec3, north: Vec3) -> Vec3 {
     normalize(add(r, add(scale(east, xi), scale(north, eta))))

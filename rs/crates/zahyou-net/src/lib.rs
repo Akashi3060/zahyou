@@ -1,13 +1,13 @@
 //! zahyou のネットワークまわり(画面に依存しない)。
 //!
 //! - 更新: GitHub Releases の最新版と動いている exe を SHA256 で突き合わせ、改名方式で入れ替える([`update`])
-//! - 星図データ: astrometry.net 形式の索引ファイル(index-*.fits)を落とす([`index_dl`])
+//! - インデックスファイル: astrometry.net 形式のインデックスファイル(index-*.fits)をダウンロードする([`index_dl`])
 //! - 天体名: Sesame で引いて VizieR の Gaia DR3 で精密化する([`target`])。結果は cache.json に覚える([`cache`])
 //! - オンライン解析: nova.astrometry.net の API([`nova`])
 //!
 //! Python 版の基準実装は gui/zahyou_update.py・gui/zahyou_env.py・dev/zahyou_core.py
 //! (internet_available / solve_online / resolve_target_name / _cache_*)。gui/ は 7.0.0 の準備でリポジトリから消した
-//! (commit 0b73d36(旧タグ v7.0.0-beta.2)の木にある。照合値の作り直しは rs/README.md)。
+//! (commit 0b73d36(旧タグ v7.0.0-beta.2)のツリーにある。照合値の作り直しは rs/README.md)。
 //! どの関数もブロッキング。呼ぶ側(app)がワーカーのスレッドで動かし、`stop` で中止を伝える。
 #![forbid(unsafe_code)]
 
@@ -40,7 +40,7 @@ pub use update::{
 use std::fmt;
 use std::time::Duration;
 
-/// 中止と失敗を分けて返すための誤り。
+/// 中止と失敗を分けて返すためのエラー。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NetError {
     /// `stop()` が真を返したので途中でやめた
@@ -68,7 +68,7 @@ pub fn internet_available() -> bool {
     internet_available_at(nova::NOVA_URL, Duration::from_secs(4))
 }
 
-/// [`internet_available`] の宛先と待ち時間を指定する版(試験用)。
+/// [`internet_available`] で宛先と待ち時間を指定できるもの(テスト用)。
 pub fn internet_available_at(base: &str, timeout: Duration) -> bool {
     let base = base.trim_end_matches('/');
     let agent = http::agent(timeout, true);

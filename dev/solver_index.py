@@ -1,8 +1,8 @@
 # ==============================================================================
-#  solver_index.py — 自前ソルバーの索引ファイル(astrometry.net の index-41xx / index-52xx-NN)
+#  solver_index.py — 自前ソルバーのインデックスファイル(astrometry.net の index-41xx / index-52xx-NN)
 #
 #  docs/design-native-solver.md の 2 節。形式は docs/index-format.md(実物を読んで全件で確かめたもの)。
-#  numpy と標準ライブラリだけを使う(第 2 段で別の言語へ移しやすくするため)。
+#  numpy と標準ライブラリだけを使う(第 2 段階で別の言語へ移しやすくするため)。
 #  build_nb.py が zahyou_engine.py へつなぐので、最上位の名前は sv_ / Sv / _sv_ / SV_ で始める。
 #  冒頭に docstring を置かない(組み立て時に import だけを外す約束)。
 #
@@ -87,7 +87,7 @@ def _sv_read_fits_hdus(path):
     """ファイルの HDU を頭から順に読む。データは読まずに飛ばす。
 
     戻り値 (hdus, end, size)。hdus は dict(header, offset, size) の並び(offset = データの先頭、
-    size = データのバイト数)、end = ヘッダーから計算したファイルの長さ(詰め物込み)、size = 実際の大きさ。
+    size = データのバイト数)、end = ヘッダーから計算したファイルの長さ(パディング込み)、size = 実際の大きさ。
     最後の HDU の後ろに XTENSION で始まらないものがあれば、そこで止める(end < size になる)。
     FITS として読めないときは ValueError(日本語の文)。
     """
@@ -140,11 +140,11 @@ def _sv_read_fits_hdus(path):
 
 
 # ------------------------------------------------------------------------------
-#  索引ファイルのヘッダーの検査
+#  インデックスファイルのヘッダーの検査
 # ------------------------------------------------------------------------------
 
 def _sv_index_layout(path, name=None):
-    """索引ファイルのヘッダーを読んで検査し、表の位置と木の形をまとめて返す。
+    """インデックスファイルのヘッダーを読んで検査し、表の位置と木の形をまとめて返す。
 
     データは読まない(ヘッダーと os.path.getsize だけ)。問題があれば ValueError(日本語の文)。
     name: 名前の検査に使うファイル名(省略時は path の名前)。
@@ -250,7 +250,7 @@ def _sv_index_layout(path, name=None):
 
 
 def sv_validate_index_file(path, name=None):
-    """索引ファイル 1 本をヘッダーだけで検査する。戻り値 (ok, message)。
+    """インデックスファイル 1 本をヘッダーだけで検査する。戻り値 (ok, message)。
 
     見ること: ファイル名の形、大きさ = ヘッダーから計算した長さ(途中で切れたダウンロード)、ENDIAN、
     INDEXID と名前の系列、HEALPIX と名前のタイル番号、必要な表がそろって大きさが合うこと。
@@ -433,7 +433,7 @@ class SvKdTree:
     def ball_candidates(self, qt, r_t):
         """木の単位の問い合わせ qt (Q, D) のそれぞれについて、中心から r_t 以内に届く葉の点を全部挙げる。
 
-        全問い合わせを幅優先で一斉にたどる(1 段ごとに numpy の配列演算)。箱までの最短距離が r_t を超えた
+        全問い合わせを幅優先で一斉にたどる(木の 1 階層ごとに numpy の配列演算)。箱までの最短距離が r_t を超えた
         枝は捨てる。箱そのものは持たず、次元ごとの「箱までの距離の 2 乗」だけを持つ(Arya & Mount の増分距離):
         分割面に対して問い合わせと同じ側の子は親と同じ距離、反対側の子は分割次元の距離が |q − 位置| に
         変わるだけ(子の箱は親の箱を分割面で切ったものなので)。根の箱は整数の全域 [0, 2^bits − 1]。
@@ -454,7 +454,7 @@ class SvKdTree:
         node = np.zeros(len(qi), dtype=np.int64)
         g2, gs = g2[keep], gs[keep]
         mask = self.mask
-        for _ in range(self.levels - 1):            # 内部節点の段(葉は最後の段にだけある)
+        for _ in range(self.levels - 1):            # 内部節点の階層(葉は最後の階層にだけある)
             if len(qi) == 0:
                 return none
             raw = self.split[node].astype(np.int64)
@@ -491,7 +491,7 @@ class SvKdTree:
 
 
 # ------------------------------------------------------------------------------
-#  索引ファイル 1 本
+#  インデックスファイル 1 本
 # ------------------------------------------------------------------------------
 
 def _sv_close_raw_mmap(raw):
@@ -505,7 +505,7 @@ def _sv_close_raw_mmap(raw):
 
 
 def sv_index_codes_from_xyz(P):
-    """quad の星(単位ベクトル。(n, dimquads, 3)、並びは A, B, C(, D))から、索引に入っているコードを計算する。
+    """quad の星(単位ベクトル。(n, dimquads, 3)、並びは A, B, C(, D))から、インデックスに入っているコードを計算する。
 
     投影中心 = A と B の中点の方向、x = 北・y = 東の心射投影、A → (0, 0)・B → (1, 1) の相似変換
     (index-format.md 8.1。この式を符号化すると保存されている整数と全 quad で一致する)。
@@ -529,7 +529,7 @@ def sv_index_codes_from_xyz(P):
 
 
 class SvIndexCorrupt(ValueError):
-    """索引ファイルの中身が壊れている(ヘッダーと大きさは正しいが、木の葉の範囲や quad の星番号が範囲の外)。
+    """インデックスファイルの中身が壊れている(ヘッダーと大きさは正しいが、木の葉の範囲や quad の星番号が範囲の外)。
     file にその SvIndexFile が入る。sv_solve はそのファイルを目録から外して探索を続ける。"""
 
     def __init__(self, file, message):
@@ -548,14 +548,14 @@ def _sv_check_lr(tree):
 
 
 class SvIndexFile:
-    """索引ファイル 1 本。ヘッダーは作るときに読み、データは使うときに mmap する(close() で放す)。
+    """インデックスファイル 1 本。ヘッダーは作るときに読み、データは使うときに mmap する(close() で放す)。
 
     属性(design-native-solver.md 2 節):
       path, name(拡張子なしのファイル名。例 'index-5206-02'), indexid, healpix(全天は −1), hpnside,
       dimquads(3 か 4), nquads, nstars, code_dim(= 2·(dimquads − 2)),
       scale_lo_rad, scale_hi_rad(quad の AB の角距離の範囲。SCALE_L / SCALE_U),
       jitter_arcsec(星の木のヘッダーの JITTER。無ければ 1.0), cutnside(一様化の HEALPix の nside),
-      tile_center_xyz, tile_radius_rad(タイルの中心と外接半径。全天の索引は None)
+      tile_center_xyz, tile_radius_rad(タイルの中心と外接半径。全天のインデックスは None)
     """
 
     def __init__(self, path, _layout=None):
@@ -652,7 +652,7 @@ class SvIndexFile:
         """mmap を放す(Windows でファイルのロックが残らないように)。あとで使えばまた開く。
 
         このファイルの配列のビューを外で持ち続けていると放せない(codetree.data などを直接持たないこと。
-        公開している関数の戻り値はどれも写しなので問題ない)。
+        公開している関数の戻り値はどれもコピーなので問題ない)。
         """
         raw = getattr(self._mm, "_mmap", None)
         self._mm = self._buf = self._quads = self._sweep = None
@@ -704,8 +704,8 @@ class SvIndexFile:
     def code_ball(self, queries, radius, check=None):
         """コードが ‖q − c‖ ≤ radius の quad を、問い合わせ (Q, code_dim) のそれぞれについて全部探す。
 
-        check: 引数なしの関数(締め切りと中止の確かめ)。問い合わせ SV_BALL_CHUNK 個ごとに呼ぶ(例外はそのまま通す。
-        束のコードは数万個になることがあり、1 回の照合が 0.4 秒を超えた)。
+        check: 引数なしの関数(タイムアウトと中止の確かめ)。問い合わせ SV_BALL_CHUNK 個ごとに呼ぶ(例外はそのまま通す。
+        バッチのコードは数万個になることがあり、1 回の照合が 0.4 秒を超えた)。
 
         戻り値 (qi, quad): 問い合わせの番号と quad の番号(int64。qi・quad の順に並べてある)。
         木の単位で量子化の分(D × 0.25 目盛り²)だけ広げて候補を取り、最後に実数で判定する。
@@ -740,7 +740,7 @@ class SvIndexFile:
             if len(pt) == 0:
                 continue
             qt32 = qt.astype(np.float32)
-            # 先に 1 つめの次元の差だけで落とす(|d₀| > 半径なら距離も半径を超える。1 列だけ読むので安い)
+            # 先に 1 つめの次元の差だけで外す(|d₀| > 半径なら距離も半径を超える。1 列だけ読むので安い)
             k = np.nonzero(np.abs(t.data[pt, 0] - qt32[qi, 0]) <= np.float32(math.sqrt(rs2) + 1.0))[0]
             qi, pt = qi[k], pt[k]
             d = t.data[pt].astype(np.float32)
@@ -758,7 +758,7 @@ class SvIndexFile:
             return none
         qi = np.concatenate(out_q)
         quad = np.concatenate(out_c)
-        # (qi, quad) の順に並べる。1 つの整数の鍵にして並べるほうが lexsort より速い
+        # (qi, quad) の順に並べる。1 つの整数のキーにして並べるほうが lexsort より速い
         key = qi * np.int64(t.ndata) + quad
         key.sort()
         return key // t.ndata, key % t.ndata
@@ -794,9 +794,9 @@ class SvIndexFile:
 # ------------------------------------------------------------------------------
 
 class SvIndexCatalog:
-    """星図データのフォルダー。index-*.fits を走査してヘッダーを検査する(データは使うときに mmap)。
+    """インデックスファイルのフォルダー。index-*.fits を走査してヘッダーを検査する(データは使うときに mmap)。
 
-    files     使える索引(INDEXID・HEALPIX の順)
+    files     使えるインデックス(INDEXID・HEALPIX の順)
     problems  使えないファイル [(パス, 理由)]
     series    INDEXID → [SvIndexFile](全天の系列は 1 本、5200 系はタイルの数だけ。HEALPIX の順)
     """
@@ -830,7 +830,7 @@ class SvIndexCatalog:
         self.files.sort(key=lambda f: (f.indexid, f.healpix))
         for f in self.files:
             self.series.setdefault(f.indexid, []).append(f)
-        # 同じ系列の中で段の値がそろっていないファイルは外す(いちばん多い形に合わせる)
+        # 同じ系列の中でヘッダーの値(DIMQUADS・SCALE・HPNSIDE)がそろっていないファイルは外す(いちばん多い形に合わせる)
         for iid in list(self.series):
             fs = self.series[iid]
             sig = [(f.dimquads, f.scale_lo_rad, f.scale_hi_rad, f.hpnside) for f in fs]
@@ -846,7 +846,7 @@ class SvIndexCatalog:
                 f"series={sorted(self.series)}, problems={len(self.problems)})")
 
     def close(self):
-        """開いている索引の mmap を全部放す。"""
+        """開いているインデックスの mmap を全部放す。"""
         for f in self.files:
             f.close()
 
@@ -871,7 +871,7 @@ class SvIndexCatalog:
         self.close()
 
     def coverage_arcmin(self):
-        """手持ちの段の quad の大きさの範囲 (lo, hi)(分角)。索引が無ければ None。"""
+        """手持ちのスケールの quad の大きさの範囲 (lo, hi)(分角)。インデックスが無ければ None。"""
         if not self.files:
             return None
         lo = min(f.scale_lo_rad for f in self.files)
@@ -879,12 +879,12 @@ class SvIndexCatalog:
         return math.degrees(lo) * 60.0, math.degrees(hi) * 60.0
 
     def select(self, scale_lo, scale_hi, width, height, hint_xyz=None, hint_radius_rad=None):
-        """画像に使う索引を選んで、試す順に並べる。
+        """画像に使うインデックスを選んで、試す順に並べる。
 
         scale_lo, scale_hi: 画素スケールの範囲(″/px)。width, height: 画像の大きさ(px)。
-        quad の大きさ(px)が [0.1 × 短辺, 対角] に入りうる段 = [0.1·min(W,H)·scale_lo, hypot(W,H)·scale_hi](″)と
-        [SCALE_L, SCALE_U] が重なる段を選ぶ。重なる段が無ければ最も近い段 1 つ。
-        順は「quad の大きさが画像の短辺の半分くらい(0.5·min(W,H)·√(scale_lo·scale_hi))になる段」から。
+        quad の大きさ(px)が [0.1 × 短辺, 対角] に入りうる範囲 = [0.1·min(W,H)·scale_lo, hypot(W,H)·scale_hi](″)と
+        [SCALE_L, SCALE_U] が重なるスケールを選ぶ。重なるスケールが無ければ最も近いスケール 1 つ。
+        順は「quad の大きさが画像の短辺の半分くらい(0.5·min(W,H)·√(scale_lo·scale_hi))になるスケール」から。
         ヒント(hint_xyz と半径)があれば、タイルの系列はヒントの円(半径 + 画像の対角の半分)と
         重なるタイルだけを、ヒントに近い順に。無ければ番号の順。
         """

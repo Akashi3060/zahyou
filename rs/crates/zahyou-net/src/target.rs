@@ -256,7 +256,7 @@ pub fn resolve_target(name: &str, online: bool, cache_file: &Path, log: &dyn Fn(
     resolve_target_with(name, online, cache_file, &SESAME_URLS, VIZIER_URL, log)
 }
 
-/// [`resolve_target`] の問い合わせ先を指定する版(試験用)。
+/// [`resolve_target`] で問い合わせ先を指定できるもの(テスト用)。
 pub fn resolve_target_with(
     name: &str,
     online: bool,

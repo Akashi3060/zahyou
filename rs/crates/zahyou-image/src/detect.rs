@@ -1,4 +1,4 @@
-//! 星の検出(Python の zahyou_core.detect_sources・_measure)。深い検出は deep.rs。
+//! 星の検出(Python の zahyou_core.detect_sources・_measure)。ディープ検出は deep.rs。
 //!
 //! 平滑化した画像をしきい値で 2 値にし、4 連結でまとめ(scipy の label と同じく、ラスター順で最初に
 //! 現れた順に番号)、領域ごとに重心・光量・伸びを測る。しきい値は 12σ から下げていき、
@@ -200,7 +200,7 @@ pub fn detect_raw(sub: &Image2D, mask: &[bool], sigma: f64, opts: &DetectOpts) -
     if n == 0 || sub.data.len() != n || mask.len() != n {
         return (Vec::new(), None);
     }
-    // マスクの画素を 0 にした画像。マスクが空なら sub そのもの(写さない。`if m {0} else {s}` は m が全部偽なら s のビットのまま)
+    // マスクの画素を 0 にした画像。マスクが空なら sub そのもの(コピーしない。`if m {0} else {s}` は m が全部偽なら s のビットのまま)
     let work: Cow<[f32]> = if !mask.par_iter().any(|&m| m) {
         Cow::Borrowed(&sub.data)
     } else {

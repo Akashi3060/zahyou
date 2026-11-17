@@ -1,7 +1,7 @@
 //! 画面を出さない入口(exe は windows サブシステムなので、結果は --out のファイルへも書く)。
 //!
 //!   zahyou.exe --selftest <画像> [--online|--offline] [--out f]   画面を組み立てて解析を 2 回通す
-//!   zahyou.exe --engine-check [--out f]                         フォント・星図データの目録・画像の読み込みを確かめる
+//!   zahyou.exe --engine-check [--out f]                         フォント・インデックスファイルの目録・画像の読み込みを確かめる
 //!   zahyou.exe --update-check [--out f]                         更新の確認だけ(試作版は問い合わせない)
 //!   zahyou.exe --bench-gui [<画像>] [--out f]                    画面まわりの速さ(JSON)
 
@@ -30,7 +30,7 @@ fn emit(args: &[String], text: &str) {
     }
 }
 
-/// 自己診断。pipeline 係の項目(エンジン・星図データ・解析・数字・図・ログ・目標なし)に、
+/// 自己診断。pipeline モジュールの項目(エンジン・インデックスファイル・解析・数字・図・ログ・目標なし)に、
 /// 画面の項目(組み立て・フォント・画面からの解析・図の貼り付け・はみ出し・下のバー・配色)を足す。
 pub fn selftest(args: &[String]) -> i32 {
     let Some(image) = arg_value(args, "--selftest") else {
@@ -51,7 +51,7 @@ pub fn selftest(args: &[String]) -> i32 {
     let temp_cache = isolate_cache();
     let image = PathBuf::from(image);
 
-    // --- 解析の項目(pipeline 係) ---
+    // --- 解析の項目(pipeline モジュール) ---
     let mut log = String::new();
     let debug = match debug_wcs.as_deref().map(super::bridge::read_wcs_file) {
         Some(Ok(w)) => Some(w),
@@ -103,7 +103,7 @@ pub fn isolate_settings() {
 
 /// 自己診断は、記憶(cache.json)も空の一時ファイルへ向ける。利用者の覚えた座標・画素スケールを読まず
 /// (結果がその PC の記憶によらない)、自己診断の画像の画素スケールや目標の座標を書き足さない。
-/// 環境変数 ZAHYOU_CACHE があればそれを使う(覚えた値で確かめたいときは、利用者の cache.json の写しを指す)。
+/// 環境変数 ZAHYOU_CACHE があればそれを使う(覚えた値で確かめたいときは、利用者の cache.json のコピーを指す)。
 /// 向けた一時ファイルを返す(終わったら消す)。以前は gui.json だけを向けていた(docs/rust-port.md 11 節)。
 fn isolate_cache() -> Option<PathBuf> {
     let p = selftest_cache_path(std::env::var_os("ZAHYOU_CACHE"), &std::env::temp_dir(), std::process::id())?;
@@ -112,7 +112,7 @@ fn isolate_cache() -> Option<PathBuf> {
     Some(p)
 }
 
-/// [`isolate_cache`] の行き先(環境変数を引数で受ける。試験用)。ZAHYOU_CACHE が空でなければ None(そちらを使う)。
+/// [`isolate_cache`] の行き先(環境変数を引数で受ける。テスト用)。ZAHYOU_CACHE が空でなければ None(そちらを使う)。
 fn selftest_cache_path(env_cache: Option<std::ffi::OsString>, temp: &Path, pid: u32) -> Option<PathBuf> {
     if env_cache.is_some_and(|v| !v.is_empty()) {
         return None;
@@ -165,7 +165,7 @@ pub fn engine_check(args: &[String]) -> i32 {
     if ok { 0 } else { 1 }
 }
 
-/// 更新の確認だけ(Python の --update-check)。--update-apply なら落として入れ替える(起動し直さない)
+/// 更新の確認だけ(Python の --update-check)。--update-apply ならダウンロードして入れ替える(起動し直さない)
 pub fn update_cli(args: &[String]) -> i32 {
     let mut out: Vec<String> = Vec::new();
     let exe = std::env::current_exe().unwrap_or_default();
@@ -216,7 +216,7 @@ pub fn update_cli(args: &[String]) -> i32 {
     code
 }
 
-/// 速さの物差し(JSON)。pipeline の物差しがあればそちらも含める。
+/// 速さのベンチマーク(JSON)。pipeline のベンチマークがあればそちらも含める。
 pub fn bench(args: &[String]) -> i32 {
     let image = args
         .iter()
@@ -247,7 +247,7 @@ pub fn bench(args: &[String]) -> i32 {
                 let (src, _) = zahyou_image::detect_sources(&prep, &zahyou_image::DetectOpts::with_min_sources(60));
                 items.push(("detect_s".into(), t.elapsed().as_secs_f64()));
                 notes.push(format!("{} x {} / {} 個", l.data.width, l.data.height, src.len()));
-                // 画面に貼る準備(灰色の画素 → 縮小の段)
+                // 画面に貼る準備(灰色の画素 → 縮小の段階)
                 let t = Instant::now();
                 let n = l.display.width * l.display.height;
                 let rgba: Vec<u8> = l

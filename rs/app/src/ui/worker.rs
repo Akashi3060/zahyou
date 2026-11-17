@@ -33,11 +33,11 @@ pub enum Msg {
     Progress(u64, u64),
     /// 解析の結果
     Run(Box<ResultView>),
-    /// 星図データの状態
+    /// インデックスファイルの状態
     Env(Box<Survey>),
     /// 更新の確認の結果(quiet = 起動したついでの確認)
     Update(Box<zahyou_net::UpdateCheck>, bool),
-    /// 段の一覧に付ける印
+    /// スケールの一覧に付けるチェック
     Marks(Vec<u32>),
     /// 更新のために閉じる
     QuitForUpdate,

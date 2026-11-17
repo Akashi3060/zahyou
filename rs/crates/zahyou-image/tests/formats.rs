@@ -7,7 +7,7 @@
 //! - JPEG は自前の復号(libjpeg-turbo と同じ計算)でビット一致を求める(4:4:4・4:2:2・4:2:0・4:4:0・4:1:1・
 //!   プログレッシブ・RST・Adobe RGB・CMYK)。image クレートに任せる形式(算術符号など)だけ平均の差を見る
 //!
-//! 既知の違い(試験の中で別に確かめる):
+//! 既知の違い(テストの中で別に確かめる):
 //! - HCOMPRESS_1・PLIO_1: 未対応なので Err(Python は読める)
 //! - 拡張子が .png の FITS: Python は Pillow の FITS プラグインが値を化けさせる。Rust は FITS として正しく読む
 
@@ -103,7 +103,7 @@ fn formats_match_python() {
             }
             (_, false, Err(e)) => {
                 let pe = fx["error"].as_str().unwrap();
-                // 自前の文(小さすぎる・一様)は文まで同じ。読めない理由の詳細は読み込み器ごとに違う
+                // 自前の文(小さすぎる・一様)は文まで同じ。読めない理由の詳細はローダーごとに違う
                 let same_text = match e {
                     LoadError::Unreadable(_) => pe.starts_with("画像として読み込めませんでした"),
                     _ => e.to_string() == pe,

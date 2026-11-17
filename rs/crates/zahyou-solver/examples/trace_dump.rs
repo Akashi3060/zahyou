@@ -1,8 +1,8 @@
-//! 前後比較の物差し: 合成星野と実写の星のリスト(rs/testdata の solver_synth.json・solver_real.json)を解き、
+//! 前後比較の基準データ: 合成星野と実写の星のリスト(rs/testdata の solver_synth.json・solver_real.json)を解き、
 //! trace(途中の値)から時刻だけを除いた JSON を 1 件 1 ファイルに書く。
 //!
 //! 解法の中を速くしたとき、変える前と変えた後で同じフォルダー構成に書かせ、ファイルをバイト単位で比べる
-//! (束ごとの quad・当たり・仮説の数、足切りの数、先頭 20000 個の仮説の 4 点の WCS と対数オッズ、tune-up、解の WCS と一致)。
+//! (バッチごとの quad・当たり・仮説の数、足切りの数、先頭 20000 個の仮説の 4 点の WCS と対数オッズ、tune-up、解の WCS と一致)。
 //! 実数は serde_json の最短の桁で書くので、解の WCS・対数オッズ・一致のずれはビットまで比べられる
 //! (仮説の対数オッズとスケールだけは trace の約束どおり 4 桁・6 桁に丸めてある)。
 //!
@@ -10,8 +10,8 @@
 //! cargo run --release -p zahyou-solver --example trace_dump -- --out <フォルダー> [--cases ra0,s5202] [--deadline 秒]
 //! ```
 //!
-//! 締め切りで止まった場合("status": "deadline")は、どこで止まったかが時間で決まるので、比べる側は
-//! 仮説の記録の共通の先頭だけを比べること。星図データは C:\AstrometryData(ZAHYOU_INDEX_DIR)。
+//! タイムアウトで止まった場合("status": "deadline")は、どこで止まったかが時間で決まるので、比べる側は
+//! 仮説の記録の共通の先頭だけを比べること。インデックスファイルは C:\AstrometryData(ZAHYOU_INDEX_DIR)。
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -59,7 +59,7 @@ fn hint_of(v: &Value) -> Option<(f64, f64, f64)> {
 }
 
 fn stars_xy_flux(xy: &Value, flux: &Value) -> Vec<FieldStar> {
-    // 試験(tests/common の stars_xy_flux)と同じ組み立て
+    // テスト(tests/common の stars_xy_flux)と同じ組み立て
     let p = f64s(xy);
     let f = if flux.is_null() { vec![f64::NAN; p.len() / 2] } else { f64s(flux) };
     p.chunks(2).zip(f).map(|(q, fl)| FieldStar { x: q[0], y: q[1], flux: fl }).collect()

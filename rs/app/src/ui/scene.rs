@@ -1,12 +1,12 @@
 //! 図 1 枚の表示用の中身(画面の Painter で描く形)。zahyou-plot の Figure と同じ考え方で持つ。
 //!
 //! - 位置はすべて**画像の画素**(0 始まり、x = 列、y = 行。画素の中心が整数)
-//! - 線の太さ・印・文字の大きさは **pt**(画面の上で一定。v6 の図と同じく 1 pt = 100/72 px で描く)
-//! - 画面への写し方(上下の向き・拡大・移動)は figure.rs が決める
+//! - 線の太さ・マーカー・文字の大きさは **pt**(画面の上で一定。v6 の図と同じく 1 pt = 100/72 px で描く)
+//! - 画面への変換(上下の向き・拡大・移動)は figure.rs が決める
 //!
-//! 画像は縮小の段(1/1, 1/2, 1/4, …)を前もって作っておく。wgpu はミップマップを作らないので、
+//! 画像は縮小の段階(1/1, 1/2, 1/4, …)を前もって作っておく。wgpu はミップマップを作らないので、
 //! 全体表示(24 MP を 800 px に縮める)で星が消えたりちらついたりしないように、表示の倍率に
-//! 合った段を選んで描く(matplotlib の antialiased 表示に当たる)。
+//! 合った段階を選んで描く(matplotlib の antialiased 表示に当たる)。
 
 use std::sync::Arc;
 
@@ -51,7 +51,7 @@ pub enum Prim {
     Text { at: [f64; 2], offset: [f32; 2], text: String, size: f32, color: Color32, bold: bool, halign: HAlign, valign: VAlign },
 }
 
-/// 目盛り 1 本(枠の上の印)
+/// 目盛り 1 本(枠の上のマーク)
 #[derive(Clone, Debug)]
 pub struct Tick {
     /// 枠の上の位置(画素)
@@ -93,20 +93,20 @@ pub struct GridSet {
 /// 表示の範囲 [x0, x1, y0, y1](画素、x0 < x1・y0 < y1)から格子を作り直す関数
 pub type Regrid = Arc<dyn Fn([f64; 4]) -> Option<GridSet> + Send + Sync>;
 
-/// 縮小の段を持つ画像(段 0 が原寸)
+/// 縮小の段階を持つ画像(段階 0 が原寸)
 #[derive(Clone)]
 pub struct Pyramid {
     pub width: usize,
     pub height: usize,
-    /// 段 k は 2^k 分の 1。行 0 = 画像の y=0 の行(画面の上下は figure.rs が決める)。
-    /// Arc で持つのは、テクスチャに上げるとき(figure.rs の upload_level)に写さずに egui へ渡すため
+    /// 段階 k は 2^k 分の 1。行 0 = 画像の y=0 の行(画面の上下は figure.rs が決める)。
+    /// Arc で持つのは、テクスチャに上げるとき(figure.rs の upload_level)にコピーせずに egui へ渡すため
     /// (egui の ImageData は Arc<ColorImage> をそのまま受け取り、egui-wgpu は画素を借りて GPU へ書く)。
-    /// 段を書き換える所は無いので、Pyramid の Clone が浅くなっても困らない。
+    /// 段階を書き換える所は無いので、Pyramid の Clone が浅くなっても困らない。
     pub levels: Vec<Arc<ColorImage>>,
 }
 
 impl Pyramid {
-    /// 原寸の画像から縮小の段を作る(長辺が 256 px を切るまで)。透明(NaN の画素)は平均から外す。
+    /// 原寸の画像から縮小の段階を作る(長辺が 256 px を切るまで)。透明(NaN の画素)は平均から外す。
     pub fn build(base: ColorImage) -> Pyramid {
         let [w, h] = base.size;
         let mut levels = vec![Arc::new(base)];
@@ -121,7 +121,7 @@ impl Pyramid {
         Pyramid { width: w, height: h, levels }
     }
 
-    /// 画面 1 px あたりの画像の画素数(> 1 なら縮小表示)に合う段
+    /// 画面 1 px あたりの画像の画素数(> 1 なら縮小表示)に合う段階
     pub fn level_for(&self, img_px_per_screen_px: f32) -> usize {
         if img_px_per_screen_px.is_nan() || img_px_per_screen_px <= 1.0 {
             return 0;
@@ -176,10 +176,10 @@ fn half(src: &ColorImage) -> ColorImage {
     ColorImage::new([nw, nh], out)
 }
 
-/// 図 1 枚(題・画像・格子・目盛り・印)
+/// 図 1 枚(タイトル・画像・格子・目盛り・マーカー)
 #[derive(Clone)]
 pub struct Scene {
-    /// 題(改行で 2 行)
+    /// タイトル(改行で 2 行)
     pub title: String,
     /// 画像の大きさ(画素)。表示の範囲の基準
     pub width: f64,
@@ -215,7 +215,7 @@ impl Scene {
 /// RGBA(straight alpha、行 0 = 画像の y=0)から ColorImage を作る。大きさが合わなければ None。
 ///
 /// 画素ごとの詰め替えは rayon で並列にする(ワーカーで図ごとに 1 回。24 MP なら 2,400 万画素と、出力 96 MB の
-/// 初めて触るページを 1 本のスレッドで受けていた)。出力は 1 本のスレッドの版(試験の rgba_image_serial)と同じ:
+/// 初めて触るページを 1 本のスレッドで受けていた)。出力は 1 本のスレッドの実装(テストの rgba_image_serial)と同じ:
 /// - from_rgba_unmultiplied は画素ごとの純粋な関数(a=0・255 は分岐、ほかは OnceLock の表引きでスレッド安全)
 /// - par_chunks_exact は IndexedParallelIterator で、Vec への collect は確保した領域へ添字の位置で書くので並びも同じ
 ///   (`vec![Color32::TRANSPARENT; n]` に並列で書く形にしないこと。Color32 は 0 埋めの特別扱いの対象外で、
@@ -259,7 +259,7 @@ mod tests {
         assert_eq!(p.levels[1].pixels[0], Color32::from_gray(100));
     }
 
-    /// 旧版の rgba_image(1 本のスレッド)。並列にした版と同じ結果になるかを見る参照実装
+    /// 旧版の rgba_image(1 本のスレッド)。並列にした実装と同じ結果になるかを見る参照実装
     fn rgba_image_serial(width: usize, height: usize, rgba: &[u8]) -> Option<ColorImage> {
         if width == 0 || height == 0 || rgba.len() != width * height * 4 {
             return None;

@@ -1,7 +1,7 @@
 //! scipy.ndimage と同じ値になる 2 次元フィルター(float32 の画像、行優先)。
 //!
 //! scipy は 1 次元フィルターを軸 0(列)→ 軸 1(行)の順にかけ、途中の結果を入力と同じ float32 に丸める。
-//! 各行の計算は float64 で、端の延長(nearest・reflect)も同じ規則。ここでは計算の順序まで写して
+//! 各行の計算は float64 で、端の延長(nearest・reflect)も同じ規則。ここでは計算の順序までそろえて
 //! ビット単位で同じ値を出す(image_kernels.json で確かめる)。
 
 use rayon::prelude::*;
@@ -37,14 +37,14 @@ fn nearest_index(i: isize, n: usize) -> usize {
 /// 画素ごとの計算は scipy の NI_Correlate1D の対称の枝と同じ順: o = x[0]*w0、続いて外側から
 /// o += (x[-j] + x[+j]) * w[j](j = r .. 1)を float64 で行い、軸ごとに float32 に丸める。
 /// 速さのため、行ごとに「重み 1 つ分を行全体に足す」を外側から順に繰り返す(画素ごとの足す順は同じ)。
-/// 出力は 1 枚だけ確保し、軸 1 はその行の写しから計算して同じ行へ書き戻す。
+/// 出力は 1 枚だけ確保し、軸 1 はその行のコピーから計算して同じ行へ書き戻す。
 fn separable_sym(data: &[f32], ny: usize, nx: usize, w: &[f64], index: fn(isize, usize) -> usize) -> Vec<f32> {
     let mut out = Vec::new();
     separable_sym_into(data, ny, nx, w, index, &mut out);
     out
 }
 
-/// `separable_sym` の書き先を受け取る版。out の長さが ny×nx 以上なら切り詰めて使う(確保もゼロ埋めもしない)。
+/// `separable_sym` の、書き先を受け取るバージョン。out の長さが ny×nx 以上なら切り詰めて使う(確保もゼロ埋めもしない)。
 /// 軸 0 が全画素を書く(各行の nx 個すべて)ので、前の中身は残らず、値は新しく確保したときと同じ。
 fn separable_sym_into(
     data: &[f32],
@@ -85,7 +85,7 @@ fn separable_sym_into(
             }
         },
     );
-    // 軸 1: 行ごと(行を端で延ばした float64 の写しから計算し、同じ行へ書き戻す)
+    // 軸 1: 行ごと(行を端で延ばした float64 のコピーから計算し、同じ行へ書き戻す)
     out.par_chunks_mut(nxc).for_each_init(
         || (vec![0.0f64; nx + 2 * r], vec![0.0f64; nx]),
         |(ext, acc), orow| {
@@ -125,7 +125,7 @@ pub fn gaussian1(data: &[f32], ny: usize, nx: usize) -> Vec<f32> {
 
 /// scipy の `_gaussian_kernel1d(sigma, 0, radius)` の重みの半分(添字は中心からの距離、[0] が中心)。
 /// 半径は `int(4 * sigma + 0.5)`(truncate=4)。scipy と同じく `exp(-0.5 / sigma² * x²)` を numpy と同じ
-/// ペアワイズ和で割る。exp は numpy(この機械では UCRT の exp)と同じ値を返すことを確かめてある。
+/// ペアワイズ和で割る。exp は numpy(このマシンでは UCRT の exp)と同じ値を返すことを確かめてある。
 /// sigma が有限の正の数でない、または大きすぎる(半径 1000 超)ときは None。
 pub fn gaussian_weights(sigma: f64) -> Option<Vec<f64>> {
     if !(sigma.is_finite() && sigma > 0.0) {
@@ -155,8 +155,8 @@ pub fn gaussian(data: &[f32], ny: usize, nx: usize, sigma: f64) -> Vec<f32> {
     out
 }
 
-/// `gaussian` の書き先を受け取る版(深い検出が、使い終えた同じ大きさの配列を書き先に回す)。
-/// out の前の中身は値に効かない(separable_sym_into は全画素を書き、sigma が使えないときは data の写しにする)。
+/// `gaussian` の、書き先を受け取るバージョン(ディープ検出が、使い終えた同じ大きさの配列を書き先に回す)。
+/// out の前の中身は値に効かない(separable_sym_into は全画素を書き、sigma が使えないときは data のコピーにする)。
 pub(crate) fn gaussian_into(data: &[f32], ny: usize, nx: usize, sigma: f64, out: &mut Vec<f32>) {
     if ny == 0 || nx == 0 || data.len() != ny * nx {
         out.clear();
@@ -172,8 +172,8 @@ pub(crate) fn gaussian_into(data: &[f32], ny: usize, nx: usize, sigma: f64, out:
 }
 
 /// `ndimage.maximum_filter(a, size=2h+1)`(mode="reflect")。最大値は端を鏡映で延ばしても窓を画像の内側に
-/// 縮めても同じなので、窓を縮めて計算する(NaN を含まない画像に使う)。深い検出は極大を 1 点ずつ調べる
-/// (deep.rs の is_local_max)ので、これは照合の試験だけで使う。
+/// 縮めても同じなので、窓を縮めて計算する(NaN を含まない画像に使う)。ディープ検出は極大を 1 点ずつ調べる
+/// (deep.rs の is_local_max)ので、これは照合のテストだけで使う。
 #[cfg(test)]
 pub(crate) fn maximum_filter(data: &[f32], ny: usize, nx: usize, h: usize) -> Vec<f32> {
     if ny == 0 || nx == 0 || data.len() != ny * nx {
@@ -220,7 +220,7 @@ pub fn binomial3(data: &[f32], ny: usize, nx: usize) -> Vec<f32> {
     separable_sym(data, ny, nx, &[0.5, 0.25], nearest_index)
 }
 
-/// `ndimage.uniform_filter(a, size=3, mode="nearest")`。scipy は線ごとに float64 の和を持ち回し
+/// `ndimage.uniform_filter(a, size=3, mode="nearest")`。scipy は線ごとに float64 の移動和を更新し
 /// (`tmp += 新 - 旧`)、毎回 3 で割る。その丸めの積み重ねまで同じにする。
 pub fn uniform3(data: &[f32], ny: usize, nx: usize) -> Vec<f32> {
     if ny == 0 || nx == 0 {
@@ -254,7 +254,7 @@ fn strip_width(nx: usize) -> usize {
     nx.div_ceil(n).max(32)
 }
 
-/// uniform3 の軸 0: 列ごとの持ち回しの和(scipy と同じく `tmp += 新 - 旧` を float64 で、毎回 3 で割って float32)。
+/// uniform3 の軸 0: 列ごとの移動和(scipy と同じく `tmp += 新 - 旧` を float64 で、毎回 3 で割って float32)。
 /// 縦の帯ごとに並列に計算する。ny・nx は 1 以上、data は ny×nx 以上。
 pub(crate) fn uniform3_strips(data: &[f32], ny: usize, nx: usize) -> Vec<Strip> {
     let sw = strip_width(nx);
@@ -295,7 +295,7 @@ pub(crate) fn uniform3_gather_row(strips: &[Strip], y: usize, t0row: &mut [f32])
     }
 }
 
-/// uniform3 の軸 1 の 1 行ぶん: t0row(軸 0 の結果の行、長さ 1 以上)の持ち回しの和を orow(同じ長さ)へ。
+/// uniform3 の軸 1 の 1 行ぶん: t0row(軸 0 の結果の行、長さ 1 以上)の移動和を orow(同じ長さ)へ。
 #[inline]
 pub(crate) fn uniform3_row(t0row: &[f32], orow: &mut [f32]) {
     let nx = t0row.len();
@@ -496,7 +496,7 @@ pub(crate) mod tests {
         out
     }
 
-    /// 決まった擬似乱数(xorshift)の画像。値の幅は大きめ(持ち回しの和の丸めの積み重ねが出るように)
+    /// 決まった擬似乱数(xorshift)の画像。値の幅は大きめ(移動和の丸めの積み重ねが出るように)
     pub(crate) fn rand_vals(n: usize, seed: u64) -> Vec<f32> {
         let mut s = seed | 1;
         (0..n)
@@ -511,7 +511,7 @@ pub(crate) mod tests {
 
     #[test]
     fn uniform3_matches_reference() {
-        // 帯の幅を変え、全面の並べ直しをやめても、前の版とビット単位で同じ(帯の境目をまたぐ幅・1 行・1 列・NaN 入り)
+        // 帯の幅を変え、全面の並べ直しをやめても、前のバージョンとビット単位で同じ(帯の境目をまたぐ幅・1 行・1 列・NaN 入り)
         for (ny, nx) in
             [(1usize, 1usize), (1, 700), (700, 1), (2, 3), (37, 300), (5, 257), (64, 256), (90, 1030), (33, 6001)]
         {
@@ -542,7 +542,7 @@ pub(crate) mod tests {
 
     #[test]
     fn gaussian_into_ignores_old_contents() {
-        // 書き先に前の値(NaN・長い・短い)が残っていても、新しく作ったものと同じ。sigma が使えないときは写し
+        // 書き先に前の値(NaN・長い・短い)が残っていても、新しく作ったものと同じ。sigma が使えないときはコピー
         let (ny, nx) = (61, 77);
         let d = rand_vals(ny * nx, 9);
         for sigma in [1.0, 1.7, 3.2, 0.0, f64::NAN, 1e-20] {

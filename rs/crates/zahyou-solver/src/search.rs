@@ -1,9 +1,9 @@
 //! 探索の本体(Python の `sv_solve`・`_sv_search`・`_sv_flush`・`_sv_flush_series`・`_sv_match_file`・
 //! `_sv_verify_and_pick`・`_sv_refine`・`_sv_hint_tiles`。設計書 3 節)。
 //!
-//! 探す順と判定は Python と同じ。並列にするのは、索引のファイルごとの照合、当たりごとの安い棄却と 4 点の当てはめ、
-//! 検証の束の中の仮説ごとの検証(足切りと本検証)だけで、どれも結果を Python の順に並べてから選ぶ
-//! (区切りごとに newpoint の順で最初に solve を超えた仮説を採る)ので、スレッドの数によらず同じ解になる。
+//! 探す順と判定は Python と同じ。並列にするのは、インデックスファイルごとの照合、当たりごとの安い棄却と 4 点のフィット、
+//! 検証のバッチの中の仮説ごとの検証(足切りと本検証)だけで、どれも結果を Python の順に並べてから選ぶ
+//! (バッチごとに newpoint の順で最初に solve を超えた仮説を採る)ので、スレッドの数によらず同じ解になる。
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::time::Instant;
@@ -23,7 +23,7 @@ use crate::pyfmt::{fmt_g, fmt_int};
 use crate::verify::{Hyp, Proj, Refs, SeriesCtx, Store, VerifyOut, quick_pass, series_cone, verify_one};
 use crate::Params;
 
-/// 最初の束の quad の数(このあと束ごとに倍、MAX_BATCH まで)。
+/// 最初のバッチの quad の数(このあとバッチごとに倍、MAX_BATCH まで)。
 const FIRST_BATCH: usize = 24;
 const MAX_BATCH: usize = 768;
 /// 系列の仮説をこの数ずつ検証し、そのたびに解を選ぶ(Python の SV_VERIFY_STEP。仮説の数の数え方もこれに合わせる)。
@@ -31,17 +31,17 @@ const VERIFY_STEP: usize = 8192;
 /// 改良の反復の回数と、反復ごとに quad からの距離による σ の広がりを弱める割合。
 const TWEAK_STEPS: usize = 10;
 const TWEAK_GAMMA: f64 = 0.7;
-/// 改良の最後の当て直しを一致だけで行う一致の数。
+/// 改良の最後の再フィットを一致だけで行う一致の数。
 const TWEAK_MIN_MATCHES: usize = 6;
-/// SIP を付けるには、当てる星が画像を 3 × 3 に分けた箱の 7 つ以上にあること。
+/// SIP を付けるには、フィットに使う星が画像を 3 × 3 に分けた箱の 7 つ以上にあること。
 const SIP_GRID: usize = 3;
 const SIP_MIN_BOXES: usize = 7;
 /// trace に書く仮説の数の上限。
 pub(crate) const TRACE_MAX_HYP: usize = 20000;
-/// code_ball で一度にたどる問い合わせの数(区切りごとに締め切りと中止を見る。Python の SV_BALL_CHUNK は 2048 だが、
-/// 答えは区切り方によらないので、中止の遅れを短くするため小さくした。1 区切りは大きな索引でも 10 ms ほど)。
+/// code_ball で一度にたどる問い合わせの数(チャンクごとにタイムアウトと中止を見る。Python の SV_BALL_CHUNK は 2048 だが、
+/// 答えはチャンクの分け方によらないので、中止の遅れを短くするため小さくした。1 チャンクは大きなインデックスでも 10 ms ほど)。
 const BALL_CHUNK: usize = 512;
-/// 当たりの安い棄却と 4 点の当てはめを並列にする最小の数。
+/// 当たりの安い棄却と 4 点のフィットを並列にする最小の数。
 const PAR_MIN_HITS: usize = 256;
 
 /// 探索の入力。
@@ -74,7 +74,7 @@ pub(crate) struct Found {
     pub matches: Vec<(usize, Vec3, f64)>,
 }
 
-/// 束 1 つの経過(trace の flushes)。
+/// バッチ 1 つの経過(trace の flushes)。
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FlushRec {
     pub newest: usize,
@@ -142,7 +142,7 @@ impl SearchState {
     }
 }
 
-/// スケール不明のときの範囲(″/px。Python の `sv_blind_scale_bounds`)。手持ちの段の quad の大きさから画像の幅で
+/// スケール不明のときの範囲(″/px。Python の `sv_blind_scale_bounds`)。手持ちのスケールの quad の大きさから画像の幅で
 /// 逆算する(下限 × 0.9、上限 × 1.1)。
 pub(crate) fn blind_scale_bounds(cat: &zahyou_index::Catalog, width: f64) -> (f64, f64) {
     let (lo_fov, hi_fov) = cat.coverage_arcmin().unwrap_or((2.0, 2000.0));
@@ -151,14 +151,14 @@ pub(crate) fn blind_scale_bounds(cat: &zahyou_index::Catalog, width: f64) -> (f6
     (crate::parts::py_max(low, 0.01), if 3600.0 < high { 3600.0 } else { high })
 }
 
-/// 照合に使う索引 1 本(Python の info の 1 行)。
+/// 照合に使うインデックス 1 本(Python の info の 1 行)。
 #[derive(Clone, Copy)]
 struct Member {
     file: usize,
     fid: usize,
 }
 
-/// 足した星の束の、quad の大きさ(3 星・4 星)ごとの照合の材料。
+/// 足した星のバッチの、quad の大きさ(3 星・4 星)ごとの照合の材料。
 struct Batch {
     dq: usize,
     quads: Vec<[usize; 4]>,
@@ -178,7 +178,7 @@ pub(crate) fn search(
     st: &mut SearchState,
 ) -> Result<Option<Found>, Abort> {
     let (w, h) = (inp.width, inp.height);
-    // 前の試行で開けなかった索引も、この探索でもう一度開いてみる
+    // 前の試行で開けなかったインデックスも、この探索でもう一度開いてみる
     store.begin_search();
     let field = Field::new(inp.xy, inp.flux, w, h, params);
     clock.check()?;
@@ -205,7 +205,7 @@ pub(crate) fn search(
         log("使えるインデックスファイルがありません");
         return Ok(None);
     }
-    // 索引ごとの AB の範囲と、系列の中の位置
+    // インデックスごとの AB の範囲と、系列の中の位置
     let tol = params.codetol;
     let mut info: Vec<(Member, f64, f64)> = Vec::new();
     for &i in &files {
@@ -293,7 +293,7 @@ pub(crate) fn search(
     Ok(None)
 }
 
-/// たまった quad の束を、選んだ索引に順に照合して検証する(Python の `_sv_flush`)。
+/// たまった quad のバッチを、選んだインデックスに順に照合して検証する(Python の `_sv_flush`)。
 #[allow(clippy::too_many_arguments)]
 fn flush(
     field: &Field,
@@ -340,9 +340,9 @@ fn flush(
             _ => groups.push((iid, vec![*m])),
         }
     }
-    // 照合は系列の順によらず同じ答えになるので、索引の数がスレッドの数に届くまで後ろの系列もまとめて並列に
-    // 照合しておく(全天の索引は 1 本ずつが別の系列なので、1 つずつだと並列にならない)。検証・当たりの数・壊れた
-    // 索引の扱いは Python と同じく系列の順に 1 つずつ行い、解けたらそこでやめる(先に照合した後ろの系列は捨てる)
+    // 照合は系列の順によらず同じ答えになるので、インデックスの数がスレッドの数に届くまで後ろの系列もまとめて並列に
+    // 照合しておく(全天のインデックスは 1 本ずつが別の系列なので、1 つずつだと並列にならない)。検証・当たりの数・壊れた
+    // インデックスの扱いは Python と同じく系列の順に 1 つずつ行い、解けたらそこでやめる(先に照合した後ろの系列は捨てる)
     let lookahead = rayon::current_num_threads().max(1);
     let mut gi = 0;
     while gi < groups.len() {
@@ -372,7 +372,7 @@ fn flush(
             }
             let mut first = pre.remove(&g);
             let sol = loop {
-                // 中身の壊れた索引は、そのファイルを外して系列の照合と検証をやり直す(ほかの索引で解ける画像まで
+                // 中身の壊れたインデックスは、そのファイルを外して系列の照合と検証をやり直す(ほかのインデックスで解ける画像まで
                 // 解けなくならないように)。外したはずのファイルがまた出たら、系列ごとこの探索から外す
                 let alive: Vec<Member> = ms.iter().copied().filter(|m| !store.is_skipped(m.file)).collect();
                 if alive.is_empty() {
@@ -424,10 +424,10 @@ fn round4(v: f64) -> f64 {
     crate::pyfmt::py_round(v, 4)
 }
 
-/// 索引 1 本の照合の結果(仮説(newpoint の順)と当たりの数)。
+/// インデックス 1 本の照合の結果(仮説(newpoint の順)と当たりの数)。
 type MatchResult = Result<(Vec<Hyp>, u64), Abort>;
 
-/// 索引を照合する(索引ごとに並列。結果は members の順)。その quad の大きさ(3 星・4 星)の束が無い索引は当たりなし。
+/// インデックスを照合する(インデックスごとに並列。結果は members の順)。その quad の大きさ(3 星・4 星)のバッチが無いインデックスは当たりなし。
 #[allow(clippy::too_many_arguments)]
 fn match_members(
     field: &Field,
@@ -452,7 +452,7 @@ fn match_members(
         .collect()
 }
 
-/// 系列 1 つぶんの残り: 照合の結果を索引の順に数え、仮説をまとめて検証する(Python の `_sv_flush_series`)。
+/// 系列 1 つぶんの残り: 照合の結果をインデックスの順に数え、仮説をまとめて検証する(Python の `_sv_flush_series`)。
 #[allow(clippy::too_many_arguments)]
 fn finish_series(
     field: &Field,
@@ -467,7 +467,7 @@ fn finish_series(
     fl: usize,
 ) -> Result<Option<Found>, Abort> {
     let sc = SeriesCtx::new(store, iid, members[0].file);
-    // 当たりの数は索引の順に足す。Python は 1 本ずつ照合するので、問題が起きた索引より前の分だけが数えられる
+    // 当たりの数はインデックスの順に足す。Python は 1 本ずつ照合するので、問題が起きたインデックスより前の分だけが数えられる
     let mut per_file: Vec<Vec<Hyp>> = Vec::with_capacity(results.len());
     for r in results {
         match r {
@@ -479,9 +479,9 @@ fn finish_series(
             Err(e) => return Err(clock.prefer_cancel(e)),
         }
     }
-    // 同じ系列のタイルの仮説をつなぎ、newpoint の順(quad の行の順。同じ行は索引の順)に並べる。
-    // 仮説(約 270 バイト)を 1 本につないで並べ替えると、写しと並べ替えの作業領域が大きい(しかも並列の外)ので、
-    // 参照(8 バイト)を並べる。参照の列は今までの連結と同じ順(索引の順、その中は索引の中の順)に作り、同じ鍵 row で
+    // 同じ系列のタイルの仮説をつなぎ、newpoint の順(quad の行の順。同じ行はインデックスの順)に並べる。
+    // 仮説(約 270 バイト)を 1 本につないで並べ替えると、コピーと並べ替えの作業領域が大きい(しかも並列の外)ので、
+    // 参照(8 バイト)を並べる。参照の列は今までの連結と同じ順(インデックスの順、その中はインデックスの中の順)に作り、同じキー row で
     // 安定に並べるので、並びは仮説そのものを並べたときと完全に同じ
     let mut all: Vec<&Hyp> = per_file.iter().flatten().collect();
     if all.is_empty() {
@@ -493,7 +493,7 @@ fn finish_series(
 
 // ------------------------------------------------------------------ 照合 ---
 
-/// 当たり 1 つを安く捨てるか、4 点で当てはめた仮説にする。
+/// 当たり 1 つを安く捨てるか、4 点でフィットした仮説にする。
 struct Cand {
     row: usize,
     qid: u32,
@@ -503,7 +503,7 @@ struct Cand {
     mirror: bool,
 }
 
-/// quad の束を索引 1 本に照合し、安く捨ててから 4 点で当てはめた仮説を返す(Python の `_sv_match_file`)。
+/// quad のバッチをインデックス 1 本に照合し、安く捨ててから 4 点でフィットした仮説を返す(Python の `_sv_match_file`)。
 /// 戻り値は (仮説(newpoint の順), 当たりの数)。
 #[allow(clippy::too_many_arguments)]
 fn match_file(
@@ -578,13 +578,13 @@ fn match_file(
         let mut s = [[0.0f64; 3]; 4];
         s[0] = data.star_xyz(stars[0]).ok_or_else(corrupt)?;
         s[1] = data.star_xyz(stars[1]).ok_or_else(corrupt)?;
-        // 安い棄却 1: 索引の AB の角距離 ÷ 画像の |AB| が [s_lo(1 − tol), s_hi(1 + tol)] の外
+        // 安い棄却 1: インデックスの AB の角距離 ÷ 画像の |AB| が [s_lo(1 − tol), s_hi(1 + tol)] の外
         let th = angle_between(s[0], s[1]) * ARCSEC_PER_RAD;
         let s_impl = th / b.ab[row];
         if !(s_impl >= s_lo * (1.0 - tol) && s_impl <= s_hi * (1.0 + tol)) {
             return Ok(None);
         }
-        // 安い棄却 2: 索引の quad の中心がヒントの円(半径 + 画像の対角の半分)の外
+        // 安い棄却 2: インデックスの quad の中心がヒントの円(半径 + 画像の対角の半分)の外
         if let Some((hc, hr)) = hint_reach {
             let qc = normalize3([s[0][0] + s[1][0], s[0][1] + s[1][1], s[0][2] + s[1][2]]);
             let reach = hr + field.half_diag * s_impl * 1.05 / ARCSEC_PER_RAD;
@@ -622,7 +622,7 @@ fn match_file(
     } else {
         hits.iter().map(one).collect::<Result<Vec<_>, _>>()?
     };
-    // 同じ組(画像の quad の行・索引の quad・星の対応)は 1 つにまとめ、newpoint の順(quad の行の順)に並べる
+    // 同じ組(画像の quad の行・インデックスの quad・星の対応)は 1 つにまとめ、newpoint の順(quad の行の順)に並べる
     let mut seen: HashSet<(usize, u32, [usize; 4])> = HashSet::new();
     let mut keep: Vec<Cand> = Vec::new();
     for c in cands.into_iter().flatten() {
@@ -666,7 +666,7 @@ fn match_file(
 // ------------------------------------------------------------------ 検証して選ぶ ---
 
 /// 仮説を newpoint の順に VERIFY_STEP 個ずつ検証し、solve 以上の最初の仮説(なければ tune-up で上がった最初のもの)を
-/// 改良して返す(Python の `_sv_verify_and_pick`)。区切りの中は並列に検証し、選ぶのは順に。
+/// 改良して返す(Python の `_sv_verify_and_pick`)。バッチの中は並列に検証し、選ぶのは順に。
 /// 改良した後の対数オッズが accept_logodds(試した数で上げた値)に届かないもの、試した仮説が多くなってから tune-up で
 /// 上がったのに改良で一致が増えないもの(tuneup_accepted)は解にしない(設計書 3.7 節の 6)。
 #[allow(clippy::too_many_arguments)]
@@ -684,11 +684,11 @@ fn verify_and_pick(
     let tune = params.logodds_tune;
     for part in hyps.chunks(VERIFY_STEP) {
         let m = part.len();
-        // 区切りごとに全部の検証の終わりを待つので、終わりぎわに残る仕事を小さくする: 仕事は 16〜31 仮説にそろえる
+        // バッチごとに全部の検証の終わりを待つので、終わりぎわに残る仕事を小さくする: 仕事は 16〜31 仮説にそろえる
         // (with_max_len が無いと、rayon は分ける回数をスレッドの数から半分ずつ減らすので、盗まれない部分の仕事は
         // 20 スレッドで 8192 / 32 = 256 仮説、8 スレッドで 512 仮説になる)。collect は並びを保つので、
-        // 結果の順も選ぶ仮説も分け方によらない。Err は今までと同じく、並列で先に出たものを返す(種類は締め切り・中止・
-        // 壊れた索引・開けない索引で、同時に起きたときにどれになるかが決まっていないのは分け方によらず前から同じ)
+        // 結果の順も選ぶ仮説も分け方によらない。Err は今までと同じく、並列で先に出たものを返す(種類はタイムアウト・中止・
+        // 壊れたインデックス・開けないインデックスで、同時に起きたときにどれになるかが決まっていないのは分け方によらず前から同じ)
         let res: Vec<VerifyOut> = part
             .par_iter()
             .with_min_len(16)
@@ -729,7 +729,7 @@ fn verify_and_pick(
                 });
             }
         }
-        // 解とみなす値は、この区切りの終わりまでに試した仮説の数で上げる(区切りの中は同じ値。Python も同じ数え方)
+        // 解とみなす値は、このバッチの終わりまでに試した仮説の数で上げる(バッチの中は同じ値。Python も同じ数え方)
         let accept = accept_logodds(params, st.hyps);
         for (i, r) in res.iter().enumerate() {
             if !(r.best >= tune) {
@@ -748,7 +748,7 @@ fn verify_and_pick(
             }
             let (wcs, res1) = match refine(field, sc, params, h, params.tweak_order, true, clock) {
                 Err(Abort::TimeUp) => {
-                    // solve を超えた仮説があるので、締め切りを過ぎても改良は最後まで済ませる(中止の合図はそのまま見る)。
+                    // solve を超えた仮説があるので、タイムアウトの時刻を過ぎても改良は最後まで済ませる(中止のフラグはそのまま見る)。
                     // ここで止めると、解けている画像が「解けず」になる。解として返すかは、改良の後の判定(試した数で上げる値・
                     // tune-up の一致の増え)で決まるので、ログは「解が見つかった」と言い切らない
                     log("タイムアウトしましたが、solve を超えた候補があるので改良を済ませます");
@@ -761,7 +761,7 @@ fn verify_and_pick(
                 continue;
             }
             // 試した仮説が多くなってから tune-up で上がった仮説は、改良で一致が増えたときだけ解にする
-            // (同じ星への当て直しだけで上がったものは偶然)
+            // (同じ星への再フィットだけで上がったものは偶然)
             if tuned && !tuneup_accepted(params, st.hyps, r.nmatch, res1.nmatch) {
                 st.passed.add_nogain(res1.best);
                 continue;
@@ -808,9 +808,9 @@ fn spread_boxes(xy: &[[f64; 2]], w: f64, h: f64) -> usize {
 
 /// 仮説 1 個を改良する(Python の `_sv_refine`。設計書 3.8 節)。戻り値 (WCS, 最後の検証)。
 ///
-/// 一致した組を今の WCS で投影し直した参照星との最近傍で取り直し、重みつき最小二乗で TAN を当て直す。これを
+/// 一致した組を今の WCS で投影し直した参照星との最近傍で取り直し、重みつき最小二乗で TAN を再フィットする。これを
 /// TWEAK_STEPS 回、σ の広がりを γ = 0.7^k で弱めながら繰り返す(CRPIX は画像の中心、接点の初めは今の WCS で
-/// 画像の中心が写る向き)。final なら最後の当て直しは quad の星を除いた一致(6 個以上あれば)で行う。
+/// 画像の中心が写る向き)。final なら最後の再フィットは quad の星を除いた一致(6 個以上あれば)で行う。
 /// order ≥ 2 で SIP を付けるのは、組が 3 × 未知数以上・画像の 3 × 3 の箱の 7 つ以上・F 検定(上側 1 %)で有意なときだけ。
 /// 最後に γ = 1 で検証し直す。
 pub(crate) fn refine(
@@ -916,10 +916,10 @@ pub(crate) fn refine(
     Ok((wcs, res))
 }
 
-/// 改良の当てはめに使う組(画像の点・星・重み)。
+/// 改良のフィットに使う組(画像の点・星・重み)。
 type FitPairs = (Vec<[f64; 2]>, Vec<Vec3>, Vec<f64>);
 
-/// 改良の当てはめに使う組: 一致した星(重み = 1 つの一致の対数オッズから)と quad の星(重み 1)。
+/// 改良のフィットに使う組: 一致した星(重み = 1 つの一致の対数オッズから)と quad の星(重み 1)。
 fn fit_pairs(field: &Field, res: &VerifyOut, h: &Hyp, quad_xyz: &[Vec3; 4]) -> FitPairs {
     let mut fxy = Vec::with_capacity(res.matches.len() + 4);
     let mut sxyz = Vec::with_capacity(res.matches.len() + 4);
@@ -939,7 +939,7 @@ fn fit_pairs(field: &Field, res: &VerifyOut, h: &Hyp, quad_xyz: &[Vec3; 4]) -> F
 
 // ------------------------------------------------------------------ ヒントのタイル ---
 
-/// ヒントがあるとき、タイルの索引を「その段の quad が照合で残りうるタイル」に絞る(Python の `_sv_hint_tiles`)。
+/// ヒントがあるとき、タイルに分かれたインデックスを「そのスケールの quad が照合で残りうるタイル」に絞る(Python の `_sv_hint_tiles`)。
 ///
 /// 照合で残る quad の画素スケールは s_impl ≤ min(s_hi·(1 + codetol), SCALE_U ÷ (quad_min_frac × 短辺))で、
 /// 残る quad の星 A はヒントから R = ヒントの半径 + 対角の半分 × s_max × 1.05 + SCALE_U/2 以内にある。タイルの中に

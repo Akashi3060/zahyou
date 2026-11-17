@@ -1,22 +1,22 @@
-//! 深い検出(Python の zahyou_core.detect_sources_deep、2026-10-16 版)。解析エンジンに渡す星を、
-//! 図に出す星(detect_sources)より暗いところまで拾う。
+//! ディープ検出(Python の zahyou_core.detect_sources_deep、2026-10-16 版)。解析エンジンに渡す星を、
+//! 図に出す星(detect_sources)より暗いところまで検出する。
 //!
 //!   1. σ=1 でぼかした画像の明るい星の半値の面積から、星像の幅 σ_psf を測る
-//!   2. 画像を s = 1.25 σ_psf(測れなければ 1.5、1〜8 に収める)のガウスでぼかし、升ごとの中央値で背景を引く。
-//!      雑音は升ごとの MAD で場所ごとに測る
+//!   2. 画像を s = 1.25 σ_psf(測れなければ 1.5、1〜8 に収める)のガウスでぼかし、ブロックごとの中央値で背景を引く。
+//!      雑音はブロックごとの MAD で場所ごとに測る
 //!   3. 局所の極大のうち、その場所の雑音の u 倍を超えるものを候補にする(u は雑音だけの画像で偽の極大が
 //!      画像全体で target_false 個ほどになる値)
 //!   4. 明るい順に見て、谷が浅いもの(同じ星の肩)・伸びたもの・鋭すぎるもの(ホットピクセル)・
 //!      まわりの輪より十分高くないものを捨てる
-//!   5. 位置はぼかした像の 3×3 に(対数の)放物線を当てて小数まで出す
+//!   5. 位置はぼかした像の 3×3 に(対数の)放物線をフィットして小数まで出す
 //!
-//! 値は Python 版と同じになるように、計算の順序と途中の型まで写してある:
+//! 値は Python 版と同じになるように、計算の順序と途中の型までそろえてある:
 //! - numpy 2 の NEP 50: float32 の配列・スカラーと Python の float の比較・積は、float を float32 に丸めて float32 で行う
 //!   (`sm > u * nmap` は `f32(u) * nmap` を float32 で計算して比べる)
 //! - 中央値は float32 の中央 2 個を float32 で足して 2 で割る(np.median・np.nanmedian・np.ma.median で同じ値)
 //! - Python の `max(a, b)` / `min(a, b)` は「後ろが厳密に大きい(小さい)ときだけ後ろ」(NaN の扱いが f64::max と違う)
 //! - `x ** 2`(Python の float)は C の pow なので `powf(2.0)` で計算する(x * x と最下位ビットが違うことがある)
-//! - exp・ln・cos・sin は Python / numpy と同じ値になることを確かめてある(この機械の UCRT)
+//! - exp・ln・cos・sin は Python / numpy と同じ値になることを確かめてある(このマシンの UCRT)
 //!
 //! 同じ値の候補(並べ替えの同点)は、元の並び(行優先)の順に見る(安定な並べ替え)。基準実装の Python も
 //! 2026-10-16 から `np.argsort(..., kind="stable")` で同じ順にした(それまでは安定でなく、飽和して頂が平らな星で
@@ -63,16 +63,16 @@ fn py_round2(x: f64) -> f64 {
     format!("{x:.2}").parse::<f64>().unwrap_or(x)
 }
 
-/// 升ごとに求める値。
+/// ブロックごとに求める値。
 #[derive(Clone, Copy)]
 enum BlockFn {
     /// 有効な画素の中央値(Python の `_median_last`)
     Median,
-    /// MAD から出した標準偏差 1.4826 × MAD。有効な画素が升の 1/4 未満なら NaN(`_mad_sigma_last`)
+    /// MAD から出した標準偏差 1.4826 × MAD。有効な画素がブロックの 1/4 未満なら NaN(`_mad_sigma_last`)
     MadSigma,
 }
 
-/// 鍵(f32_key)の並びの中央値。`np.median`(float32)と同じ値: 奇数個なら中央の値、偶数個なら中央 2 個を
+/// キー(f32_key)の並びの中央値。`np.median`(float32)と同じ値: 奇数個なら中央の値、偶数個なら中央 2 個を
 /// float32 で足して 2 で割る。空なら NaN。keys の並びは変わる。
 fn keys_median(keys: &mut [u32]) -> f32 {
     let n = keys.len();
@@ -91,7 +91,7 @@ fn keys_median(keys: &mut [u32]) -> f32 {
     }
 }
 
-/// `_block_map` の升の値(3×3 の中央値でならしたもの)と、引き伸ばしの寸法。
+/// `_block_map` のブロックの値(3×3 の中央値でならしたもの)と、引き伸ばしの寸法。
 struct BlockGrid {
     coarse: Vec<f32>,
     by: usize,
@@ -101,10 +101,10 @@ struct BlockGrid {
     bsz: usize,
 }
 
-/// Python の `_block_map` の前半: bsz 画素の升ごとに `keep == want` の画素の値を出し、値の無い升を
-/// 有限な升の中央値で埋め、3×3 の中央値でならす。升が縦横 3 つ未満、または有限な升が 1 つも無ければ None。
+/// Python の `_block_map` の前半: bsz 画素のブロックごとに `keep == want` の画素の値を出し、値の無いブロックを
+/// 有限なブロックの中央値で埋め、3×3 の中央値でならす。ブロックが縦横 3 つ未満、または有限なブロックが 1 つも無ければ None。
 /// Python はマスクの画素を NaN にして nanmedian を取るので、ここでも NaN の画素は数えない
-/// (MAD の「有効な画素が升の 1/4」は `np.isfinite` の数なので inf も数えない)。
+/// (MAD の「有効な画素がブロックの 1/4」は `np.isfinite` の数なので inf も数えない)。
 fn block_grid(
     img: &[f32],
     keep: &[bool],
@@ -171,7 +171,7 @@ fn block_grid(
 }
 
 impl BlockGrid {
-    /// Python の `_block_map` の後半: 升の中心を節点に双一次で引き伸ばす(外側は端の値)。値は
+    /// Python の `_block_map` の後半: ブロックの中心を節点に双一次で引き伸ばす(外側は端の値)。値は
     /// rows = coarse[iy] (1 - wy) + coarse[iy + 1] wy(float64)、out = rows[ix] (1 - wx) + rows[ix + 1] wx を float32 に。
     /// `subtract` なら out の値を img から引き(`img - back`)、そうでなければ img に書く。
     fn expand(&self, img: &mut [f32], (ny, nx): (usize, usize), subtract: bool) {
@@ -201,7 +201,7 @@ impl BlockGrid {
     }
 }
 
-/// `img = img - _block_map(img, keep == want, bsz, _median_last)`。升が足りなければ
+/// `img = img - _block_map(img, keep == want, bsz, _median_last)`。ブロックが足りなければ
 /// `img - float(np.median(img[keep == want]))`(Python の `back if back is not None else ...`)。
 fn subtract_background(img: &mut [f32], keep: &[bool], want: bool, dims: (usize, usize), bsz: usize) {
     match block_grid(img, keep, want, dims, bsz, BlockFn::Median) {
@@ -233,10 +233,10 @@ fn interp_axis(n: usize, o: usize, bsz: usize, nb: usize) -> Vec<(usize, f64)> {
         .collect()
 }
 
-/// 場所ごとの雑音の地図: 一辺 nbox の升ごとの MAD の σ(block_grid の MadSigma)を引き伸ばし、0.7 ns を下限にする
-/// (星で埋まった升で雑音を低く見積もらない)。升が足りなければ全面 ns。
-/// 升の地図があるときは expand が全画素を上書きするので、確保は 0 埋め(OS のゼロページで、直列に埋めない)でよい。
-/// 前の版は全面を ns で埋めてから上書きしていたが、上書きされる値は同じ。
+/// 場所ごとの雑音のマップ: 一辺 nbox のブロックごとの MAD の σ(block_grid の MadSigma)を引き伸ばし、0.7 ns を下限にする
+/// (星で埋まったブロックで雑音を低く見積もらない)。ブロックが足りなければ全面 ns。
+/// ブロックのマップがあるときは expand が全画素を上書きするので、確保は 0 埋め(OS のゼロページで、直列に埋めない)でよい。
+/// 前のバージョンは全面を ns で埋めてから上書きしていたが、上書きされる値は同じ。
 fn noise_map(sm: &[f32], bad: &[bool], dims: (usize, usize), nbox: usize, ns: f64) -> Vec<f32> {
     let mut nmap = vec![0.0f32; dims.0 * dims.1];
     match block_grid(sm, bad, false, dims, nbox, BlockFn::MadSigma) {
@@ -601,7 +601,7 @@ fn line_min(sm: &[f32], ny: usize, nx: usize, p0: (usize, usize), p1: (usize, us
     lo
 }
 
-/// 深い検出の本体(Python の `detect_sources_deep(sub, mask, sigma, max_sources, target_false, min_u, info)`)。
+/// ディープ検出の本体(Python の `detect_sources_deep(sub, mask, sigma, max_sources, target_false, min_u, info)`)。
 /// 戻り値は (明るい順の星, しきい値 u, 測った値)。星が探せない大きさ・マスクのときは ([], None, None)。
 pub fn detect_deep_raw(
     sub: &Image2D,
@@ -621,7 +621,7 @@ pub fn detect_deep_raw(
         return (Vec::new(), None, None);
     }
     let dims = (ny, nx);
-    // マスクの画素を 0 にした画像。マスクが空なら sub そのもの(写さない。`if m {0} else {s}` は m が全部偽なら s のビットのまま)
+    // マスクの画素を 0 にした画像。マスクが空なら sub そのもの(コピーしない。`if m {0} else {s}` は m が全部偽なら s のビットのまま)
     let work: Cow<[f32]> = if n_valid == npx {
         Cow::Borrowed(&sub.data)
     } else {
@@ -647,7 +647,7 @@ pub fn detect_deep_raw(
     let bsz = ((8.0 * s).round_ties_even() as usize).max(16);
     subtract_background(&mut sm, mask, false, dims, bsz);
     // マスクの縁はぼかしでマスクの 0 が混ざって沈むので、ぼかしの幅だけ広げて除く。
-    // マスクが空なら mask そのもの(全部偽で、前の版の `vec![false; npx]` と同じ中身)
+    // マスクが空なら mask そのもの(全部偽で、前のバージョンの `vec![false; npx]` と同じ中身)
     let bad: Cow<[bool]> = if n_valid == npx {
         Cow::Borrowed(mask)
     } else {
@@ -713,7 +713,7 @@ pub fn detect_deep_raw(
     if n > 0 {
         let r_max = reach(vals[0]);
         let r2 = r_max * r_max; // scipy の cKDTree は距離の 2 乗を r² と比べる
-        // 残した星を一辺 cell 画素の升目に入れ、半径 r_max の中にかかる升だけを見る。どの星で肩と分かっても
+        // 残した星を一辺 cell 画素のセルに入れ、半径 r_max の中にかかるセルだけを見る。どの星で肩と分かっても
         // 結果は同じなので、見る順は Python(cKDTree)と違ってよい
         let rr = (r_max.ceil() as usize).min(ny.max(nx));
         let cell = rr.max(32);
@@ -829,7 +829,7 @@ pub fn detect_deep_raw(
     (out, Some(u), Some(info))
 }
 
-/// 深い検出(`detect_sources_deep(prep.sub, prep.mask, prep.sigma, ...)`)。戻り値は (星, しきい値 u, 測った値)。
+/// ディープ検出(`detect_sources_deep(prep.sub, prep.mask, prep.sigma, ...)`)。戻り値は (星, しきい値 u, 測った値)。
 pub fn detect_deep(prep: &Prep, opts: &DeepOpts) -> (Vec<Source>, Option<f64>, Option<DeepInfo>) {
     detect_deep_raw(&prep.sub, &prep.mask, prep.sigma, opts)
 }
@@ -927,8 +927,8 @@ mod tests {
 
     #[test]
     fn noise_map_matches_reference() {
-        // 2026-10-24 までの雑音の地図(全面を ns で埋めてから升の地図で上書きし、下限をかける)とビット単位で同じ。
-        // 升の地図が作れる大きさ・作れない大きさ(升が 3 つ未満)・マスク入り・ns が NaN のとき
+        // 2026-10-24 までの雑音のマップ(全面を ns で埋めてからブロックのマップで上書きし、下限をかける)とビット単位で同じ。
+        // ブロックのマップが作れる大きさ・作れない大きさ(ブロックが 3 つ未満)・マスク入り・ns が NaN のとき
         fn noise_map_ref(sm: &[f32], bad: &[bool], dims: (usize, usize), nbox: usize, ns: f64) -> Vec<f32> {
             let mut nmap = vec![ns as f32; dims.0 * dims.1];
             if let Some(g) = block_grid(sm, bad, false, dims, nbox, BlockFn::MadSigma) {

@@ -1,8 +1,8 @@
 //! 合成星野(rs/testdata/solver_synth.json。dev/solver_synth.py が種で作った正解つきの星野)を解き、
-//! (1) Python 基準実装の sv_solve と同じ答えか(同じ索引・対数オッズ 1e-6・一致数・最終の WCS 1e-6 px・
+//! (1) Python 基準実装の sv_solve と同じ答えか(同じインデックス・対数オッズ 1e-6・一致数・最終の WCS 1e-6 px・
 //!     試した quad の数・検証した仮説の数)、(2) 正解に対して設計書 8 節の基準(中心 2″ か 0.5 px・スケール 0.2 %・
-//!     回転 0.1°・鏡像)を満たすか、(3) 途中の値(trace)が Python と同じか(解いた quad の 4 点、使った索引、
-//!     束ごとの quad・当たり・仮説の数、最初の 24 個の仮説の 4 点の WCS と対数オッズ、解いた仮説の順番)を確かめる。
+//!     回転 0.1°・鏡像)を満たすか、(3) 途中の値(trace)が Python と同じか(解いた quad の 4 点、使ったインデックス、
+//!     バッチごとの quad・当たり・仮説の数、最初の 24 個の仮説の 4 点の WCS と対数オッズ、解いた仮説の順番)を確かめる。
 //!     (3) は解法の crate が trace を出せるときだけ(出せなければ「----」と出して飛ばす)。
 //!
 //! ```text
@@ -11,8 +11,8 @@
 //! ZAHYOU_SYNTH_CASES=ra0,few20 cargo test -p zahyou-solver --test synth -- --ignored --nocapture   名前で選ぶ
 //! ```
 //!
-//! 星図データ(C:\AstrometryData。ZAHYOU_INDEX_DIR)か基準値の JSON が無ければ SKIP と出して通す。
-//! Python が締め切りで止まった場合("status": "deadline")は Python との突き合わせをせず、正解との比較だけをする。
+//! インデックスファイル(C:\AstrometryData。ZAHYOU_INDEX_DIR)か基準値の JSON が無ければ SKIP と出して通す。
+//! Python がタイムアウトで止まった場合("status": "deadline")は Python との突き合わせをせず、正解との比較だけをする。
 //! 乱数の星野(解けてはいけない)は tests/negative.rs。
 
 mod common;
@@ -68,7 +68,7 @@ fn run_case(c: &Value) -> Outcome {
     let (res, dt, trace) = solve_traced(&req, cat, &Params::default(), solve_deadline_s(), &buf);
     let py = &c["python"];
     let status = py["status"].as_str().unwrap_or("");
-    // (3) 途中の値(Python が締め切りで止まったものは比べない)
+    // (3) 途中の値(Python がタイムアウトで止まったものは比べない)
     if matches!(status, "solved" | "unsolved") {
         out.trace = trace.map(|t| {
             let d = trace_diff(&t, py);

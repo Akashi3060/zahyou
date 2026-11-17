@@ -1,6 +1,6 @@
 //! FITS を自前で読む(Python 版の `_load_fits`・`_pick_fits_hdu`。astropy の `fits.open` と同じ意味)。
 //!
-//! - ヘッダーは 2880 バイトの区切りに 80 文字のカードが 36 枚。END のカードで終わる。
+//! - ヘッダーは 2880 バイトのブロックに 80 文字のカードが 36 枚。END のカードで終わる。
 //! - 値の読み方は astropy と同じ: 文字列('' は ' 1 文字、後ろの空白は捨てる)・T/F・整数・実数(D 指数も)、
 //!   HIERARCH(ESO 式の長いキー)、CONTINUE(& で続く長い文字列)。値の無いカードは `CardValue::None`。
 //! - データの大きさは |BITPIX|/8 × GCOUNT × (PCOUNT + NAXIS1 × … × NAXISn)。次の HDU は 2880 の倍数に切り上げた先。
@@ -21,7 +21,7 @@ use crate::tile;
 
 pub(crate) const BLOCK: u64 = 2880;
 const CARD_LEN: usize = 80;
-/// ヘッダーがこれより長ければ壊れているとみなす(36 枚 × 1 万区切り = 36 万枚)
+/// ヘッダーがこれより長ければ壊れているとみなす(36 枚 × 1 万ブロック = 36 万枚)
 const MAX_HEADER_BLOCKS: u64 = 10_000;
 
 /// バイトの出どころ(ファイルか、展開済みのメモリ)。
@@ -549,12 +549,12 @@ impl ArraySource for FileArray<'_> {
 
     fn read_f32(&mut self, start: usize, out: &mut [f32]) -> Result<(), String> {
         let (bp, sc) = (self.bitpix, self.sc.clone());
-        // よくある型は、画素ごとの (BITPIX, 型の規則) の分岐を外へ出した専用の閉包にする。
-        // 式は下の一般の閉包(be_int / be_float → Scaling::int_f32 / float_f32)をその型について展開したものと同じ:
+        // よくある型は、画素ごとの (BITPIX, 型の規則) の分岐を外へ出した専用のクロージャにする。
+        // 式は下の一般のクロージャ(be_int / be_float → Scaling::int_f32 / float_f32)をその型について展開したものと同じ:
         // - 整数 Raw: `raw as f32`(raw は be_int の i64)
         // - 16・32 bit の PseudoUnsigned: `Scaling::unsigned` の `(raw + 2^(bits-1)) as u64` を f32 に
-        // - float32 Raw: 一般の閉包では be_float の `f32 as f64` と float_f32 の `as f32` の往復(下の注)
-        // - float64 Raw: `f64 as f32`(CPU の変換命令。一般の閉包と同じ)
+        // - float32 Raw: 一般のクロージャでは be_float の `f32 as f64` と float_f32 の `as f32` の往復(下の注)
+        // - float64 Raw: `f64 as f32`(CPU の変換命令。一般のクロージャと同じ)
         match (bp, sc.kind) {
             (8, ScaleKind::Raw) => self.read_conv(start, out, |r| r[0] as i64 as f32),
             (16, ScaleKind::Raw) => self.read_conv(start, out, |r| i16::from_be_bytes([r[0], r[1]]) as i64 as f32),
@@ -569,8 +569,8 @@ impl ArraySource for FileArray<'_> {
             }),
             // 以前は f32 → f64 → f32 の往復を CPU の変換命令でしていた(`&dyn Fn` の中で型が実行時に決まるので、
             // 往復が省かれなかった)。往復は NaN 以外と静かな NaN ではビットを変えず、信号の NaN は「静か」のビット
-            // (0x0040_0000)を立てる(2026-10 に以前の版の release で確かめた: 7f800001 → 7fc00001)。
-            // 型が決まった閉包では、コンパイラーが往復を省いてよい(Rust の約束、RFC 3514)ので信号の NaN が
+            // (0x0040_0000)を立てる(2026-10 に以前のバージョンの release で確かめた: 7f800001 → 7fc00001)。
+            // 型が決まったクロージャでは、コンパイラーが往復を省いてよい(Rust の仕様、RFC 3514)ので信号の NaN が
             // そのまま残る。同じビットにするため、往復の結果を整数で明示的に作る
             (-32, ScaleKind::Raw) => self.read_conv(start, out, |r| {
                 let b = u32::from_be_bytes([r[0], r[1], r[2], r[3]]);
@@ -735,7 +735,7 @@ mod tests {
     }
 
     /// 以前の読み方(画素ごとに `&dyn Fn`、呼ぶたびに作業領域を作る)。read_conv を静的な呼び出しと
-    /// 型ごとの専用の閉包にしたので、値がビット単位で同じかをこれと比べる。
+    /// 型ごとの専用のクロージャにしたので、値がビット単位で同じかをこれと比べる。
     fn old_read_conv<T: Copy + Send + Default>(
         a: &mut FileArray,
         start: usize,
@@ -818,7 +818,7 @@ mod tests {
             [0, 0x8000_0000, 0x7fc0_0000, 0x7f80_0001, 0x7f80_0000, 0xff80_0000, 1, 0x7f7f_ffff, 0xffc0_0001];
         for (k, &(bp, bscale, bzero, blank)) in cases.iter().enumerate() {
             let bpp = (bp.unsigned_abs() / 8) as usize;
-            // 区切り(READ_CHUNK)をまたぐ大きさと、半端な大きさ
+            // READ_CHUNK の境目をまたぐ大きさと、半端な大きさ
             for &n in &[1000usize, READ_CHUNK + 777] {
                 let mut bytes = rand_bytes(n * bpp, 0x9E37_79B9_7F4A_7C15 ^ (k as u64 * 1000 + n as u64));
                 if bp == -32 {
@@ -863,9 +863,9 @@ mod tests {
 
     #[test]
     fn fits_interleaved_color_blocks() {
-        // FITS の (H,W,3)(NAXIS1 = 3)を、区切りごとに作業領域を使い回して読む。全体を読んでから合成した値と同じか
+        // FITS の (H,W,3)(NAXIS1 = 3)を、ブロックごとに作業領域を使い回して読む。全体を読んでから合成した値と同じか
         use crate::array::{LUM_BLOCK, lum_weights, luminance_interleaved};
-        let (h, w, ch) = (700usize, 800usize, 3usize); // 56 万画素 > LUM_BLOCK(区切りが 2 つ、2 つ目は端数)
+        let (h, w, ch) = (700usize, 800usize, 3usize); // 56 万画素 > LUM_BLOCK(ブロックが 2 つ、2 つ目は端数)
         assert!(h * w > LUM_BLOCK);
         for (k, &(bp, bscale, bzero)) in
             [(-32i32, 1.0f64, 0.0f64), (16, 1.0, 32768.0), (-64, 1.0, 0.0)].iter().enumerate()

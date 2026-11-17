@@ -124,7 +124,7 @@ fn layout_check_matches_python() {
 }
 
 fn b64(s: &str) -> Vec<u8> {
-    // 標準の base64(試験の中だけで使う小さな復号)
+    // 標準の base64(テストの中だけで使う小さなデコーダー)
     let mut map = [255u8; 256];
     for (i, c) in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".iter().enumerate() {
         map[*c as usize] = i as u8;

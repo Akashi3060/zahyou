@@ -1,14 +1,14 @@
-//! zahyou-solver の試験の共通部品: 基準値(rs/testdata/solver_*.json)と正解(dev/solver_truth.json)を読む、
-//! 星図データの目録(系列を絞った写しも)、物差し(Python の sv_synth_measure・sv_synth_compare)、
-//! WCS の差(画素)、画像の置き場所、SKIP の出し方、重い試験を 1 本ずつ流す鍵。
+//! zahyou-solver のテストの共通部品: 基準値(rs/testdata/solver_*.json)と正解(dev/solver_truth.json)を読む、
+//! インデックスファイルの目録(系列を絞ったものも)、測定と比較(Python の sv_synth_measure・sv_synth_compare)、
+//! WCS の差(画素)、画像の置き場所、SKIP の出し方、重いテストを 1 本ずつ流すロック。
 //!
 //! 置き場所は環境変数で変えられる:
-//!   ZAHYOU_INDEX_DIR     星図データ(既定 C:\AstrometryData)
+//!   ZAHYOU_INDEX_DIR     インデックスファイル(既定 C:\AstrometryData)
 //!   ZAHYOU_TESTDATA      基準値の JSON(既定 rs/testdata)
 //!   ZAHYOU_TEST_IMAGES   $ZAHYOU_TEST_IMAGES/ で始まる画像のパスの基点(既定はホームフォルダー)
 //!   ZAHYOU_PY_REPO       リポジトリからの相対の画像が zahyou-rs に無いとき(dev/tcase・dev/realcase は
 //!                        .gitignore)に見る Python 版のリポジトリ(既定 ~/Documents/GitHub/zahyou)
-//!   ZAHYOU_SOLVER_DEADLINE  解ける場合の 1 回の締め切り [秒](既定 120)
+//!   ZAHYOU_SOLVER_DEADLINE  解ける場合の 1 回のタイムアウト [秒](既定 120)
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
@@ -48,12 +48,12 @@ pub fn py_repo_dir() -> PathBuf {
         .unwrap_or_else(|| home_dir().join("Documents").join("GitHub").join("zahyou"))
 }
 
-/// 解ける場合の締め切り [秒]。
+/// 解ける場合のタイムアウト [秒]。
 pub fn solve_deadline_s() -> f64 {
     std::env::var("ZAHYOU_SOLVER_DEADLINE").ok().and_then(|s| s.parse().ok()).unwrap_or(120.0)
 }
 
-/// SKIP を出す(試験は通す)。
+/// SKIP を出す(テストは通す)。
 pub fn skip(name: &str, why: &str) {
     eprintln!("SKIP {name}: {why}");
 }
@@ -72,8 +72,8 @@ pub fn load_truth() -> Option<Value> {
     Some(serde_json::from_str(&s).expect("solver_truth.json"))
 }
 
-/// "$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を base からの相対で実際のパスに。`Downloads/…` がそこに無ければ、同じ並びの控え
-/// (作者の PC の `Documents/claude/zahyou/testdata/images/` の下。Downloads を整理するので写してある。2026-10-29)も見る
+/// "$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を base からの相対で実際のパスに。`Downloads/…` がそこに無ければ、同じ並びのコピー
+/// (作者の PC の `Documents/claude/zahyou/testdata/images/` の下。Downloads を整理するのでコピーしてある。2026-10-29)も見る
 /// (dev/test_solver_real.py の images_path と同じ決まり)。
 fn images_path(base: PathBuf, rest: &str) -> PathBuf {
     let p = rest.split('/').fold(base.clone(), |b, s| b.join(s));
@@ -107,12 +107,12 @@ pub fn sha256_file(p: &Path) -> Option<String> {
     Some(Sha256::digest(&b).iter().map(|x| format!("{x:02x}")).collect())
 }
 
-// ------------------------------------------------------------------ 星図データ ---
+// ------------------------------------------------------------------ インデックスファイル ---
 
 static CATALOG: OnceLock<Option<Arc<Catalog>>> = OnceLock::new();
 
-/// 星図データの目録(1 つの試験の実行ファイルの中で使い回す)。無ければ None。
-/// Windows 以外でも None(zahyou-index が索引の表を開くのは Windows だけなので、星図データを使う試験をしない)。
+/// インデックスファイルの目録(1 つのテストの実行ファイルの中で使い回す)。無ければ None。
+/// Windows 以外でも None(zahyou-index がインデックスの表を開くのは Windows だけなので、インデックスファイルを使うテストをしない)。
 pub fn catalog() -> Option<Arc<Catalog>> {
     CATALOG
         .get_or_init(|| {
@@ -145,7 +145,7 @@ pub fn restricted_catalog(ids: &[u32]) -> Catalog {
     c
 }
 
-/// 索引のファイル 1 本のパス(無ければ None。Windows 以外でも None。[`catalog`] と同じ理由)。
+/// インデックスファイル 1 本のパス(無ければ None。Windows 以外でも None。[`catalog`] と同じ理由)。
 pub fn index_path(tag: &str) -> Option<PathBuf> {
     if !cfg!(windows) {
         return None;
@@ -154,12 +154,12 @@ pub fn index_path(tag: &str) -> Option<PathBuf> {
     p.is_file().then_some(p)
 }
 
-// ------------------------------------------------------------------ 重い試験を 1 本ずつ ---
+// ------------------------------------------------------------------ 重いテストを 1 本ずつ ---
 
 static HEAVY: Mutex<()> = Mutex::new(());
 
-/// 時間を測る試験・重い試験はこれを取ってから走らせる(同じ実行ファイルの中で並列に走ると、締め切りの超過や
-/// 速さの値が他の試験の負荷で狂うため)。前の試験が panic して毒になっていても取る。
+/// 時間を測るテスト・重いテストはこれを取ってから走らせる(同じ実行ファイルの中で並列に走ると、タイムアウトの超過や
+/// 速さの値が他のテストの負荷で狂うため)。前のテストが panic して poison 状態になっていても取る。
 pub fn heavy() -> MutexGuard<'static, ()> {
     HEAVY.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -270,7 +270,7 @@ pub fn wcs_diff_px(a: &Wcs, b: &Wcs, w: usize, h: usize) -> f64 {
     worst
 }
 
-// ------------------------------------------------------------------ 物差し(Python の solver_synth) ---
+// ------------------------------------------------------------------ 測定と比較(Python の solver_synth) ---
 
 /// sv_synth_measure の値: 中心・画素スケール・+y の位置角・パリティ(と、正解の中心の北で測った位置角)。
 #[derive(Clone, Copy, Debug)]
@@ -463,12 +463,12 @@ impl LogBuf {
     }
 }
 
-/// 締め切り(秒)から Control を作る道具。
+/// タイムアウト(秒)から Control を作る道具。
 pub fn deadline_in(sec: f64) -> Instant {
     Instant::now() + Duration::from_secs_f64(sec.max(0.0))
 }
 
-/// 1 回解く(締め切り sec 秒・中止なし・ログは buf へ)。戻り値 (結果, 秒)。
+/// 1 回解く(タイムアウト sec 秒・中止なし・ログは buf へ)。戻り値 (結果, 秒)。
 pub fn solve_once(
     req: &SolveRequest,
     cat: &Catalog,
@@ -600,8 +600,8 @@ pub fn hyp_diff(r: &Value, p: &Value) -> Option<String> {
 }
 
 /// Rust の trace(Python と同じ名前の項目)と、gen_solver.py が Python の trace から抜き出した要点を突き合わせる。
-/// 見るもの: 解いた quad(画像側・索引側)、使った索引の一覧(数と sha256)、スケールの範囲、試した quad・当たり・
-/// 仮説・足切りの数、対数オッズの最大、束ごとの経過、tune-up、最初の仮説(gen_solver の nhyp 個)、解いた仮説の順番。
+/// 見るもの: 解いた quad(画像側・インデックス側)、使ったインデックスの一覧(数と sha256)、スケールの範囲、試した quad・当たり・
+/// 仮説・足切りの数、対数オッズの最大、バッチごとの経過、tune-up、最初の仮説(gen_solver の nhyp 個)、解いた仮説の順番。
 /// 食い違いの説明の並び(空なら一致)。
 pub fn trace_diff(rust: &Value, py: &Value) -> Vec<String> {
     use sha2::{Digest, Sha256};
@@ -617,7 +617,7 @@ pub fn trace_diff(rust: &Value, py: &Value) -> Vec<String> {
             }
         }
     }
-    // 索引の一覧
+    // インデックスの一覧
     let files: Vec<String> = rust["files"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
     let sha: String = Sha256::digest(files.join("\n").as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
     if Some(files.len() as u64) != py["files_count"].as_u64() || py["files_sha256"].as_str() != Some(sha.as_str()) {
@@ -637,7 +637,7 @@ pub fn trace_diff(rust: &Value, py: &Value) -> Vec<String> {
         (Some(a), Some(b)) if (a - b).abs() <= 1e-6 => {}
         (a, b) => bad.push(format!("対数オッズの最大 {a:?} ≠ Python {b:?}")),
     }
-    // 束ごとの経過
+    // バッチごとの経過
     let rf = rust["flushes"].as_array().cloned().unwrap_or_default();
     let pf = py["flushes"].as_array().cloned().unwrap_or_default();
     let nf = rf.len().min(pf.len());
@@ -724,7 +724,7 @@ pub fn radec_str(v: Vec3) -> String {
     format!("({ra:.5}, {dec:+.5})")
 }
 
-/// 一時フォルダー(target の下。試験ごとに名前を分ける)。
+/// 一時フォルダー(target の下。テストごとに名前を分ける)。
 pub fn temp_dir(sub: &str) -> PathBuf {
     let base = std::env::var_os("CARGO_TARGET_TMPDIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
     let d = base.join("zahyou-solver-tests").join(sub);

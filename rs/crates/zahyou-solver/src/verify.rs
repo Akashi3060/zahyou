@@ -1,8 +1,8 @@
 //! 仮説の検証(Python の `_sv_verify_hyps`・`_sv_quick_pass`・`_sv_series_cone`・`_sv_test_lists`・`_sv_sigma2`・
 //! `_sv_verify_boxes`。設計書 3.7 節)。
 //!
-//! Python は仮説の束をまとめて numpy で検証するが、仮説どうしは互いに影響しない(参照星・σ・並びはどれも
-//! 仮説ごと)ので、ここでは 1 仮説ずつ同じ計算をする(束の分け方は時間とメモリのためだけ)。並列にするのは呼ぶ側。
+//! Python は仮説のバッチをまとめて numpy で検証するが、仮説どうしは互いに影響しない(参照星・σ・並びはどれも
+//! 仮説ごと)ので、ここでは 1 仮説ずつ同じ計算をする(バッチの分け方は時間とメモリのためだけ)。並列にするのは呼ぶ側。
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -20,14 +20,14 @@ use crate::parts::{CoreResult, accumulate, healpix_side_rad, nearest_refs};
 /// 検証の前の安い足切り: 並びの先頭何個の星に参照星が 1 つも無ければ捨てるか(Python の SV_QUICK_STARS)。
 pub(crate) const QUICK_STARS: usize = 10;
 
-// ------------------------------------------------------------------ 索引の持ち方 ---
+// ------------------------------------------------------------------ インデックスの持ち方 ---
 
-/// 1 回の探索(か試行のはしご全体)で使う索引の mmap と、壊れていると分かったファイル。
+/// 1 回の探索(か段階的な試行の全体)で使うインデックスの mmap と、壊れていると分かったファイル。
 pub(crate) struct Store<'a> {
     pub cat: &'a Catalog,
-    /// 開いた表か、中身の問題(形式・この機械で読めない)。OS のエラーで開けなかったときは入れない(次に開き直す)
+    /// 開いた表か、中身の問題(形式・このマシンで読めない)。OS のエラーで開けなかったときは入れない(次に開き直す)
     data: Vec<OnceLock<Result<Arc<IndexData>, String>>>,
-    /// 中身が壊れていると分かったファイル(files の番号 → 理由)。試行のはしごの間は持ち続ける
+    /// 中身が壊れていると分かったファイル(files の番号 → 理由)。段階的な試行の間は持ち続ける
     pub broken: Mutex<BTreeMap<usize, String>>,
     /// 今は開けないファイル(files の番号 → 理由)。その探索の中でだけ外す([`Store::begin_search`] で忘れる)
     unavailable: Mutex<BTreeMap<usize, String>>,
@@ -53,10 +53,10 @@ impl<'a> Store<'a> {
         self.unavailable.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 
-    /// 索引の表(mmap)。中身が壊れていれば Corrupt、OS のエラーで開けなければ Unavailable。
+    /// インデックスの表(mmap)。中身が壊れていれば Corrupt、OS のエラーで開けなければ Unavailable。
     pub fn data(&self, i: usize) -> Result<&Arc<IndexData>, Abort> {
         // get_or_init の中で開かない: 開くときの木の検査は rayon で並列に走り、待つ間に横取りした仕事(並列の検証)が
-        // 同じ索引を開こうとすると、同じスレッドで初期化中のセルを待って止まる。外で開いて先に入ったほうを使う
+        // 同じインデックスを開こうとすると、同じスレッドで初期化中のセルを待って止まる。外で開いて先に入ったほうを使う
         let cell = &self.data[i];
         let name = &self.cat.files[i].name;
         if cell.get().is_none() {
@@ -106,7 +106,7 @@ pub(crate) struct SeriesCtx<'s, 'a> {
     pub store: &'s Store<'a>,
     /// 系列のファイル(files の番号)。並びの位置 = Python の fid
     pub files: Vec<usize>,
-    /// この探索で使わないファイル(中身が壊れている・今は開けない。fid ごと。このときの写し)
+    /// この探索で使わないファイル(中身が壊れている・今は開けない。fid ごと。このときのコピー)
     pub broken: Vec<bool>,
     /// タイルの中心と外接半径と、その cos(fid ごと。全天は None)
     pub tiles: Vec<Option<(Vec3, f64, f64)>>,
@@ -154,7 +154,7 @@ impl Refs {
     }
 
     /// start から後ろ(1 つのタイルの分)を、星の番号の昇順に並べる(4 本とも同じ並べ方で)。
-    /// 木をたどる順は番号の昇順なので、正常な索引では確かめるだけで並べ替えは起きない。
+    /// 木をたどる順は番号の昇順なので、正常なインデックスでは確かめるだけで並べ替えは起きない。
     fn sort_tail(&mut self, start: usize) {
         if self.sid[start..].is_sorted() {
             return;
@@ -178,7 +178,7 @@ impl Refs {
 /// タイルは「中心どうしの内積 ≥ cos(min(外接半径 + r + 1e-9, π))」で選ぶ(Python と同じ)。判定は stars_in_cone と同じ。
 /// 星の単位ベクトルは、円錐の判定に使った値をそのまま受け取る(star_xyz で引き直さない。同じ整数から同じ式で作るので
 /// ビットまで同じ)。集まる星・順・値は、stars_in_cone の番号ごとに star_xyz と sweep を引いていた形と同じ
-/// (試験 series_cone_matches_reference)。
+/// (テスト series_cone_matches_reference)。
 pub(crate) fn series_cone(sc: &SeriesCtx, c: Vec3, r: f64) -> Result<Refs, Abort> {
     let mut out = Refs::with_capacity(REFS_CAP);
     for_tiles(sc, c, r, |fid, data| {
@@ -198,7 +198,7 @@ pub(crate) fn series_cone(sc: &SeriesCtx, c: Vec3, r: f64) -> Result<Refs, Abort
     Ok(out)
 }
 
-/// 変える前の series_cone(stars_in_cone の番号ごとに star_xyz と sweep を引く)。試験で今の形と比べる。
+/// 変える前の series_cone(stars_in_cone の番号ごとに star_xyz と sweep を引く)。テストで今の形と比べる。
 #[cfg(test)]
 fn series_cone_ref(sc: &SeriesCtx, c: Vec3, r: f64) -> Result<Refs, Abort> {
     let mut out = Refs::default();
@@ -272,7 +272,7 @@ pub(crate) fn for_tiles(
 
 // ------------------------------------------------------------------ 仮説 ---
 
-/// 照合と 4 点の当てはめで作った仮説 1 つ(Python の仮説の束の 1 行)。
+/// 照合と 4 点のフィットで作った仮説 1 つ(Python の仮説のバッチの 1 行)。
 #[derive(Clone, Debug)]
 pub(crate) struct Hyp {
     pub crval: Vec3,
@@ -284,11 +284,11 @@ pub(crate) struct Hyp {
     /// ″/px
     pub scale: f64,
     pub dq: usize,
-    /// 画像の星(入力の添字)。索引の quad の A, B, C(, D) の順
+    /// 画像の星(入力の添字)。インデックスの quad の A, B, C(, D) の順
     pub qfield: [usize; 4],
-    /// 索引の星の番号
+    /// インデックスの星の番号
     pub qindex: [u32; 4],
-    /// quad の索引の、系列の中の位置
+    /// quad のインデックスの、系列の中の位置
     pub fid: usize,
     /// 画像側の quad の中心 (A+B)/2 と |AB|²/4
     pub qc: [f64; 2],
@@ -345,7 +345,7 @@ impl Hyp {
     }
 }
 
-/// 検証の一様化の箱の数 (nw, nh)。箱 = 索引の CUTNSIDE の HEALPix の 1 辺(Python の `_sv_verify_boxes`)。
+/// 検証の一様化の箱の数 (nw, nh)。箱 = インデックスの CUTNSIDE の HEALPix の 1 辺(Python の `_sv_verify_boxes`)。
 pub(crate) fn verify_boxes(field: &Field, rep: &IndexFile, scale: f64) -> (usize, usize) {
     match rep.cutnside {
         Some(cut) if cut > 0 => {
@@ -430,7 +430,7 @@ pub(crate) fn sigma2(field: &Field, h: &Hyp, t: usize, pix2: f64, gamma: f64) ->
     pix2 * (1.0 + gamma * r2 / h.q2)
 }
 
-/// σ の「画素の誤差 + 索引の JITTER」の分(pix² = verify_pix² + (jitter / scale)²)。
+/// σ の「画素の誤差 + インデックスの JITTER」の分(pix² = verify_pix² + (jitter / scale)²)。
 #[inline]
 pub(crate) fn pix2_of(params: &Params, rep: &IndexFile, scale: f64) -> f64 {
     let j = rep.jitter_arcsec / scale;
@@ -521,7 +521,7 @@ pub(crate) fn verify_one(
         sel.push((refs.sweep[k], refs.fid[k], refs.sid[k], k, rx, ry));
     }
     // sweep・タイル・番号の順(今までは (sweep, タイル, 番号) で安定に並べていた)。sel は k(refs の中の位置)の昇順に
-    // 積んであるので、安定な並べ替えで同じ鍵の間に残る順は k の昇順。k を 4 つめの鍵に足した不安定な並べ替えは、
+    // 積んであるので、安定な並べ替えで同じキーの間に残る順は k の昇順。k を 4 つめのキーに足した不安定な並べ替えは、
     // k が重ならない(全順序になる)ので同じ順になり、作業領域を取らない
     sel.sort_unstable_by_key(|e| (e.0, e.1, e.2, e.3));
     let nr0 = sel.len() as f64;
@@ -548,7 +548,7 @@ pub(crate) fn verify_one(
     if nr == 0 {
         return Ok(VerifyOut::rejected(false));
     }
-    // 4. 画像の星の並び(検証の一様化。箱 = 索引の CUTNSIDE の HEALPix の 1 辺)
+    // 4. 画像の星の並び(検証の一様化。箱 = インデックスの CUTNSIDE の HEALPix の 1 辺)
     let (nw, nh) = verify_boxes(field, sc.rep, h.scale);
     let nv = field.vxy.len();
     let test = test_list(field, h, nw, nh, ror2, nv, nv);
@@ -630,7 +630,7 @@ mod tests {
     }
 
     /// 参照星の並べ替え: (sweep, タイル, 番号) の安定な並べ替えと、k を足した不安定な並べ替えが同じ順
-    /// (鍵が重なる場合も。sel は k の昇順に積む)。
+    /// (キーが重なる場合も。sel は k の昇順に積む)。
     #[test]
     fn sel_sort_matches_stable_sort() {
         let mut s = 0x9E3779B97F4A7C15u64;
@@ -653,7 +653,7 @@ mod tests {
     }
 
     /// 今の series_cone が、変える前の形(stars_in_cone の番号ごとに star_xyz と sweep を引く)と、集める星・順・
-    /// 単位ベクトルのビット・sweep まで同じ(星図データの系列 5202・5206・4107・4115 の乱数の円。半径 π 以上も)。
+    /// 単位ベクトルのビット・sweep まで同じ(インデックスファイルの系列 5202・5206・4107・4115 の乱数の円。半径 π 以上も)。
     #[test]
     fn series_cone_matches_reference() {
         let dir = std::env::var_os("ZAHYOU_INDEX_DIR")
@@ -685,7 +685,7 @@ mod tests {
                         break [v[0] / m, v[1] / m, v[2] / m];
                     }
                 };
-                // 小さい星図(4115)だけ、π 以上の半径(木を見ずに全部)も
+                // 小さいインデックス(4115)だけ、π 以上の半径(木を見ずに全部)も
                 let r = if iid == 4115 && k % 10 == 0 { std::f64::consts::PI + rnd() } else { rnd() * rmax };
                 let got = series_cone(&sc, c, r).unwrap();
                 let want = series_cone_ref(&sc, c, r).unwrap();
