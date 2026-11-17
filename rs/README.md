@@ -2,7 +2,7 @@
 
 天体写真から望遠鏡の向き(画像の中心と目標までのずれ)を割り出す zahyou を Rust で作り直したもの。
 設計と進み具合は [../docs/rust-port.md](../docs/rust-port.md)、解き方(基準実装の Python 版)は
-[../docs/design-native-solver.md](../docs/design-native-solver.md)、索引ファイルの形式は [../docs/index-format.md](../docs/index-format.md)。
+[../docs/design-native-solver.md](../docs/design-native-solver.md)、インデックスファイルの形式は [../docs/index-format.md](../docs/index-format.md)。
 
 ```
 crates/zahyou-wcs     座標・TAN/SIP の WCS・当てはめ・FITS のカード
@@ -22,9 +22,9 @@ tools                 同梱物の表示(THIRD-PARTY-NOTICES.md)を作る・ラ�
 - MSYS2 の UCRT64 の Rust(`pacman -S mingw-w64-ucrt-x86_64-rust`、1.94 で確かめた。ターゲット `x86_64-pc-windows-gnu`、
   リンカーは UCRT64 の gcc)。**rustup は入れない**(rustup の gnu は MSVCRT 前提で、UCRT64 の gcc と混ぜると壊れる)。
 - シェルは Git Bash。最初に `export PATH=/c/msys64/ucrt64/bin:$PATH`。
-- 試験の一部(照合値の作り直しと Python 側の速さ)には Python 3.13 と numpy・scipy・astropy・matplotlib
-  (`%USERPROFILE%\AppData\Local\Programs\Python\Python313\python.exe`。zahyou-net の試験は `ZAHYOU_PYTHON` で変えられる)。
-- 星図データ `C:\AstrometryData`(index-*.fits)。無ければ、それが要る試験は `SKIP` と出して通す。
+- テストの一部(照合値の作り直しと Python 側の速さ)には Python 3.13 と numpy・scipy・astropy・matplotlib
+  (`%USERPROFILE%\AppData\Local\Programs\Python\Python313\python.exe`。zahyou-net のテストは `ZAHYOU_PYTHON` で変えられる)。
+- インデックスファイル `C:\AstrometryData`(index-*.fits)。無ければ、それが要るテストは `SKIP` と出して通す。
 
 ## ビルド
 
@@ -38,7 +38,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 `CARGO_TARGET_DIR` で置き場所を変えられる(何人かで同時にビルドするときは別々にする)。release は `lto = "fat"`・
 `codegen-units = 1` なので 2〜3 分かかる。eframe は 0.33 系(0.36 は Rust 1.95 以上が要る)。
 
-## 試験
+## テスト
 
 ```bash
 cargo test --workspace                                   # 既定(3 分ほど)
@@ -47,18 +47,18 @@ cargo test -p zahyou run_solver_vs_python -- --nocapture # 解析の流れ全体
 cargo test -p zahyou run_solver_vs_python_all -- --ignored --nocapture   # 締め切りまで探す 2 場面も込みで 20 場面(1 分ほど)
 ```
 
-- 試験の画像は `$ZAHYOU_TEST_IMAGES/…`(既定はホームフォルダー)か、リポジトリからの相対。リポジトリに無い
+- テストの画像は `$ZAHYOU_TEST_IMAGES/…`(既定はホームフォルダー)か、リポジトリからの相対。リポジトリに無い
   `dev/realcase`・`dev/tcase`(.gitignore)は `ZAHYOU_PY_REPO`(既定 `~/Documents/GitHub/zahyou`)の同じ場所を見る。
   中身(sha256)が照合値を作ったときと違えば SKIP。
-- `--ignored` の中身: 解法の全部の合成星野・全部の実写・解けてはいけない画像(締め切り 30 秒)と、GitHub の Releases・
-  nova.astrometry.net への疎通・星図データの置き場所への HEAD(読むだけ。画像も星のリストも送らない)。
-  外へ問い合わせたくなければ `ZAHYOU_OFFLINE_TESTS=1`(天体名の試験を飛ばす)と `--skip live`。
-- 解法の試験の細かい説明と環境変数は [crates/zahyou-solver/tests/README.md](crates/zahyou-solver/tests/README.md)。
+- `--ignored` の中身: 解法の全部の合成星野・全部の実写・解けてはいけない画像(タイムアウト 30 秒)と、GitHub の Releases・
+  nova.astrometry.net への疎通・インデックスファイルの置き場所への HEAD(読むだけ。画像も星のリストも送らない)。
+  外へ問い合わせたくなければ `ZAHYOU_OFFLINE_TESTS=1`(天体名のテストを飛ばす)と `--skip live`。
+- 解法のテストの細かい説明と環境変数は [crates/zahyou-solver/tests/README.md](crates/zahyou-solver/tests/README.md)。
 
 ### 利用者のファイルを書き換えない
 
 画面・解析は `%LOCALAPPDATA%\zahyou\cache.json`(天体名の座標と機材の画素スケール)と `gui.json`(画面の設定)を
-読み書きする。試験や exe を手で動かすときは、一時ファイルへ向けてから動かす:
+読み書きする。テストや exe を手で動かすときは、一時ファイルへ向けてから動かす:
 
 ```bash
 T=$(mktemp -d)
@@ -67,9 +67,9 @@ export ZAHYOU_CACHE="$T/cache.json" ZAHYOU_SETTINGS="$T/gui.json" LOCALAPPDATA="
 
 `--selftest` は gui.json と cache.json の両方を自分で一時ファイルへ向ける(ZAHYOU_SETTINGS・ZAHYOU_CACHE が無いとき。
 cache.json は空から始めて終わったら消すので、結果はその PC の記憶によらない。2026-10-17 から。以前は Python 版の自己診断と
-同じく cache.json は利用者のものを読み書きしていた)。覚えた値で確かめたいときは ZAHYOU_CACHE に cache.json の写しを指す。
+同じく cache.json は利用者のものを読み書きしていた)。覚えた値で確かめたいときは ZAHYOU_CACHE に cache.json のコピーを指す。
 `--shot`・`--first-frame` は gui.json だけを向ける(**cache.json は向けない**)ので、手で動かすときは上の 3 つを設定する。
-試験 `app/tests/selftest_isolation.rs` が、3 つを外した exe の `--selftest` で `%LOCALAPPDATA%\zahyou` ができないことを見る。
+テスト `app/tests/selftest_isolation.rs` が、3 つを外した exe の `--selftest` で `%LOCALAPPDATA%\zahyou` ができないことを見る。
 
 ## exe の入口
 
@@ -98,10 +98,10 @@ exe は windows サブシステムなので、結果はコンソールに出な�
   (`zahyou_net::nova::PUBLICLY_VISIBLE`。2026-10-16 の決定。それでも nova の一覧や画像ファイルからは完全には隠れない場合があるので、
   利用者向けの文書には「送ったものは第三者に見られることがある」と書いた)。`--shot --run` で撮るときや試しに解かせるときに外へ送りたくなければ、
   一時の gui.json の `"solve"` を `"オフラインのみ"` にするか、`"api_key": ""` を書いておく。`--selftest --offline` は送らない。
-- 版名は `Cargo.toml` の `[workspace.package] version` だけで決まる(`v` を付けて末尾の 0 の部分を省いたものが画面・ログ・
-  更新の確認・exe の ProductVersion の版名。8.0.0 → `v8`、8.0.0-beta.1 → `v8-beta.1`。`app/build.rs` の `version_label`。
-  版名は v7・v8 のような整数の形にする(2026-10-24 の決定。版を上げるときは大きな版を上げる。docs/release-v7.md 2 節))。`-beta.N` などのプレリリースの版は窓の題・起動のログ・［使い方］に「β版」と添え、更新の確認は
-  GitHub のプレリリースも含めて同じ大きな版(v8 なら v8)の新しいものを探す。`-dev` で終わる版は更新を確かめない。
+- バージョン名は `Cargo.toml` の `[workspace.package] version` だけで決まる(`v` を付けて末尾の 0 の部分を省いたものが画面・ログ・
+  更新の確認・exe の ProductVersion のバージョン名。8.0.0 → `v8`、8.0.0-beta.1 → `v8-beta.1`。`app/build.rs` の `version_label`。
+  バージョン名は v7・v8 のような整数の形にする(2026-10-24 の決定。バージョンを上げるときはメジャーバージョンを上げる。docs/release-v7.md 2 節))。`-beta.N` などのプレリリースのバージョンはウィンドウのタイトル・起動のログ・［使い方］に「β版」と添え、更新の確認は
+  GitHub のプレリリースも含めて同じメジャーバージョン(v8 なら v8)の新しいものを探す。`-dev` で終わるバージョンは更新を確かめない。
 
 ## 照合値を作り直す(Python 基準実装 = リポジトリの dev/)
 
@@ -122,7 +122,7 @@ $PY -B app/testdata/gen_run_solver.py         # run() を本物の解法で 20 �
 (`git worktree add --detach <置き場所> 0b73d36` → `ZAHYOU_PY_REPO=<置き場所>`)。ソースの注釈にある「Python 版の `gui/…`」も、
 その木のファイルのこと(`git show 0b73d36:gui/zahyou_gui.py`)。
 
-## 速さの物差し
+## 速さのベンチマーク
 
 ```bash
 cargo build --release -p zahyou && ZAHYOU_CACHE=... target/release/zahyou.exe --bench --out rust.json
@@ -150,6 +150,6 @@ THIRD-PARTY-NOTICES.md は exe に埋め込んで、［使い方］タブから�
 - 自分で書く `unsafe` は `zahyou-index` の mmap だけ。ほかの crate は `#![forbid(unsafe_code)]`。
   mmap するのは Windows だけ(使っている間の書き換えを、共有モードで OS が止めてくれるのは Windows だけなので。同じプロセスの
   ダウンロードも止められる)。
-  ほかの OS では索引の表を開かず、`zahyou-index` も `forbid` になる。
-- 壊れた入力で panic しない(試験で切り詰めたファイル・壊したヘッダー・壊した索引を読ませる)。
+  ほかの OS ではインデックスの表を開かず、`zahyou-index` も `forbid` になる。
+- 壊れた入力で panic しない(テストで切り詰めたファイル・壊したヘッダー・壊したインデックスを読ませる)。
 - コメントは日本語。外部のクレートは許容型のライセンスだけ。C のライブラリへの FFI は入れない。
