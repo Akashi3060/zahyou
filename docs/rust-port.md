@@ -1281,7 +1281,7 @@ cargo のテストは ZAHYOU_CACHE・ZAHYOU_SETTINGS・LOCALAPPDATA を一時の
 | `cargo test -p zahyou -- --ignored --skip live`(`run_solver_vs_python_all` ほか) | 2 本通過 |
 | `negative_dense_accept_rule`(新しいテスト) | 既定・一致の増えだけ・引き上げだけの 3 通りは、仮説 20,229,488 個を試し尽くして解なし(約 26 秒)。両方を外すと前と同じ誤った解(22.773709888689385・一致 5・仮説 16,187,319 個目) |
 | `dev/test_solver_core.py`(部品 + 実写) | 43/43 通過(新しい case_20 を含む。3I_00010 の星 8 個も解ける) |
-| `dev/test_solver_synth.py` | 63/64。ra0 はタイムアウト 60 秒で解けない(Python で 162 秒かかる場面。直す前のバージョンでも同じく落ちる) |
+| `dev/test_solver_synth.py` | 63/64。ra0 はタイムアウト 60 秒で解けない(Python で 162 秒かかる場面。直す前のバージョンでも同じく落ちる。2026-11-17 に、ブラインドで遅い 3 件の締め切りを 600 秒にした。dev/README.md) |
 | `dev/test_solver_real.py --engine --both`(組み立てた `zahyou_engine.py` と sv_solve 直接) | 24/24 通過(38 件は、この作業ツリーに無い dev/tcase などの画像で飛ばした) |
 | 本番の経路(比較の zbench)で比較の画像 155 枚、ブラインド・タイムアウト 60 秒 | 正解の 142 枚(実写 64・合成 52・形式違い 26)は、解のインデックス・対数オッズ・一致数・仮説の数・スケールまで直す前と同じ。陰性・解けない 13 枚は全部解なし(直す前は f-tcase-dense が誤答) |
 
