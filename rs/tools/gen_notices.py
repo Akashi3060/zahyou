@@ -35,6 +35,9 @@ sys.dont_write_bytecode = True
 import cargo_deps as cd  # noqa: E402
 
 OUT = cd.RS_DIR / "THIRD-PARTY-NOTICES.md"
+# ノートブック版の拡張モジュール zahyou-native(rs/py。wheel に入れる)
+WHEEL_DIR = cd.RS_DIR / "py"
+OUT_WHEEL = WHEEL_DIR / "THIRD-PARTY-NOTICES.md"
 
 # ライセンスファイルとみなす名前(大文字小文字は問わない)
 LICENSE_NAME = re.compile(r"^(licen[cs]e|copying|notice|copyright|unlicense)", re.I)
@@ -721,6 +724,103 @@ def render(col: Collected, tc: Toolchain) -> str:
     w("- MinGW-w64 の表示(実行時-3)の最後の節にある Wine 由来のヘッダー(LGPL)は、C をコンパイルするときの")
     w("  宣言だけで、exe にコードは入らないと考えています(推測。結合されるライブラリの中身までは確かめていません)。\n")
 
+    render_crates(col, w, by_id)
+
+    # --- 実行時ライブラリの表示
+    w("## 実行時ライブラリの表示\n")
+    w("MSYS2 UCRT64 のツールチェーンに入っている表示のファイルを、そのまま写しています"
+      "(HTML のものは文字だけにしています)。\n")
+    for i, (name, lic, rel, t) in enumerate(tc.texts, 1):
+        w(f"### 実行時-{i}: {name}\n")
+        w(f"ライセンス式: {lic}。元のファイル: `{rel}`(rustc の sysroot から)\n")
+        w(fence(t))
+        w("")
+    text = "\n".join(out).rstrip() + "\n"
+    return re.sub(r"\n{3,}", "\n\n", text)
+
+
+WHEEL_HEAD = """\
+# 同梱しているソフトウェアの表示(zahyou-native。ノートブック版の Rust の解法)
+
+この文書は `rs/tools/gen_notices.py --wheel` が、`cargo metadata` と各クレートの配布物にある
+ライセンスファイルから機械的に作っています。手で書き足したものではありません。
+依存を変えたら作り直してください(`python rs/tools/gen_notices.py --wheel`、古いかどうかは `--wheel --check`)。
+同じものが wheel(`zahyou_native-*.whl`)の `.dist-info/licenses/` に入っています。
+
+zahyou-native は、ノートブック版(`{notebook}`)のオフライン解析を Rust で速く解くための Python の拡張モジュールです。
+中身は exe と同じ Rust の解法(`zahyou-solver`・`zahyou-index`・`zahyou-wcs`)で、Python 版のエンジン
+(`dev/solver_*.py`)を Rust に移したものです。
+
+## MIT ライセンスが及ぶ範囲
+
+下の LICENSE —— MIT ライセンス —— が及ぶのは **zahyou 自身のソースコードだけ**です
+(`rs/py/` と、そこから使う `rs/crates/`)。wheel に入っている第三者のソフトウェア(この文書の後半)、
+星図データ(index ファイル)とその元になった星表は含みません。
+
+{license}
+
+## オフライン解析の解き方 — astrometry.net の方式
+
+解き方(星 4 つ(広い段は 3 つ)の並びの幾何ハッシュ → 照合 → ベイズの検証 → 改良)は、下の論文と、
+astrometry.net の公開文書と BSD-3 の部分のソースを読んでまとめた調べ物をもとに、自分で書き直したものです。
+**astrometry.net のコードは含んでいません**(取り込みも移植もしていません)。
+
+{lang}
+- <https://astrometry.net/>
+
+## 同梱していないもの
+
+星図データ(index ファイル)は入っていません。条件(Gaia は CC BY-NC 3.0 IGO・商用は ESA の許可・
+クレジットは ESA/Gaia/DPAC)と論文・謝辞は、exe の表示(`rs/THIRD-PARTY-NOTICES.md`)とノートブック版の
+説明にあります。
+
+## 拡張モジュールに入っているもの
+
+zahyou-native は Rust のプログラムで、下の第三者のソフトウェアを中に含んでいます。
+それぞれの著作権は各プロジェクトに属し、各ライセンスの条件で配布されています。
+ライセンス式が `A OR B` のものは、そのどれか 1 つの条件で使っています(本文は、配布物にあるものをすべて載せています)。
+"""
+
+
+def render_wheel(col: Collected) -> str:
+    """wheel(zahyou-native)に添える表示。"""
+    deps = col.deps
+    lic_text = read_text(cd.REPO_DIR / "LICENSE")
+    if lic_text is None:
+        raise SystemExit(f"!! zahyou の LICENSE がありません: {cd.REPO_DIR / 'LICENSE'}")
+    out: list[str] = [WHEEL_HEAD.format(license=fence(lic_text), lang=LANG_REF, notebook=notebook_name())]
+    w = out.append
+    pkgs = deps.runtime
+    by_id = {p.id: p for p in pkgs}
+    ct = [p for p in pkgs if p.compile_time_only]
+    w(f"- Rust のクレート: **{len(pkgs)} 個**(`cargo metadata`。Windows・Mac・Linux のどれかで使うものを全部。"
+      f"ビルドのときだけ使う {deps.build_only} 個と、試験のときだけ使う {deps.dev_only} 個は除く)")
+    w(f"  - うち {len(ct)} 個は proc-macro(コンパイルのときにコードを生成するもの)とその依存です。"
+      "拡張モジュールにコードは入りませんが、念のため載せています")
+    w("- Rust の標準ライブラリ(Apache-2.0 OR MIT。本文は下の Apache-2.0・MIT と同じ)が静的に結合されます。"
+      "その中の `compiler_builtins` には LLVM の compiler-rt(Apache-2.0 WITH LLVM-exception)が入っています")
+    w("- 拡張モジュールが読み込むのは、OS と Python に付いてくるライブラリだけです\n")
+    counts: dict[str, int] = {}
+    for p in pkgs:
+        counts[p.license or "(なし)"] = counts.get(p.license or "(なし)", 0) + 1
+    w("| ライセンス式(Cargo.toml の値) | クレートの数 |")
+    w("|---|---|")
+    for lic, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
+        w(f"| {md_cell(lic)} | {n} |")
+    w("")
+    native = [p for p in pkgs if p.native_build_deps]
+    if native:
+        w("### C などを含むもの\n")
+        for p in native:
+            w(f"`{p.name}` {p.version} はビルドのときに {', '.join(p.native_build_deps)} を使います(ライセンス {p.license})。\n")
+    render_crates(col, w, by_id)
+    text = "\n".join(out).rstrip() + "\n"
+    return re.sub(r"\n{3,}", "\n\n", text)
+
+
+def render_crates(col: Collected, w, by_id: dict) -> None:
+    """クレートの一覧と、ライセンス本文(exe と wheel で共通の部分)。"""
+    pkgs = col.deps.runtime
     # --- 一覧
     w("### クレートの一覧\n")
     w("「本文」の番号は、下の「ライセンス本文」の番号です。\n")
@@ -782,20 +882,13 @@ def render(col: Collected, tc: Toolchain) -> str:
         w(fence(g.body))
         w("")
 
-    # --- 実行時ライブラリの表示
-    w("## 実行時ライブラリの表示\n")
-    w("MSYS2 UCRT64 のツールチェーンに入っている表示のファイルを、そのまま写しています"
-      "(HTML のものは文字だけにしています)。\n")
-    for i, (name, lic, rel, t) in enumerate(tc.texts, 1):
-        w(f"### 実行時-{i}: {name}\n")
-        w(f"ライセンス式: {lic}。元のファイル: `{rel}`(rustc の sysroot から)\n")
-        w(fence(t))
-        w("")
-    text = "\n".join(out).rstrip() + "\n"
-    return re.sub(r"\n{3,}", "\n\n", text)
-
 
 def build(args) -> tuple[str, Collected]:
+    if args.wheel:
+        # wheel は Windows・Mac・Linux 向けに建てるので、ターゲットで絞らずに全部を載せる
+        meta = cd.load_metadata(args.metadata, args.cargo, manifest=WHEEL_DIR / "Cargo.toml", target=None)
+        col = collect(cd.classify(meta, local_is_own=True))
+        return render_wheel(col), col
     meta = cd.load_metadata(args.metadata, args.cargo)
     deps = cd.classify(meta)
     col = collect(deps)
@@ -807,7 +900,9 @@ def main(argv=None) -> int:
     cd.stdout_utf8()
     ap = argparse.ArgumentParser(description="rs/THIRD-PARTY-NOTICES.md を作る")
     ap.add_argument("--check", action="store_true", help="書き出さずに、今のファイルが古くないかだけ見る")
-    ap.add_argument("--out", default=str(OUT), help="書き出す先(既定: rs/THIRD-PARTY-NOTICES.md)")
+    ap.add_argument("--wheel", action="store_true",
+                    help="exe ではなく、ノートブック版の拡張モジュール(rs/py)の表示を作る(既定の出力 rs/py/THIRD-PARTY-NOTICES.md)")
+    ap.add_argument("--out", default=None, help="書き出す先(既定: rs/THIRD-PARTY-NOTICES.md)")
     ap.add_argument("--metadata", help="cargo metadata の JSON(無ければ cargo を呼ぶ)")
     ap.add_argument("--cargo", default="cargo")
     ap.add_argument("--sysroot", help="rustc の sysroot(無ければ rustc --print sysroot)")
@@ -816,14 +911,15 @@ def main(argv=None) -> int:
     text, col = build(args)
     for m in col.warnings:
         print("!! " + m, file=sys.stderr)
-    out = Path(args.out)
+    out = Path(args.out or (OUT_WHEEL if args.wheel else OUT))
     if args.check:
         try:
             cur = out.read_bytes().decode("utf-8").replace("\r\n", "\n")
         except (OSError, UnicodeDecodeError):
             cur = None
         if cur != text:
-            print(f"!! {out} は古くなっています。python rs/tools/gen_notices.py で作り直してください")
+            print(f"!! {out} は古くなっています。python rs/tools/gen_notices.py{' --wheel' if args.wheel else ''}"
+                  " で作り直してください")
             if cur is not None:
                 diff = list(difflib.unified_diff(cur.split("\n"), text.split("\n"), "今のファイル", "作り直したもの",
                                                  lineterm="", n=1))

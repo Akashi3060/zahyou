@@ -105,7 +105,7 @@ Release を作って試したり、nova へ送ったりはしていない。ソ�
 - `-beta.N` などのプレリリースのバージョンは、タイトル・起動のログ・［使い方］に「(β版)」が付く。
 - β版のタグと Release のタイトルもバージョン名の形にする(`v8-beta.N`、タイトルは「zahyou v8-beta.N (β版)」)。7 節の `v7.0.0-beta.N` は v7 のときの書き方。
 
-ただしバージョンの文字は exe の外にも書いてある。**バージョンを上げるときに直す場所は全部で次の 11 個**(11 はβ版のときだけ。上から順に):
+ただしバージョンの文字は exe の外にも書いてある。**バージョンを上げるときに直す場所は全部で次の 12 個**(11 はβ版のときだけ。上から順に):
 
 | | 直す場所 | 直し方 | 直し忘れたら |
 |---|---|---|---|
@@ -120,6 +120,7 @@ Release を作って試したり、nova へ送ったりはしていない。ソ�
 | 9 | マニュアル PDF(`…マニュアルv4.pdf`。6 の文字と 8 の写真を貼っている) | 6 と 8 のあとで `python dev/make_manual.py`(5 節) | 6 節の manual の検査(作り直したものとバイト単位で比べる) |
 | 10 | `dev/README.md` のノートブックの名前 | 手で | テストでは分からない。下の grep で探す |
 | 11 | β版を出すときだけ: `rs/app/src/ui/help_tab.rs` のβ版の説明 3 行(「このバージョンは v7 のβ版です…」。前のメジャーバージョンへの戻し方を含む) | 手で書き直す | テスト `beta_版の間だけ更新の扱いを説明する`(メジャーバージョンをバージョンから組み立てて探すので、書き直し忘れると落ちる) |
+| 12 | ノートブック版の拡張モジュール: `rs/py/Cargo.toml` の `[package] version`(exe と同じ形。workspace の外なので受け継げない)・`rs/py/Cargo.lock`・`rs/py/THIRD-PARTY-NOTICES.md`(ノートブックの名前が入る) | version は手で → `cd rs/py && cargo check`(Cargo.lock を書き換える。`CARGO_TARGET_DIR` は一時のフォルダーへ)→ `python rs/tools/gen_notices.py --wheel`。セル A の pip の行の Release の名前(`expanded_assets/v8`)は 4 の `build_nb.py` が版から入れる | テスト `version_in_docs_matches_cargo`、`test_tools.py` の `test_wheel_notices_up_to_date`、6 節の wheels の検査 |
 
 - テスト `version_in_docs_matches_cargo`(`rs/app/src/pipeline.rs`)が見るのは次の 3 つ。
   - README・`dev/make_manual.py`・`dev/nb_main.py`・`zahyou_engine.py` の「数.数.数-beta.数」は `Cargo.toml` のバージョンと、バージョン名の形「v数-beta.数」はバージョン名と比較し、違うものがあれば落ちる。
@@ -151,6 +152,8 @@ python tools/check_licenses.py           # 依存のライセンスが許可リ�
 python tools/gen_notices.py --check      # 古ければ終了コード 1
 python tools/gen_notices.py              # 古ければ作り直す(Cargo.lock・Rust・gcc の版が変わったとき)
 python -B tools/test_tools.py
+python tools/check_licenses.py --wheel   # ノートブック版の拡張モジュール(rs/py)の依存も同じく
+python tools/gen_notices.py --wheel      # その表示(rs/py/THIRD-PARTY-NOTICES.md。wheel に入る)
 ```
 
 - 依存を足したら、必ず `check_licenses.py` を通す(v6 では `crc32c`(LGPL)が連鎖で入っていた)。
@@ -281,7 +284,12 @@ python dev/make_manual.py                                     # 天体画像解�
 
 ```bash
 DIST=$USERPROFILE/zahyou-dist-v8                   # リポジトリの外。空か無いフォルダー(版名で。β版なら zahyou-dist-v8-beta.N)
-python rs/tools/make_release_assets.py --exe "$(cygpath -w $EXE)" --out "$(cygpath -w $DIST)"
+# ノートブック版の拡張モジュールの wheel 4 つ(GitHub Actions で建てる。rs/py/README.md)
+gh workflow run wheels.yml --repo Akashi3060/zahyou --ref main      # 出す commit が main にある状態で
+gh run list --repo Akashi3060/zahyou --workflow wheels.yml --limit 1  # 終わったら ID を見る
+WHEELS=$USERPROFILE/zahyou-wheels-v8                                 # リポジトリの外。空のフォルダー
+gh run download <ID> --repo Akashi3060/zahyou -n zahyou-native-wheels -D "$WHEELS"
+python rs/tools/make_release_assets.py --exe "$(cygpath -w $EXE)" --wheels "$(cygpath -w $WHEELS)" --out "$(cygpath -w $DIST)"
 (cd "$DIST" && sha256sum -c SHA256SUMS.txt)
 ```
 
@@ -295,9 +303,10 @@ python rs/tools/make_release_assets.py --exe "$(cygpath -w $EXE)" --out "$(cygpa
 | `zahyou-manual-v4.pdf` | `天体画像解析プログラム「zahyou」導入・運用マニュアルv4.pdf` | `dev/make_manual.py` で作り直したものとバイト単位で同じ |
 | `LICENSE.txt` | `LICENSE` | — |
 | `THIRD-PARTY-NOTICES.md` | `rs/THIRD-PARTY-NOTICES.md`(exe の［使い方］タブでも読める) | exe に埋め込んだものと同じ・`gen_notices.py --check` で最新 |
-| `SHA256SUMS.txt` | 上の 6 つの SHA256(`sha256sum -c` の形、LF) | 書いたあと読み直して照合 |
+| `zahyou_native-<版>-cp39-abi3-<プラットフォーム>.whl` 4 つ | `--wheels`(GitHub Actions の成果物。Windows x86_64・Mac universal2・Linux x86_64・Linux aarch64)。ノートブックのセル A の 2 つ目の pip の行が、この Release のページから探す(2026-11-17 から) | 4 つそろっていて版が Cargo の版(PEP 440 の形。8.0.0-beta.1 → 8.0.0b1)、`.dist-info/licenses/THIRD-PARTY-NOTICES.md` が `rs/py/THIRD-PARTY-NOTICES.md` と同じ、拡張モジュールにホームのパスが無い(手元で建てたものを混ぜない)、`rs/py/Cargo.toml` の版も同じ(wheels) |
+| `SHA256SUMS.txt` | 上の全部の SHA256(`sha256sum -c` の形、LF) | 書いたあと読み直して照合 |
 
-- 検査が 1 つでも落ちたら、何も書かずに終了コード 1。`--skip version|paths|notices|manual|notebook` は試しのとき用(最後に「確かめていない」と出る)。
+- 検査が 1 つでも落ちたら、何も書かずに終了コード 1。`--skip version|paths|notices|manual|notebook|wheels` は試しのとき用(最後に「確かめていない」と出る)。
 - paths の検査は、この道具を走らせた PC の USERPROFILE を探す(exe をビルドした PC で走らせる前提)。
 - 出力先は、空か無いフォルダーで、リポジトリの外に限る(直下に .gitignore が無いので)。
 - 文字のファイル(.ipynb・.py・.txt・.md)は改行を LF にそろえて書く(作業ツリーが CRLF でも SHA256 が変わらない。`LICENSE.txt` は
@@ -323,7 +332,7 @@ SHA256 は Release の本文にも書く(SHA256SUMS.txt を貼る)。正式版�
 gh release create v7.0.0-beta.N --repo Akashi3060/zahyou --target native-rs --prerelease --latest=false --draft \
   --title "zahyou v7.0.0-beta.N (β版)" --notes-file release-notes-v7.0.0-beta.N.md \
   "$DIST/zahyou.exe" "$DIST/zahyou_v7_beta.ipynb" "$DIST/zahyou_engine.py" "$DIST/zahyou-manual-v4.pdf" \
-  "$DIST/LICENSE.txt" "$DIST/THIRD-PARTY-NOTICES.md" "$DIST/SHA256SUMS.txt"
+  "$DIST/LICENSE.txt" "$DIST/THIRD-PARTY-NOTICES.md" "$DIST"/zahyou_native-*.whl "$DIST/SHA256SUMS.txt"
 # 出す前に確かめる: pre-release の印が付いている・Latest でない・下書き・資産が 7 つで digest が SHA256SUMS.txt と同じ
 gh release view v7.0.0-beta.N --repo Akashi3060/zahyou --json isPrerelease,isDraft,assets \
   --jq '"prerelease=\(.isPrerelease) draft=\(.isDraft)", (.assets[]|[.name,.size,.digest]|@tsv)'
@@ -422,7 +431,7 @@ gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false --latest=fa
 gh release create v7 --repo Akashi3060/zahyou --verify-tag --draft \
   --title "zahyou v7.0.0" --notes-file release-notes-v7.0.0.md \
   "$DIST/zahyou.exe" "$DIST/zahyou_v7.ipynb" "$DIST/zahyou_engine.py" "$DIST/zahyou-manual-v4.pdf" \
-  "$DIST/LICENSE.txt" "$DIST/THIRD-PARTY-NOTICES.md" "$DIST/SHA256SUMS.txt"
+  "$DIST/LICENSE.txt" "$DIST/THIRD-PARTY-NOTICES.md" "$DIST"/zahyou_native-*.whl "$DIST/SHA256SUMS.txt"
 gh release view v7 --repo Akashi3060/zahyou --json isPrerelease,isDraft,assets \
   --jq '"prerelease=\(.isPrerelease) draft=\(.isDraft)", (.assets[]|[.name,.size,.digest]|@tsv)'   # prerelease=false
 gh release edit v7 --repo Akashi3060/zahyou --draft=false --latest                           # 出す(ここで v6 の全員に入れ替えが出る)

@@ -57,16 +57,17 @@ class Deps:
     workspace: list[str] = field(default_factory=list)  # ワークスペースのメンバーの名前
 
 
-def load_metadata(path: str | None = None, cargo: str = "cargo") -> dict:
-    """cargo metadata を読む。path が無ければ cargo を呼ぶ(--locked、ターゲットを絞る)。"""
+def load_metadata(path: str | None = None, cargo: str = "cargo", manifest: Path | None = None,
+                  target: str | None = TARGET) -> dict:
+    """cargo metadata を読む。path が無ければ cargo を呼ぶ(--locked。target があればそのターゲットに絞る)。
+    manifest の既定は rs/Cargo.toml(exe の workspace)。"""
     if path:
         with open(path, encoding="utf-8") as f:
             return json.load(f)
-    cmd = [
-        cargo, "metadata", "--format-version", "1", "--locked",
-        "--filter-platform", TARGET,
-        "--manifest-path", str(RS_DIR / "Cargo.toml"),
-    ]
+    cmd = [cargo, "metadata", "--format-version", "1", "--locked"]
+    if target:
+        cmd += ["--filter-platform", target]
+    cmd += ["--manifest-path", str(manifest or (RS_DIR / "Cargo.toml"))]
     try:
         out = subprocess.run(cmd, check=True, capture_output=True, **_no_window())
     except FileNotFoundError:
@@ -84,10 +85,13 @@ def _no_window() -> dict:
     return {}
 
 
-def classify(meta: dict) -> Deps:
-    """exe に入る依存・ビルドだけ・試験だけに分ける。"""
+def classify(meta: dict, local_is_own: bool = False) -> Deps:
+    """exe に入る依存・ビルドだけ・試験だけに分ける。local_is_own なら、パスで参照した(source の無い)
+    クレートも zahyou 自身のものとして扱う(rs/py の拡張モジュールは workspace の外から rs/crates を使うため)。"""
     pkgs = {p["id"]: p for p in meta["packages"]}
     ws = set(meta["workspace_members"])
+    if local_is_own:
+        ws |= {i for i, p in pkgs.items() if p.get("source") is None}
     nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
 
     def edges(nid: str, kinds: set) -> list[str]:

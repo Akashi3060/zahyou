@@ -21,14 +21,14 @@
 
 | ファイル | 中身 |
 |---|---|
-| `nb_loader.py` | セル A（pip 行 + エンジンの読み込み） |
+| `nb_loader.py` | セル A（pip 行 + エンジンの読み込み）。2 つ目の pip の行は Rust の解法の拡張モジュール zahyou-native（`../rs/py/README.md`）を、その版の Release から入れる（`{RELEASE_TAG}` を `build_nb.py` が版から入れる） |
 | `nb_pick.py` | セル B（`pick_image()` の 1 行） |
 | `nb_settings.py` | セル C 冒頭のユーザー設定項目（インデックスファイルの置き場所 `INDEX_DIR` もここ） |
 | `solver_wcs.py` | 幾何: 単位ベクトル ↔ 赤経赤緯、TAN 投影、TAN/SIP のフィット、FITS ヘッダー |
 | `solver_index.py` | インデックスファイル: FITS の表を生のバイトで読む、kd-tree の探索、段とタイルの選び方、検査 |
 | `solver_core.py` | 解法: 星の並べ替え、quad 作り、コード、照合、検証（対数オッズ）、改良、探索の本体 `sv_solve` |
 | `solver_synth.py` | テスト用: インデックスの星から「正解つきの合成星野」を作る（エンジンには入れない） |
-| `zahyou_core.py` | 画像読み込み・前処理・星検出・スケール推定・オフライン解析の段取り（`solve_offline` → `sv_solve`）・オンライン解析・目標の名前解決 |
+| `zahyou_core.py` | 画像読み込み・前処理・星検出・スケール推定・オフライン解析の段取り（`solve_offline` → `_solve_stars` → zahyou-native があればそれ、無ければ `sv_solve`。環境変数 `ZAHYOU_SOLVER=python` で `sv_solve` に固定）・オンライン解析・目標の名前解決 |
 | `zahyou_plot.py` | WCS の整形・描画・ずれの計算 |
 | `nb_ui.py` | 日本語フォント設定・画像選択ボタン（エンジンに入る） |
 | `nb_main.py` | `run()` 本体 |
@@ -76,6 +76,7 @@ python test_robust.py            # いろいろな画像で星が検出できる
 python test_online_settings.py   # オンライン解析が nova へ送る中身 (公開しない指定 publicly_visible="n" など)。
 #                                    astroquery の送信を偽物に差し替えるのでネットには出ない
 python test_notebook_run.py      # 本物のカーネルでセル A/B を実行し、画面に出るものを数える
+python test_native.py            # 拡張モジュール zahyou-native(../rs/py)の解が sv_solve と同じか。入っていなければ SKIP
 ```
 
 `test_solver_*.py` はどれも単体で走らせられる（`test_robust.py` と同じ書き方）。

@@ -90,6 +90,8 @@ def judge(expr: str | None, toolchain: bool = False):
 def main(argv=None) -> int:
     cd.stdout_utf8()
     ap = argparse.ArgumentParser(description="exe に入る依存のライセンスを許可リストと突き合わせる")
+    ap.add_argument("--wheel", action="store_true",
+                    help="exe ではなく、ノートブック版の拡張モジュール(rs/py。Windows・Mac・Linux 向け)の依存を見る")
     ap.add_argument("--metadata", help="cargo metadata の JSON(無ければ cargo を呼ぶ)")
     ap.add_argument("--cargo", default="cargo")
     ap.add_argument("--strict", action="store_true", help="OR の選べる式に禁止のライセンスがあるだけでも失敗")
@@ -97,8 +99,12 @@ def main(argv=None) -> int:
     ap.add_argument("--no-texts", action="store_true", help="ライセンスの本文が揃うかを見ない")
     args = ap.parse_args(argv)
 
-    meta = cd.load_metadata(args.metadata, args.cargo)
-    deps = cd.classify(meta)
+    if args.wheel:
+        meta = cd.load_metadata(args.metadata, args.cargo, manifest=cd.RS_DIR / "py" / "Cargo.toml", target=None)
+        deps = cd.classify(meta, local_is_own=True)
+    else:
+        meta = cd.load_metadata(args.metadata, args.cargo)
+        deps = cd.classify(meta)
     fails: list[str] = []
     notes: list[str] = []
 

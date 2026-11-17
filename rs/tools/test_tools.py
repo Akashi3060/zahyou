@@ -294,6 +294,22 @@ class RealTest(unittest.TestCase):
         self.assertEqual(rc, 0, buf.getvalue())
         self.assertIn("ring", buf.getvalue())
 
+    def test_wheel_notices_up_to_date(self):
+        # ノートブック版の拡張モジュール(rs/py)の表示。zahyou 自身のクレート(パスで参照)は載せない
+        buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(io.StringIO()):
+            rc = gn.main(["--wheel", "--check"])
+        self.assertEqual(rc, 0, buf.getvalue())
+        text = gn.OUT_WHEEL.read_text(encoding="utf-8")
+        self.assertIn("`pyo3`", text)
+        self.assertNotIn("`zahyou-solver`", text.split("## 拡張モジュールに入っているもの")[1])
+
+    def test_wheel_licenses_allowed(self):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = cl.main(["--wheel"])
+        self.assertEqual(rc, 0, buf.getvalue())
+
 
 if __name__ == "__main__":
     cd.stdout_utf8()

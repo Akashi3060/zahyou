@@ -14,6 +14,7 @@ import struct
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -327,6 +328,44 @@ class AssembleTest(unittest.TestCase):
         build_nb = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(build_nb)  # 名前を決めるだけ(build() は __main__ のときだけ走る)
         self.assertEqual(Path(build_nb.ROOT_NB), repo_nb)
+
+    def test_wheel_version(self):
+        self.assertEqual(mra.wheel_version("8.0.0"), "8.0.0")
+        self.assertEqual(mra.wheel_version("9.0.0-beta.2"), "9.0.0b2")
+        self.assertEqual(mra.wheel_version("9.0.0-rc.1"), "9.0.0rc1")
+
+    def _wheels(self, d: Path, version: str, tags=("win_amd64", "macosx_10_12_universal2",
+                                                    "manylinux_2_28_x86_64", "manylinux_2_28_aarch64"),
+                notices: bytes | None = None, lib: bytes = b"\x7fELF ok") -> Path:
+        d.mkdir(parents=True, exist_ok=True)
+        wv = mra.wheel_version(version)
+        if notices is None:
+            notices = (mra.RS_DIR / "py" / "THIRD-PARTY-NOTICES.md").read_bytes()
+        for t in tags:
+            with zipfile.ZipFile(d / f"zahyou_native-{wv}-cp39-abi3-{t}.whl", "w") as z:
+                z.writestr(f"zahyou_native-{wv}.dist-info/licenses/THIRD-PARTY-NOTICES.md", notices)
+                z.writestr("zahyou_native/zahyou_native" + (".pyd" if t == "win_amd64" else ".abi3.so"), lib)
+        return d
+
+    def test_check_wheels(self):
+        v = mra.cargo_version()
+        homes = [r"C:\Users\taro"]
+        self.assertEqual(mra.check_wheels(self._wheels(self.dir / "ok", v), v, homes), [])
+        # 渡さない・足りない・版が違う・表示が違う・手元で建てた(ホームのパスが残る)
+        self.assertTrue(mra.check_wheels(None, v, homes))
+        p = mra.check_wheels(self._wheels(self.dir / "few", v, tags=("win_amd64",)), v, homes)
+        self.assertTrue(any("Linux aarch64" in x for x in p), p)
+        p = mra.check_wheels(self._wheels(self.dir / "old", "1.0.0"), v, homes)
+        self.assertTrue(any("1.0.0" in x for x in p), p)
+        p = mra.check_wheels(self._wheels(self.dir / "lic", v, notices=b"x"), v, homes)
+        self.assertTrue(any("同梱物の表示" in x for x in p), p)
+        p = mra.check_wheels(self._wheels(self.dir / "home", v, lib=rb"C:\Users\taro\.cargo\registry\x.rs"), v, homes)
+        self.assertEqual(sum("ホームフォルダー" in x for x in p), 4, p)
+        # 配るものには wheel も入る(SHA256SUMS.txt にも載る)
+        ws = mra.wheel_files(self.dir / "ok")
+        plan = mra.plan_assets(Path("zahyou.exe"), v, "v4", ws)
+        self.assertEqual(list(plan.files)[-4:], [w.name for w in ws])
+        self.assertTrue(all(not mra.is_text_asset(w.name) for w in ws))
 
     def test_main_refuses_bad_out(self):
         exe = self.dir / "zahyou.exe"

@@ -1,0 +1,86 @@
+# ノートブック版の拡張モジュール zahyou-native(rs/py)の wheel を Windows・Mac・Linux 向けに建てる。
+# 建てた wheel は「zahyou-native-wheels」という名前の成果物に入る。Release に添えるのは人の作業
+# (docs/release-v7.md の 6 節: gh run download → make_release_assets.py --wheels)。このワークフローは Release に触れない。
+name: wheels
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "rs/py/**"
+      - "rs/crates/zahyou-solver/**"
+      - "rs/crates/zahyou-index/**"
+      - "rs/crates/zahyou-wcs/**"
+      - "rs/crates/zahyou-image/**"
+      - ".github/workflows/wheels.yml"
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows-x86_64, os: windows-latest, target: x86_64-pc-windows-msvc, manylinux: "" }
+          - { name: macos-universal2, os: macos-latest, target: universal2-apple-darwin, manylinux: "" }
+          - { name: linux-x86_64, os: ubuntu-latest, target: x86_64-unknown-linux-gnu, manylinux: "2_28" }
+          - { name: linux-aarch64, os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, manylinux: "2_28" }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: wheel を建てる
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: rs/py
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --locked --out dist
+          rust-toolchain: stable
+      - name: 入れて呼べるか確かめる(星図データは無いので「解なし」を返すことまで)
+        shell: bash
+        env:
+          PYTHONIOENCODING: utf-8   # Windows の画面は cp1252 で、ログの日本語を出すと落ちる
+        run: |
+          python -m pip install --no-index --find-links rs/py/dist zahyou-native
+          python - <<'PY'
+          import tempfile, zahyou_native as zn
+          print("zahyou_native", zn.__version__, "API", zn.API)
+          assert zn.API == 1
+          logs = []
+          with tempfile.TemporaryDirectory() as d:
+              r = zn.solve([(10.0, 20.0), (30.0, 40.0), (50.0, 15.0), (70.0, 60.0)], [4.0, 3.0, 2.0, 1.0],
+                           100, 80, d, timeout=5.0, cancel=lambda: False, log=logs.append)
+          print(r, logs)
+          assert r is None and logs, "星図データの無いフォルダーで解なしにならない"
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.name }}
+          path: rs/py/dist/*.whl
+          if-no-files-found: error
+
+  collect:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          merge-multiple: true
+          path: wheels
+      - run: ls -la wheels && test "$(ls wheels/*.whl | wc -l)" = 4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zahyou-native-wheels
+          path: wheels/*.whl
+          if-no-files-found: error
