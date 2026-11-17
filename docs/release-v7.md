@@ -1079,3 +1079,6 @@ e198e0ec5761ded05228222fe3f275ffaf6635d82ade4498bf7d692c2318f93a  AstrometryData
 d410376cf4c330fcc6f5363ad9bdf35810a657d277d2b596c8d4c35aa0a4cdfe  AstrometryData-index-5202.zip  3661346499
 ```
 - 次に配るときの注意: v9 から、Release のアセットに wheel 4 つが入る。wheel は手元ではなく main の wheels ワークフローでビルドする(6 節)。
+- 後片付け(同じ日。ユーザーの指示「過去の Release の作業フォルダーも消して」): 作者の PC の `%USERPROFILE%` にあった v7・v8 のアセットの
+  作業フォルダー 10 個(`zahyou-dist-v7*`・`zahyou-dist-v8`・上の v8 の準備にある `zahyou-dist-v8-prev-20261024` など、約 200 MB)をごみ箱へ移した。
+  残したのは v9 の `zahyou-dist-v9` と `zahyou-wheels-v9`。公開したものは GitHub の Release にある。
