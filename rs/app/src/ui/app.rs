@@ -379,7 +379,7 @@ impl ZahyouApp {
         }
     }
 
-    /// 知らせ・確認の箱(Python の messagebox)。持ち主があれば、そのウィンドウに従うモーダルにする
+    /// 知らせ・確認のメッセージボックス(Python の messagebox)。持ち主があれば、そのウィンドウに従うモーダルにする
     fn message(
         &mut self,
         host: Host,
@@ -398,7 +398,7 @@ impl ZahyouApp {
         d.show()
     }
 
-    /// ファイルの選択の箱(持ち主があれば、そのウィンドウに従うモーダル)
+    /// ファイルの選択のダイアログ(持ち主があれば、そのウィンドウに従うモーダル)
     fn file_dialog(host: Host) -> rfd::FileDialog {
         let d = rfd::FileDialog::new();
         match host {
