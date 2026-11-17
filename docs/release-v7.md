@@ -942,7 +942,12 @@ f677908c1c64fc1965de7076c670f5ed7ef6cf773a6296be35b35e60e40b451e  THIRD-PARTY-NO
 ### v9 の準備(2026-11-17。ユーザーの指示「推奨どおり直す」→「v9 を準備する」。Release の公開と配布ページの差し替えは了承のあとで)
 
 ブランチ `release-v9`(PR #53 のブランチ `ui/standard-terms` の上)。中身は、画面・ログ・配布物の造語を一般の用語にそろえた PR #53
-(文書は PR #52 で先に直した)と、次のバージョン上げ。解析のしくみと答えは v8 と同じ。
+(文書は PR #52 で先に直した)と、次のバージョン上げ。exe の解析のしくみと答えは v8 と同じ。
+11-17 の夕方に main(PR #54 の合成星野のテストの直しと、PR #56 のノートブック版の拡張モジュール zahyou-native)をマージした(`0b8e47a`)。
+- 競合は 4 ファイル(この文書・pipeline.rs のテスト・gen_notices.py・make_release_assets.py)。両方の変更を残し、#56 で足された文も一般の用語にそろえた
+- 2 節の表の 12 のとおり、`rs/py/Cargo.toml` を 9.0.0 にし、`rs/py/Cargo.lock` と `rs/py/THIRD-PARTY-NOTICES.md` を作り直した
+- README・マニュアル 4.3・wiki に、セル A の 2 つ目の pip の行(`expanded_assets/v9`)と zahyou-native の説明を足した
+- exe のソースはテスト(pipeline.rs の `version_in_docs_matches_cargo`)しか変わっていないので、exe はマージの前と同じものになる(下で確かめた)
 
 - **バージョン**: `rs/Cargo.toml` を `9.0.0` に(バージョン名 `v9`)。2 節の表のとおり、次のものを直した。
   - `Cargo.lock`(cargo が更新)、`zahyou_v8.ipynb` → `zahyou_v9.ipynb`(git mv)、`NB_VERSION = "v9"` と `build_nb.py`、`gen_notices.py`
@@ -956,7 +961,9 @@ f677908c1c64fc1965de7076c670f5ed7ef6cf773a6296be35b35e60e40b451e  THIRD-PARTY-NO
   - cargo の新しい警告「unused workspace dependency」4 件(bytemuck・memmap2・rfd・ureq。各クレートが自分でバージョンを書いている)は、ビルドに影響しないので残した
   - exe が読み込む DLL(`objdump -p`)は v8 の exe と同じ一覧
 - **exe**: 4 節の置き換えを付けてビルドした。
-  - 14,115,840 バイト、SHA256 `e099e7809a1399d15a75c415f54c347a08fd6ca9d67d3f501246c669885915ab`。作者のホームのパスは 0 か所(`/cargo` 500・`/zahyou` 2)
+  - 14,115,840 バイト、SHA256 `5f97551b1f77048a0d5aea1303de10efef4a0e8b66a71b54b53f9d4c82050a66`。作者のホームのパスは 0 か所(`/cargo` 500・`/zahyou` 2)
+  - main をマージしたあとでビルドし直した。マージの前の exe(`e099e780…`)とは、PE の見出しの時刻(TimeDateStamp)と
+    チェックサムの 4 バイトしか違わない(コードは同じ)。配るのはマージのあとの exe
   - `--engine-check` の version=v9、`--selftest --offline` 25/25
   - `--update-check` は「最新版です (v9)。公開されている最新版 v8 より新しいバージョンを使っています。」
   - 最初の描画まで: DirectX 12 で 0.44〜0.46 秒、OpenGL で 0.26〜0.35 秒(3 回ずつ。README の「起動と大きさ」・マニュアル 3.2・wiki の動作環境)
@@ -967,13 +974,14 @@ f677908c1c64fc1965de7076c670f5ed7ef6cf773a6296be35b35e60e40b451e  THIRD-PARTY-NO
   - `dev/test_solver_synth.py` は 63/64。落ちる `ra0` は main でも同じで、Python では 60 秒に収まったことの無い場面
     (PR #54 で、失敗の説明の星の順位を解法の並びで数えるように直した。タイムアウトは 60 秒のまま)
   - `dev/test_notebook_run.py` は nbclient が入っていないので走らせていない
-- **アセット**(6 節): `%USERPROFILE%\zahyou-dist-v9`。5 つの検査が全部 OK で、`sha256sum -c` も OK だった。
+- **アセット**(6 節): `%USERPROFILE%\zahyou-dist-v9`(main をマージする前に作ったもの。wheel はまだ無いので、wheels の検査は飛ばした)。
+  5 つの検査が全部 OK で、`sha256sum -c` も OK だった。wheel 4 つを足すと 11 個になる。
 
 ```
-e099e7809a1399d15a75c415f54c347a08fd6ca9d67d3f501246c669885915ab  zahyou.exe
-ab6cf18453344e1fb63e1318205f0326f775a9b9a312b1ad663ce37e3dfd0c9e  zahyou_v9.ipynb
-ecae0772813462ee4cfdf9fae699b539174911d48c9d3b148f2c0d3aec07a485  zahyou_engine.py
-f6d9cfd42a8df4d5cbc64d7ee06dbfe7bd03dfbc35d8148d088d2ba9f395e98c  zahyou-manual-v4.pdf
+5f97551b1f77048a0d5aea1303de10efef4a0e8b66a71b54b53f9d4c82050a66  zahyou.exe
+a2c4491a51b88aa025c466e7523f28e1191831f09fcc529b3b2869c923039123  zahyou_v9.ipynb
+2962b0a65a4a92a9494657aa027bc47fcfd4c2eeb30bfe8d8dc5a4de65becc9b  zahyou_engine.py
+ea1c23684b8e67cddddf0afb332d0e7e8bb44001325d02dd10d887e135b187a7  zahyou-manual-v4.pdf
 4efc7babf6be215d508636aefa67428a28d1c9977b02d1b580c47b26dd34a3f8  LICENSE.txt
 891c046d749baf2cef4efdd778a67dd40658344b7eb38b189530e386276b4a05  THIRD-PARTY-NOTICES.md
 ```
@@ -981,10 +989,13 @@ f6d9cfd42a8df4d5cbc64d7ee06dbfe7bd03dfbc35d8148d088d2ba9f395e98c  zahyou-manual-
   - `zahyou_v9.ipynb` は、セル C の説明の文言が変わったので v8 と中身が違う(配布ページでは中身を入れ替えてから改名する)
   - Release の本文と配布ページの `はじめにお読みください.txt` の下書きは、作者の手元の `Documents\claude\zahyou\release-backup\v9-release-20261117\`
 - **残り**(ユーザーの了承のあとで、この順に。v8 のときの手順と同じ):
-  1. PR を merge commit で main へ(`release-v9` のブランチ。#53 の commit も入るので #53 も merge 済みになる)
+  1. PR #55 を merge commit で main へ(`release-v9` のブランチ。#53 の commit も入るので #53 も merge 済みになる)
+  1b. main で wheels ワークフローを動かし、wheel 4 つを `$USERPROFILE/zahyou-wheels-v9` へダウンロードして、
+      `make_release_assets.py --wheels` でアセット 11 個(マニュアル・SHA256SUMS を含む)を作り直す。Release の本文の SHA256SUMS もそれに合わせる
   2. ブランチ `release-v9` と `ui/standard-terms` を消す(どちらもタグと同じ名前ではないが、片付けとして)
   3. タグ `v9` を merge の commit に打って push
-  4. Release を下書きで作り、prerelease=false・タイトル「zahyou v9」・アセット 7 つ・digest を見てから `--latest` で出す
+  4. Release を下書きで作り、prerelease=false・タイトル「zahyou v9」・アセット 11 個・digest を見てから `--latest` で出す。
+     出したあと、ノートブックのセル A の 2 つ目の pip の行(`expanded_assets/v9`)で wheel が入ることを確かめる
   5. 公開中の v8 の exe(のコピー、一時の LOCALAPPDATA)で「更新を確認」→「更新する」が v9 に入れ替わり、`zahyou.exe.old` が v9 の起動で消えること
   6. 配布ページ(Nextcloud)の差し替え: `zahyou.exe`・`zahyou_engine.py`・`THIRD-PARTY-NOTICES.md`・マニュアル v4・`はじめにお読みください.txt` は `cat >` で中身を入れ替え、
      `zahyou_v8.ipynb` は中身を v9 のものに入れ替えてから `zahyou_v9.ipynb` に改名する。`LICENSE.txt`・`SHA256SUMS.txt`(zip 用)・インデックスファイルの zip は触らない

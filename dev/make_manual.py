@@ -211,7 +211,7 @@ def build(out_path):
          "v6 の WSL 版は約 4 秒）"],
         ["exe", "約 13 MB・ウィンドウが出るまで 1 秒ほど（v6 は 102 MB・約 4 秒）"],
         ["対応する画角", "4′ 〜 2000′（焦点距離およそ 4800 mm まで。v6 と同じ）"],
-        ["バージョン", "v9。画面とログの言葉を一般の用語にそろえました（解析は v8 と同じ）。"
+        ["バージョン", "v9。画面とログの言葉を一般の用語にそろえ、ノートブック版でも Rust の解き方を使えるようにしました。"
          "v6・v7・v8 の［使い方］タブの「更新を確認」→「更新する」で入れ替わります（9.1）"],
     ], st, widths=[42 * mm, CONTENT_W - 42 * mm]))
     add(Spacer(1, 16 * mm))
@@ -756,7 +756,13 @@ def build(out_path):
         "# !pip install astroquery astropy matplotlib Pillow reproject ipywidgets scipy",
         "  ↓ 先頭の # を消す",
         "!pip install astroquery astropy matplotlib Pillow reproject ipywidgets scipy",
+        "!pip install zahyou-native --no-index --find-links \\",
+        "    https://github.com/Akashi3060/zahyou/releases/expanded_assets/v9",
     ], st, jp=True))
+    add(Paragraph("2 行目は、オフライン解析を exe と同じ Rust の解き方で速くする部品（zahyou-native）を、"
+                  "GitHub の Releases の v9 に添えた wheel から入れます（Windows・Mac・Linux）。"
+                  "入れなくても動きますが、星の並びによっては時間内に解けないことがあります。"
+                  "セル A の中では 1 行で書いてあります。", st.body))
 
     add(PageBreak())
 
@@ -1255,7 +1261,8 @@ def build(out_path):
         "https://github.com/Akashi3060/zahyou/releases/latest<br/>"
         "付けているもの: zahyou.exe（デスクトップ版）・zahyou_v9.ipynb と zahyou_engine.py"
         "（ノートブック版）・zahyou-manual-v4.pdf（このマニュアル）・LICENSE.txt・"
-        "THIRD-PARTY-NOTICES.md（exe に入っているライブラリの一覧）・SHA256SUMS.txt（全部の SHA256）",
+        "THIRD-PARTY-NOTICES.md（exe に入っているライブラリの一覧）・"
+        "zahyou_native の wheel 4 つ（ノートブック版で Rust の解き方を使う部品）・SHA256SUMS.txt（全部の SHA256）",
         "ソース：https://github.com/Akashi3060/zahyou",
         "配布ページ（zahyou.exe・ノートブック版・このマニュアルと、ノートブック版向けのインデックスファイルの zip）："
         "https://cloud.akashi-kosaku.uk/s/M2sNsnA2K4oJ4Co",

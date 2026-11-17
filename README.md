@@ -4,7 +4,9 @@
   v8 の README を、2026-11-17 に v9 向けに直した。バージョン名は v7・v8・v9 のような整数の形で書く(2026-10-24 のユーザーの決定)。
   配っている v7 の exe は、タイトル・［使い方］・ログとも「v7.0.0」と出る。
   v9 で変わったこと: 画面・ログ・配布物の言葉を一般の用語にそろえた(星図データ → インデックスファイル、落とす → ダウンロード、
-    段 → スケール、版 → バージョン など。PR #52・#53)。解析の中身と答えは v8 と同じ。ビルドの道具は rustc 1.100.0・gcc 16.2。
+    段 → スケール、版 → バージョン など。PR #52・#53)。exe の解析の中身と答えは v8 と同じ。ビルドの道具は rustc 1.100.0・gcc 16.2。
+    ノートブック版から exe と同じ Rust の解法を使えるようにした(拡張モジュール zahyou-native。PR #56)。
+    その wheel 4 つ(GitHub Actions でビルド)を Release に添える(rs/py/README.md・docs/release-v7.md 6 節)。
   v8 で変わったこと:
     (1) 速くなった(同じ候補を試せば出力は同じ。24 MP の解析全体 0.95 → 0.73 秒、解法の難しい場合 1.5〜1.6 倍、私有メモリの最大も減る。docs/rust-port.md 13 節)
     (2) 一致の少ない誤った解を出しにくくした(仮説を 10 万個以上試したあとは受け入れを厳しくする。比較の画像 155 枚の答えは変わらない。
@@ -53,7 +55,9 @@
 > **v9 では、画面とログの言葉を、一般に使われている用語にそろえました。**
 > - 「星図データ」を「インデックスファイル」、「落とす」を「ダウンロード」、インデックスの「段」を「スケール」、「版」を「バージョン」などに変えました。
 >   ［準備］タブのボタンは「おすすめをまとめてダウンロード」「必要なスケールを選ぶ」「選んだスケールをダウンロード」です。
-> - 解析のしくみと答えは v8 と同じです。
+> - **ノートブック版で、exe と同じ Rust の解き方を使えるようにしました**（部品 `zahyou-native`。セル A の 2 つ目の pip の行で入れます。
+>   入れなくても動きます。[下記](#ノートブック版中身を読んだり書き換えたい人へ)）。
+> - exe の解析のしくみと答えは v8 と同じです。
 
 > **v8 では、解析が速くなり、誤った答えを出しにくくなりました。**
 > - **速くなりました**（速くした所は、同じ候補を試せば v7 と同じ答えになります）。24 メガ画素の画像では、照合を除く処理全体（読み込みから図まで）が
@@ -94,6 +98,7 @@ Python も VS Code も要りません。インストールも不要で、ファ�
 | `zahyou-manual-v4.pdf` | 導入・運用マニュアル v4 |
 | `LICENSE.txt` | zahyou のライセンス（MIT） |
 | `THIRD-PARTY-NOTICES.md` | `zahyou.exe` に入っているライブラリの一覧とライセンス（exe の［使い方］タブでも読めます） |
+| `zahyou_native-9.0.0-cp39-abi3-*.whl`（4 つ） | ノートブック版で Rust の解き方を使う部品（Windows・Mac・Linux 向け。セル A の 2 つ目の pip の行が、ここから入れます） |
 | `SHA256SUMS.txt` | 上の全部の SHA256（中身が本物か確かめたいとき） |
 
 </details>
@@ -606,7 +611,7 @@ python --version
 
 ```
 !pip install astroquery astropy matplotlib Pillow reproject ipywidgets scipy
-!pip install zahyou-native --no-index --find-links https://github.com/Akashi3060/zahyou/releases/expanded_assets/v8
+!pip install zahyou-native --no-index --find-links https://github.com/Akashi3060/zahyou/releases/expanded_assets/v9
 ```
 
 2 行目は、オフライン解析を exe と同じ Rust 版の解き方で速くする部品です（Windows・Mac・Linux。入れなくても動きますが、
