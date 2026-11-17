@@ -1713,6 +1713,12 @@ mod tests {
             .collect();
         nbs.sort();
         assert_eq!(nbs, vec![nb_name], "直下の zahyou_v<数>.ipynb は今の版の 1 つだけのはず");
+        // ノートブック版の拡張モジュール(rs/py。workspace の外なので版を受け継げない)も同じ版
+        let py = std::fs::read_to_string(repo.join("rs").join("py").join("Cargo.toml")).unwrap();
+        assert!(
+            py.lines().any(|l| l.trim() == format!("version = \"{ver}\"")),
+            "rs/py/Cargo.toml の version が {ver} でない(docs/release-v7.md 2 節の表の 12)"
+        );
     }
 
     /// 行の中の、版名の形のβの版「v数-beta.数」「v数.数-beta.数」をすべて返す(頭の v は必須。v の前が英数字なら

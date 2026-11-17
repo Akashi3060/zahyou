@@ -1220,6 +1220,59 @@ def _solution_note(sol):
     return " / ".join(parts)
 
 
+# Rust の解法 (拡張モジュール zahyou_native。rs/py/README.md)。入っていれば sv_solve の代わりに使う。
+# 探す順と判定は sv_solve と同じなので同じ解になり、ブラインドで数十倍速い (合成の ra0: 217 → 6 秒)。
+# 環境変数 ZAHYOU_SOLVER=python なら使わない (Python の解法を確かめるとき)
+_NATIVE_API = 1
+_NATIVE = {"tried": False, "mod": None, "why": ""}
+
+
+def native_solver():
+    """使える zahyou_native を返す。無ければ None (理由は _NATIVE["why"])。"""
+    if not _NATIVE["tried"]:
+        _NATIVE["tried"] = True
+        if os.environ.get("ZAHYOU_SOLVER", "").strip().lower() == "python":
+            _NATIVE["why"] = "環境変数 ZAHYOU_SOLVER=python"
+        else:
+            try:
+                import zahyou_native as mod
+            except ImportError:
+                _NATIVE["why"] = ("zahyou-native が入っていません。セル A の 2 つ目の pip の行の # を外して"
+                                  "一度実行すると、Rust 版で速く解けます")
+            else:
+                if getattr(mod, "API", None) == _NATIVE_API:
+                    _NATIVE["mod"] = mod
+                else:
+                    _NATIVE["why"] = (f"zahyou-native {getattr(mod, '__version__', '?')} はこのノートブックと版が"
+                                      f"合いません (API {getattr(mod, 'API', '?')}、要るのは {_NATIVE_API})。"
+                                      "セル A の 2 つ目の pip の行に --upgrade を付けて実行し、カーネルを再起動してください")
+    return _NATIVE["mod"]
+
+
+def _solve_stars(xy, flux, width, height, catalog, *, scale_lo, scale_hi, hint, deadline, cancel, log):
+    """星のリストを解く。zahyou_native があればそれで、無ければ sv_solve で。戻り値は SvSolution か None。
+    中止は SvCancelled。"""
+    mod = native_solver()
+    if mod is None:
+        return sv_solve(xy, flux, width, height, catalog, scale_lo=scale_lo, scale_hi=scale_hi,
+                        hint=hint, deadline=deadline, cancel=cancel, log=log)
+    try:
+        r = mod.solve([(float(x), float(y)) for x, y in xy], [float(f) for f in flux], int(width), int(height),
+                      os.fspath(catalog.index_dir), scale_lo=scale_lo, scale_hi=scale_hi,
+                      hint=None if hint is None else tuple(float(v) for v in hint),
+                      timeout=max(0.0, deadline - time.monotonic()), cancel=cancel, log=log)
+    except InterruptedError:
+        raise SvCancelled()
+    if r is None:
+        return None
+    w = r["wcs"]
+    wcs = SvWcs(w["crval_xyz"], w["crpix"], w["cd"], a=w.get("a"), b=w.get("b"), ap=w.get("ap"), bp=w.get("bp"))
+    return SvSolution(wcs, r["logodds"], r["nmatch"], r["ndistract"], r["nfield"], r["nref"], r["index_name"],
+                      np.array(r["quad_field"], dtype=np.int64), np.array(r["quad_index"], dtype=np.int64),
+                      r["quads_tried"], r["hypotheses"], r["seconds"],
+                      [(int(i), np.array(v, dtype=np.float64), float(dist)) for i, v, dist in r["matches"]])
+
+
 def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
                   hint_radec=None, hint_radius_deg=5.0, verbose=True,
                   diagnostics=None, index_dir=None, prep=None, cancel=None):
@@ -1294,6 +1347,10 @@ def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
                 _log(f"     ※ 必要な段は横幅 {fov_w:.1f}′ ではなく"
                      f"短辺 {fov_short:.1f}′ で決まります。")
 
+    native = native_solver()
+    _log("  - 解析エンジン: " + (f"Rust 版 (zahyou-native {getattr(native, '__version__', '?')})" if native else
+                                f"Python 版 ({_NATIVE['why']})"))
+
     hint = None
     if hint_radec is not None:
         hint = (float(hint_radec[0]), float(hint_radec[1]), float(hint_radius_deg))
@@ -1366,9 +1423,9 @@ def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
         xy = np.array([[s["x"], s["y"]] for s in stars], dtype=np.float64)
         flux = np.array([s["flux"] for s in stars], dtype=np.float64)
         try:
-            sol = sv_solve(xy, flux, nx, ny, catalog, scale_lo=s_lo, scale_hi=s_hi,
-                           hint=hint_i, deadline=time.monotonic() + t,
-                           cancel=stopped, log=solver_log)
+            sol = _solve_stars(xy, flux, nx, ny, catalog, scale_lo=s_lo, scale_hi=s_hi,
+                               hint=hint_i, deadline=time.monotonic() + t,
+                               cancel=stopped, log=solver_log)
         except SvCancelled:
             _log("  ■ 中止しました。")
             return None

@@ -13,6 +13,8 @@
     zahyou-manual-v4.pdf      導入・運用マニュアル(リポジトリ直下の「…マニュアルv4.pdf」。v4 は dev/make_manual.py の VERSION)
     LICENSE.txt               LICENSE の写し
     THIRD-PARTY-NOTICES.md    rs/THIRD-PARTY-NOTICES.md(Rust 版の exe の同梱物。exe に埋め込んだものと同じ)
+    zahyou_native-*.whl       ノートブック版の拡張モジュール(rs/py)の wheel 4 つ(--wheels のフォルダーから。GitHub Actions の
+                              wheels ワークフローで建てたもの。ノートブックのセル A の 2 つ目の pip の行がこの Release から探す)
     SHA256SUMS.txt            上の全部の SHA256(`sha256sum -c SHA256SUMS.txt` で確かめられる形。改行は LF)
 
 検査(1 つでも落ちたら、何も書かずに終了コード 1):
@@ -27,6 +29,10 @@
               (cargo と rustc が要る。PATH に無ければ C:\\msys64\\ucrt64\\bin を足して探す)
     manual    dev/make_manual.py を一時フォルダーで組み直したものが、リポジトリの PDF とバイト単位で同じ
               (make_manual.py は作成日時などを固定して組むので、同じ中身なら同じバイトになる)
+    wheels    --wheels のフォルダーに、Cargo の版の zahyou_native の wheel が Windows x86_64・Mac(universal2)・
+              Linux x86_64・Linux aarch64 の 4 つそろっていて、それぞれの .dist-info/licenses/THIRD-PARTY-NOTICES.md が
+              rs/py/THIRD-PARTY-NOTICES.md と同じで、拡張モジュールに建てた人のホームフォルダーのパスが無い
+              (手元で建てた wheel を混ぜない)。rs/py/Cargo.toml の版も Cargo の版と同じ
     notebook  dev/build_nb.py を一時フォルダーへ走らせた出力と比べて、直下の zahyou_engine.py が同じで、
               zahyou_v<大きな版>.ipynb のセルの並びと中身が同じ(出力の例はリポジトリのものを残して配る)。
               NB_VERSION が版名と同じ
@@ -53,6 +59,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -61,18 +68,25 @@ REPO_DIR = RS_DIR.parent
 DEV_DIR = REPO_DIR / "dev"
 MSYS_BIN = Path(r"C:\msys64\ucrt64\bin")
 
-CHECKS = ("version", "paths", "notices", "manual", "notebook")
+CHECKS = ("version", "paths", "notices", "manual", "notebook", "wheels")
+# 配る wheel の行き先(名前の末尾のプラットフォームの印で見分ける)。.github/workflows/wheels.yml の matrix と同じ 4 つ
+WHEEL_PLATFORMS = (
+    ("Windows x86_64", lambda tag: tag == "win_amd64"),
+    ("Mac(universal2)", lambda tag: tag.startswith("macosx_") and tag.endswith("_universal2")),
+    ("Linux x86_64", lambda tag: "manylinux" in tag and tag.endswith("_x86_64")),
+    ("Linux aarch64", lambda tag: "manylinux" in tag and tag.endswith("_aarch64")),
+)
 VS_FF_PRERELEASE = 0x2
 VS_FIXEDFILEINFO_SIG = struct.pack("<I", 0xFEEF04BD)
 
 
 # ------------------------------------------------------------------ 名前と版 ---
 
-def cargo_version(cargo_toml: Path = RS_DIR / "Cargo.toml") -> str:
-    """rs/Cargo.toml の [workspace.package] version"""
+def cargo_version(cargo_toml: Path = RS_DIR / "Cargo.toml", table: str = "workspace") -> str:
+    """rs/Cargo.toml の [workspace.package] version(table="package" なら [package] version。rs/py 用)"""
     with open(cargo_toml, "rb") as f:
         data = tomllib.load(f)
-    return data["workspace"]["package"]["version"]
+    return data["package"]["version"] if table == "package" else data["workspace"]["package"]["version"]
 
 
 def split_version(version: str) -> tuple[tuple[int, int, int], str]:
@@ -275,6 +289,77 @@ def check_paths(exe: Path, homes: list[str] | None = None) -> list[str]:
     return problems
 
 
+# ------------------------------------------------------- ノートブック版の拡張モジュール ---
+
+def wheel_version(version: str) -> str:
+    """Cargo の版を wheel の名前の版(PEP 440)にする。maturin と同じ決まり: 8.0.0 → 8.0.0、8.0.0-beta.1 → 8.0.0b1"""
+    (ma, mi, pa), pre = split_version(version)
+    if not pre:
+        return f"{ma}.{mi}.{pa}"
+    m = re.fullmatch(r"(alpha|beta|rc)\.?(\d+)", pre)
+    if not m:
+        raise ValueError(f"wheel の版にできないプレリリース: {pre}")
+    return f"{ma}.{mi}.{pa}{ {'alpha': 'a', 'beta': 'b', 'rc': 'rc'}[m[1]] }{m[2]}"
+
+
+def wheel_files(wdir: Path | None) -> list[Path]:
+    return sorted(wdir.glob("*.whl")) if wdir is not None and wdir.is_dir() else []
+
+
+def check_wheels(wdir: Path | None, version: str, homes: list[str] | None = None) -> list[str]:
+    """--wheels のフォルダーの wheel を確かめる。見つかった説明の一覧(空なら合格)"""
+    if wdir is None:
+        return ["--wheels で zahyou-native の wheel のフォルダーを渡してください(docs/release-v7.md 6 節。"
+                "GitHub Actions の wheels ワークフローの成果物 zahyou-native-wheels)"]
+    problems = []
+    py_ver = cargo_version(RS_DIR / "py" / "Cargo.toml", "package")
+    if py_ver != version:
+        problems.append(f"rs/py/Cargo.toml の版 {py_ver} が rs/Cargo.toml の {version} と違います(release-v7.md 2 節の表の 12)")
+    wv = wheel_version(version)
+    want_notices = (RS_DIR / "py" / "THIRD-PARTY-NOTICES.md").read_bytes().replace(b"\r\n", b"\n")
+    found: dict[str, list[str]] = {name: [] for name, _ in WHEEL_PLATFORMS}
+    files = wheel_files(wdir)
+    if not files:
+        problems.append(f"{wdir} に wheel(*.whl)がありません")
+    for f in files:
+        m = re.fullmatch(r"zahyou_native-([^-]+)-cp39-abi3-(.+)\.whl", f.name)
+        if not m:
+            problems.append(f"{f.name}: zahyou_native の abi3 の wheel の名前ではありません")
+            continue
+        if m[1] != wv:
+            problems.append(f"{f.name}: 版 {m[1]} が Cargo の版({wv})と違います")
+        tags = m[2].split(".")
+        hit = [name for name, ok in WHEEL_PLATFORMS if any(ok(t) for t in tags)]
+        if len(hit) != 1:
+            problems.append(f"{f.name}: どのプラットフォームのものか決まりません")
+        else:
+            found[hit[0]].append(f.name)
+        try:
+            with zipfile.ZipFile(f) as z:
+                names = z.namelist()
+                lic = f"zahyou_native-{m[1]}.dist-info/licenses/THIRD-PARTY-NOTICES.md"
+                if lic not in names:
+                    problems.append(f"{f.name}: {lic} がありません")
+                elif z.read(lic).replace(b"\r\n", b"\n") != want_notices:
+                    problems.append(f"{f.name}: 同梱物の表示が rs/py/THIRD-PARTY-NOTICES.md と違います")
+                libs = [n for n in names if n.startswith("zahyou_native/") and n.endswith((".pyd", ".so"))]
+                if len(libs) != 1:
+                    problems.append(f"{f.name}: 拡張モジュール(.pyd / .so)が 1 つではありません({len(libs)} 個)")
+                for n in libs:
+                    data = z.read(n)
+                    for home in homes if homes is not None else home_dirs():
+                        c = count_home_paths(data, home)
+                        if sum(c.values()):
+                            problems.append(f"{f.name}: {n} にホームフォルダーのパス {home} が {sum(c.values())} か所あります"
+                                            "(手元で建てた wheel。配るのは GitHub Actions で建てたもの)")
+        except zipfile.BadZipFile:
+            problems.append(f"{f.name}: zip として読めません")
+    for name, got in found.items():
+        if len(got) != 1:
+            problems.append(f"{name} の wheel が {len(got)} 個です(1 つのはず){': ' + ', '.join(got) if got else ''}")
+    return problems
+
+
 # ------------------------------------------------------------ 同梱物の表示 ---
 
 def notices_embedded(exe_bytes: bytes, notices: bytes) -> bool:
@@ -390,7 +475,7 @@ def is_text_asset(name: str) -> bool:
     return name.lower().endswith(TEXT_SUFFIXES)
 
 
-def plan_assets(exe: Path, version: str, manual_ver: str) -> Plan:
+def plan_assets(exe: Path, version: str, manual_ver: str, wheels: list[Path] | None = None) -> Plan:
     p = Plan()
     p.files["zahyou.exe"] = exe
     p.files[notebook_asset_name(version)] = notebook_repo_path(version)
@@ -398,6 +483,8 @@ def plan_assets(exe: Path, version: str, manual_ver: str) -> Plan:
     p.files[f"zahyou-manual-{manual_ver}.pdf"] = manual_repo_path(manual_ver)
     p.files["LICENSE.txt"] = REPO_DIR / "LICENSE"
     p.files["THIRD-PARTY-NOTICES.md"] = RS_DIR / "THIRD-PARTY-NOTICES.md"
+    for w in wheels or []:
+        p.files[w.name] = w
     return p
 
 
@@ -455,6 +542,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--exe", type=Path, required=True, help="release ビルドの zahyou.exe")
     ap.add_argument("--out", type=Path, required=True, help="資産を置くフォルダー(空か無い、リポジトリの外)")
+    ap.add_argument("--wheels", type=Path, help="zahyou-native の wheel 4 つのフォルダー(GitHub Actions の成果物 zahyou-native-wheels)")
     ap.add_argument("--skip", action="append", default=[], choices=CHECKS, help="飛ばす検査(試しのとき用。何度でも)")
     ap.add_argument("--allow-in-repo", action="store_true", help=argparse.SUPPRESS)  # 試験用
     a = ap.parse_args(argv)
@@ -479,6 +567,7 @@ def main(argv: list[str] | None = None) -> int:
             "notices": lambda: check_notices(a.exe),
             "manual": lambda: check_manual(manual_ver, work / "manual"),
             "notebook": lambda: check_notebook(work / "notebook", version),
+            "wheels": lambda: check_wheels(a.wheels, version),
         }
         for name, run in steps.items():
             if name in a.skip:
@@ -495,14 +584,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"検査に落ちたので、資産は書いていません: {', '.join(failed)}", file=sys.stderr)
         return 1
 
-    names = assemble(plan_assets(a.exe, version, manual_ver), a.out)
+    names = assemble(plan_assets(a.exe, version, manual_ver, wheel_files(a.wheels)), a.out)
     problems = verify_sha256sums(a.out)
     if problems:
         print("SHA256SUMS.txt を読み直すと合いません: " + " / ".join(problems), file=sys.stderr)
         return 1
     print(f"\n{a.out}")
     for n in names + ["SHA256SUMS.txt"]:
-        print(f"  {n:28s} {(a.out / n).stat().st_size:>12,d} バイト")
+        print(f"  {n:52s} {(a.out / n).stat().st_size:>12,d} バイト")
     print("\nSHA256SUMS.txt:")
     print((a.out / "SHA256SUMS.txt").read_text(encoding="ascii"), end="")
     skipped = [n for n, r in results.items() if r is None]
