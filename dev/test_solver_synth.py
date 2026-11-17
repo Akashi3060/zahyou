@@ -8,9 +8,7 @@ docs/design-native-solver.md の 8 節。星野は dev/solver_synth.py が作る
   python dev/test_solver_synth.py                  全部
   python dev/test_solver_synth.py --quick          代表 13 件(全部は 59 件。ほかに物差しの自己検査 5 項目)
   python dev/test_solver_synth.py --case s52*,ra0  名前で選ぶ(ワイルドカード可、カンマ区切り)
-  --json 結果.json   --deadline-random 30(乱数の星野の締め切り [秒])
-  --deadline 60(全部の場合の締め切り [秒] をこの値にそろえる。付けなければ 60 秒で、ブラインドで遅い 3 件
-  (ra0・tile_corner・polein)だけ SLOW_DEADLINE。下の「位置」の場合の説明)
+  --json 結果.json   --deadline 60(1 件の締め切り [秒])   --deadline-random 30(乱数の星野)
   --index-dir C:\\AstrometryData(環境変数 ZAHYOU_INDEX_DIR でも)   --dump-fields フォルダー(星野を JSON に)
   --trace フォルダー(sv_solve の trace)   --verbose(解法のログ)   --fake(sv_solve の代わりに正解を返す偽物)
 
@@ -41,9 +39,6 @@ import solver_wcs as sw        # noqa: E402
 DATA = os.environ.get("ZAHYOU_INDEX_DIR", r"C:\AstrometryData")
 RESULTS = []                   # (名前, True / False / None(SKIP), 説明, 記録)
 ARGS = None
-DEADLINE = 60.0                # 1 件の締め切り [秒](解ける星野の既定)
-SLOW_DEADLINE = 600.0          # ブラインドで遅い場合の締め切り [秒]。rs/testdata/gen_solver.py が基準値を作るときの
-#                                Python の締め切りと同じ(ほかの処理と重なると 1.5 倍ほど遅くなるので、300 秒では足りなかった)
 
 # 各段の quad の大きさ(AB の角距離、分角)。docs/index-format.md の 1 節
 SERIES_ARCMIN = {
@@ -61,15 +56,13 @@ CASES = []
 
 def case(name, what, center, scale, size=(968, 548), rot=0.0, mirror=False, sip=None, seed=None,
          n_stars=60, drop=0.3, distract=0.3, noise=0.3, hint=None, scale_known=False, only=None,
-         random=False, quick=False, deadline=None):
-    """1 件の場合。hint = (東へ [度], 北へ [度], 半径 [度]): 正解の中心からずらした点をヒントにする。
-    deadline = この場合の締め切り [秒](None なら DEADLINE。--deadline を付けたときはそちら)。"""
+         random=False, quick=False):
+    """1 件の場合。hint = (東へ [度], 北へ [度], 半径 [度]): 正解の中心からずらした点をヒントにする。"""
     CASES.append(dict(name=name, what=what, center=center, scale=float(scale), size=tuple(size),
                       rot=float(rot), mirror=bool(mirror), sip=sip,
                       seed=seed if seed is not None else 1000 + len(CASES),
                       n_stars=n_stars, drop=drop, distract=distract, noise=noise, hint=hint,
-                      scale_known=bool(scale_known), only=only, random=bool(random), quick=bool(quick),
-                      deadline=None if deadline is None else float(deadline)))
+                      scale_known=bool(scale_known), only=only, random=bool(random), quick=bool(quick)))
 
 
 def _gm(iid):
@@ -117,21 +110,14 @@ for _rot, _mir, _q in ((0.0, False, False), (90.0, False, False), (211.3, False,
          (95.0 + _rot, 20.0 - _rot / 10.0), 1.4616, rot=_rot, mirror=_mir, scale_known=True, quick=_q)
 
 # 位置: タイルの境界・赤経 0°・極・南天
-# tile_corner・ra0・polein はブラインド(スケール不明・ヒントなし)で仮説が多く、Python では 60 秒に収まらない
-# ことがあるので、締め切りを SLOW_DEADLINE(600 秒)にする。遅いのは星野の形のためで、
-# 位置の扱いのせいではない: ra0 の当たるはずの quad は、解法の並び(明るい順のあと画面に散らした順)では
-# 37 番目の星まで組めず、そこまでの仮説は 3,461,197 個(Core Ultra 7 265K の Python で 154〜277 秒。tile_corner も 36〜69 秒。
-# 2026-10-16 の基準値 rs/testdata/solver_synth.json から 2026-11-17 の main まで、仮説の数も解も同じ)。
-# Rust は同じ探索を 3〜5 秒で終える。位置の扱いだけを速く確かめるのは、下のヒントつきの版
 case("tile_edge", "5200 系のタイルの辺の上(2 枚にまたがる)",
      tuple(float(v) for v in sw.sv_xyz_to_radec(si.sv_healpix_xy_point(17, 2, 0.5, 0.0))), 2.0, rot=33.0)
 case("tile_corner", "5200 系のタイルの角の上(3〜4 枚にまたがる)",
      tuple(float(v) for v in sw.sv_xyz_to_radec(si.sv_healpix_xy_point(5, 2, 0.0, 0.0))), 2.0,
-     rot=128.0, mirror=True, deadline=SLOW_DEADLINE)
-case("ra0", "赤経 0° をまたぐ", (0.0, 25.0), 1.4616, rot=250.0, deadline=SLOW_DEADLINE)
+     rot=128.0, mirror=True)
+case("ra0", "赤経 0° をまたぐ", (0.0, 25.0), 1.4616, rot=250.0)
 case("pole89", "極付近(赤緯 89°)", (123.0, 89.0), 1.4616, rot=45.0, quick=True)
-case("polein", "視野に天の北極が入る(赤緯 89.95°)", (77.0, 89.95), 1.4616, rot=300.0, mirror=True,
-     deadline=SLOW_DEADLINE)
+case("polein", "視野に天の北極が入る(赤緯 89.95°)", (77.0, 89.95), 1.4616, rot=300.0, mirror=True)
 case("south60", "南天(赤緯 −60°)", (250.0, -60.0), 1.4616, rot=190.0, quick=True)
 
 # ヒントの有無 × スケールの既知・不明(同じ星野)
@@ -157,9 +143,8 @@ case("rand_hint", "一様乱数の星 60 個 + ヒント + スケール既知", 
      hint=(0.0, 0.0, 5.0), scale_known=True, random=True)
 
 # 位置の場合と同じ星野(種も同じ)にヒントを与えた版。位置の場合のブラインドは全天探索の速さにも左右される
-# (Python 版では tile_corner・ra0・polein に 60 秒より長くかかることがある。上の SLOW_DEADLINE)ので、
-# 位置の扱い(タイルの選び方・赤経 0°・極)はこちらで速さと切り離して確かめる(締め切りは DEADLINE のまま)。
-# 種は一覧の順で決まるので、前の場合を変えないよう最後に置く
+# (Python 版では tile_corner・ra0・polein が 60 秒に収まらないことがある)ので、位置の扱い(タイルの選び方・
+# 赤経 0°・極)はこちらで速さと切り離して確かめる。種は一覧の順で決まるので、前の場合を変えないよう最後に置く
 for _n, _q in (("tile_edge", False), ("tile_corner", True), ("ra0", True), ("pole89", False),
                ("polein", False), ("south60", False)):
     _b = next(c for c in CASES if c["name"] == _n)
@@ -659,21 +644,11 @@ def fake_solve(xy, flux, width, height, catalog, **kw):
     return None if t is None else _FakeSolution(t)
 
 
-def deadline_of(c):
-    """この場合の締め切り [秒]。乱数の星野は --deadline-random。ほかは --deadline を付ければその値、
-    付けなければ場合ごとの値(遅い場合の SLOW_DEADLINE)か DEADLINE。"""
-    if c["random"]:
-        return ARGS.deadline_random
-    if ARGS.deadline is not None:
-        return ARGS.deadline
-    return c["deadline"] if c["deadline"] is not None else DEADLINE
-
-
 def run_solve(c, f, catalog, solver):
     W, H = c["size"]
     cat = restrict(catalog, c["only"]) if c["only"] else catalog
     s_lo, s_hi = scale_range(c)
-    deadline_s = deadline_of(c)
+    deadline_s = ARGS.deadline_random if c["random"] else ARGS.deadline
     kw = dict(scale_lo=s_lo, scale_hi=s_hi, hint=hint_of(c))
     if ARGS.verbose:
         kw["log"] = lambda m: print(f"      · {m}", flush=True)
@@ -754,8 +729,7 @@ def main():
     ap.add_argument("--quick", action="store_true", help="代表の場合だけ")
     ap.add_argument("--case", help="場合の名前(ワイルドカード可、カンマ区切り)")
     ap.add_argument("--json", help="結果を JSON に書く")
-    ap.add_argument("--deadline", type=float, default=None,
-                    help=f"全部の場合の締め切り [秒](付けなければ {DEADLINE:g}。ブラインドで遅い場合は {SLOW_DEADLINE:g})")
+    ap.add_argument("--deadline", type=float, default=60.0, help="1 件の締め切り [秒](既定 60)")
     ap.add_argument("--deadline-random", type=float, default=30.0, help="乱数の星野の締め切り [秒](既定 30)")
     ap.add_argument("--index-dir", default=None, help="索引の置き場所(既定 C:\\AstrometryData)")
     ap.add_argument("--dump-fields", help="星野を JSON でこのフォルダーに書く(移植の試験の入力)")
