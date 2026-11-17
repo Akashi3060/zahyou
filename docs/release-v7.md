@@ -973,7 +973,8 @@ f677908c1c64fc1965de7076c670f5ed7ef6cf773a6296be35b35e60e40b451e  THIRD-PARTY-NO
   - `dev/test_solver_core.py` 46/46、`dev/test_solver_real.py --engine --both` 62/62
   - `dev/test_solver_synth.py` は 63/64。落ちる `ra0` は main でも同じで、Python では 60 秒に収まったことの無い場面
     (PR #54 で、失敗の説明の星の順位を解法の並びで数えるように直した。タイムアウトは 60 秒のまま)
-  - `dev/test_notebook_run.py` は nbclient が入っていないので走らせていない
+  - `dev/test_notebook_run.py` は nbclient が入っていないので、このときは走らせていない。公開のあと(11-17 の夜)に、一時の venv
+    (`--system-site-packages` に nbclient・nbformat・ipykernel を足したもの)で走らせ、zahyou-native なし・あり(Release の Windows の wheel)とも 5/5
 - **アセット**(6 節): `%USERPROFILE%\zahyou-dist-v9`(main をマージする前に作ったもの。wheel はまだ無いので、wheels の検査は飛ばした)。
   5 つの検査が全部 OK で、`sha256sum -c` も OK だった。wheel 4 つを足すと 11 個になる。
 
