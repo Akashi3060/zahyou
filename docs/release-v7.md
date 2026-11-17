@@ -1001,3 +1001,49 @@ ea1c23684b8e67cddddf0afb332d0e7e8bb44001325d02dd10d887e135b187a7  zahyou-manual-
      `zahyou_v8.ipynb` は中身を v9 のものに入れ替えてから `zahyou_v9.ipynb` に改名する。`LICENSE.txt`・`SHA256SUMS.txt`(zip 用)・インデックスファイルの zip は触らない
      (zip の README のひな形 `dev/make_index_zips.py` は直したが、配布中の zip は作り直さない)。最後に公開 URL からダウンロードして SHA256 を確かめる
   7. wiki のブランチ `ui-standard-terms` を master へ入れて push する
+
+### v9(タグ `v9`。2026-11-17 20:21 JST に公開。ユーザーの指示「競合を解決して, v9まで進めて」)
+
+上の「v9 の準備」の「残り」を、この順に行った。
+
+1. PR #53 が main と競合していた(main に #54・#56 が入ったため)。#53 の commit を含み、競合を解いてある PR #55 を merge commit で main へ入れた
+   (`7c8a1cf`)。#53 も merge 済みになった。main の中身は `release-v9` の最後の commit(`5236765`)と同じ(`git diff` が空)。
+2. ブランチ `release-v9` と `ui/standard-terms` を消した(origin と手元)。
+3. main で wheels ワークフローを動かした(run `44068173700`、4 つの OS・CPU とも success)。wheel 4 つを `%USERPROFILE%\zahyou-wheels-v9` へダウンロードし、
+   `make_release_assets.py --wheels` でアセット 11 個を作った。6 つの検査(version・paths・notices・manual・notebook・wheels)が全部 OK、`sha256sum -c` も OK。
+   - 公開の前に、Windows の wheel を一時の venv に入れて `dev/test_native.py` を回した(9/9。Rust の解き方と Python の解き方の答えが同じ)。
+   - マージのあとのソースで `dev/test_solver_core.py` 46/46、`dev/test_solver_real.py --engine --both` 62/62。
+4. タグ `v9` を `7c8a1cf` に打って push(`git ls-remote` は `refs/tags/v9` だけ)。Release を下書きで作り、prerelease=false・タイトル「zahyou v9」・アセット 11 個で、
+   digest は SHA256SUMS.txt の 10 個と一致することを確かめた。本文のリンク 21 個は 200(日本語のアンカー 2 つは README の見出しで確かめた)、本文の大文字の SHA256 は
+   zahyou.exe の digest と同じ。`--latest` で出し、`releases/latest` は v9 になった。`expanded_assets/v9` も 200。
+5. 公開中の v8 の exe(`86d1e160…`)のコピーを一時のフォルダーに置き、一時の LOCALAPPDATA で `--update-check --update-apply` を動かした。
+   - 「新しい版があります: v9 (2026-11-17 版 / 14 MB)」(v8 の exe なので古い文言)と出て、SHA256 が一致し、入れ替わった(`zahyou.exe` = `5f97551b…`、`zahyou.exe.old` = v8)。
+   - v9 を一時の設定(API キーを空・オフラインのみ)で 1 回起動すると、`zahyou.exe.old` が消えた。起動したその 1 つだけを PID で閉じた。
+   - ノートブックのセル A の 2 つ目の pip の行と同じ形(`--no-index --find-links …/expanded_assets/v9`)で、一時の venv に zahyou-native 9.0.0 が入り、import できた。
+6. 配布ページを差し替えた。TrueNAS の root(一時 cronjob)で、スクリプトは先に新しいファイルの SHA256 と、今の中身が v8 であることを確かめる。
+   - `cat >` で中身を入れ替えたもの: `zahyou.exe`・`zahyou_engine.py`・`THIRD-PARTY-NOTICES.md`・マニュアル v4・`はじめにお読みください.txt`(v9 向け。BOM 付き・CRLF)。
+   - `zahyou_v8.ipynb` は中身を v9 のものに `cat >` で入れ替えてから、`mv` で `zahyou_v9.ipynb` にした。
+   - inode・所有者(AstroKIT:YoFu)・ACL は前のまま。wheel は配布ページには置かない(セル A の pip の行は GitHub の Release から入れる)。
+   - 公開 URL(public.php/webdav)から 6 つをダウンロードして、SHA256 がアセットと同じことを確かめた。`zahyou_v8.ipynb` は 404。
+   - 置き場の `_claude-tmp/zahyou-v9-swap` は root で消した(`_claude-tmp` のほかのものには触れていない)。スクリプト・ログ・本文・説明文・SHA256SUMS のバックアップは
+     作者の手元の `Documents\claude\zahyou\release-backup\v9-release-20261117\`。
+7. wiki のブランチ `ui-standard-terms` を master へ fast-forward で入れて push した(`4c7ca2e`)。公開の wiki に「v9 で変わったこと」が出ることを確かめた。
+
+アセット(`SHA256SUMS.txt`):
+
+```
+5f97551b1f77048a0d5aea1303de10efef4a0e8b66a71b54b53f9d4c82050a66  zahyou.exe
+a2c4491a51b88aa025c466e7523f28e1191831f09fcc529b3b2869c923039123  zahyou_v9.ipynb
+2962b0a65a4a92a9494657aa027bc47fcfd4c2eeb30bfe8d8dc5a4de65becc9b  zahyou_engine.py
+ea1c23684b8e67cddddf0afb332d0e7e8bb44001325d02dd10d887e135b187a7  zahyou-manual-v4.pdf
+4efc7babf6be215d508636aefa67428a28d1c9977b02d1b580c47b26dd34a3f8  LICENSE.txt
+891c046d749baf2cef4efdd778a67dd40658344b7eb38b189530e386276b4a05  THIRD-PARTY-NOTICES.md
+f3f9e1eb5a05a726632a4b32d8e420a448b72a4147c231648a849c0697244b2f  zahyou_native-9.0.0-cp39-abi3-macosx_10_12_universal2.macosx_10_12_x86_64.macosx_11_0_arm64.whl
+123f638aa04b29b6d20c0f72161c54ab9803c7026662b22c0cd877884633dde1  zahyou_native-9.0.0-cp39-abi3-manylinux_2_28_aarch64.whl
+96e60a2677be3224f53e867a6df6ae451e31f44bdab2d2ca58196db6faec7c4b  zahyou_native-9.0.0-cp39-abi3-manylinux_2_28_x86_64.whl
+5197113893d0ada4fcc467464b49b6c10a7a7eb471c315580f7b7c3581e0e304  zahyou_native-9.0.0-cp39-abi3-win_amd64.whl
+```
+
+- 残したもの: インデックスファイルの zip(と配布ページの `SHA256SUMS.txt`)は作り直していない。中の README は v8 までの言葉のまま
+  (ひな形の `dev/make_index_zips.py` は直してある。作り直すかは別に決める)。
+- 次に配るときの注意: v9 から、Release のアセットに wheel 4 つが入る。wheel は手元ではなく main の wheels ワークフローでビルドする(6 節)。
