@@ -1,9 +1,9 @@
 """
 天体画像解析プログラム「zahyou」導入・運用マニュアル v4 を PDF で作る。
-(v4 = zahyou v8(Cargo のバージョン 8.0.0、画面のバージョン名「v8」)。デスクトップ版は Rust の exe、オフライン解析は zahyou の中のエンジン。
+(v4 = zahyou v9(Cargo のバージョン 9.0.0、画面のバージョン名「v9」)。デスクトップ版は Rust の exe、オフライン解析は zahyou の中のエンジン。
  v4 は zahyou v7(正式版 7.0.0)のときに作ったバージョンで、2026-10-16 の決定(API キーの欄・DirectX 12 を既定)を入れ、
- 2026-10-18 に β版の本文から正式版の本文に書き直した。2026-10-24 に v8 向けに中身を直した(マニュアルのバージョンは v4 のまま)。
- 解析の時間・メモリの数字は v7 の開発中の exe(2026-10-16)で測ったもの。exe の大きさと起動の時間は v8 の exe で 2026-10-25 に測った)
+ 2026-10-18 に β版の本文から正式版の本文に書き直した。2026-10-24 に v8 向けに、2026-11-17 に v9 向けに中身を直した(マニュアルのバージョンは v4 のまま)。
+ 解析の時間・メモリの数字は v7 の開発中の exe(2026-10-16)で測ったもの。exe の大きさと起動の時間は v9 の exe で 2026-11-17 に測った)
 
   python make_manual.py [出力先.pdf]
 
@@ -200,18 +200,19 @@ def build(out_path):
                   ms.ParagraphStyle("clead2", parent=st.body, fontSize=10,
                                     leading=17, alignment=1, textColor=MUTED)))
     add(Spacer(1, 20 * mm))
-    # exe の大きさと起動の時間は v8 の exe で測り直し、README の「起動と大きさ」・3.2 の起動の文と同じ値にそろえる(docs/release-v7.md 2 節)
+    # exe の大きさと起動の時間は v9 の exe で測り直し、README の「起動と大きさ」・3.2 の起動の文と同じ値にそろえる(docs/release-v7.md 2 節)
     ext(table([
-        ["v4（zahyou v8）で変わったこと", ""],
+        ["v4（zahyou v9）で変わったこと", ""],
         ["オフライン解析", "zahyou の中のエンジンで解きます。"
          "<b>WSL も astrometry.net も要りません</b>（要るのはインデックスファイルだけ）。"
          "v8 では、一致する星の少ない誤った解を出しにくくしました"],
         ["解析の速さ", "オフラインで 1 枚 0.1 〜 0.4 秒"
-         "（0.5 〜 4 メガ画素の実写を v7 の開発中の exe で測った値。v8 はこれより速くなりました。"
+         "（0.5 〜 4 メガ画素の実写を v7 の開発中の exe で測った値。v8 以降はこれより速くなりました。"
          "v6 の WSL 版は約 4 秒）"],
         ["exe", "約 13 MB・ウィンドウが出るまで 1 秒ほど（v6 は 102 MB・約 4 秒）"],
         ["対応する画角", "4′ 〜 2000′（焦点距離およそ 4800 mm まで。v6 と同じ）"],
-        ["バージョン", "v8。v6 と v7 の［使い方］タブの「更新を確認」→「更新する」で入れ替わります（9.1）"],
+        ["バージョン", "v9。画面とログの言葉を一般の用語にそろえました（解析は v8 と同じ）。"
+         "v6・v7・v8 の［使い方］タブの「更新を確認」→「更新する」で入れ替わります（9.1）"],
     ], st, widths=[42 * mm, CONTENT_W - 42 * mm]))
     add(Spacer(1, 16 * mm))
     add(Paragraph(f"{VERSION}　{DATE}", ms.ParagraphStyle(
@@ -596,7 +597,7 @@ def build(out_path):
     ext(callout("確かめた PC は 2 台です", [
         "<b>ノート PC（Core i7-1360P・RAM 16 GB・SSD 1 TB）</b>で、v7 が軽快に動くことを確かめました。",
         "このマニュアルの数字は、すべて <b>Core Ultra 7 265K（20 スレッド）・Windows 11</b> の"
-        "デスクトップ PC で測ったものです（v8 もこの PC で確かめました。解析の時間とメモリは、断りの無いものは v7 の開発中の exe（2026-10-16。解析の中身は v7 と同じ）で測りました。GPU は NVIDIA GeForce RTX 3060 と内蔵の Intel Graphics の"
+        "デスクトップ PC で測ったものです（v8・v9 もこの PC で確かめました。解析の時間とメモリは、断りの無いものは v7 の開発中の exe（2026-10-16。解析の中身は v7 と同じ）で測りました。GPU は NVIDIA GeForce RTX 3060 と内蔵の Intel Graphics の"
         "両方で描いて確かめました）。描画方式の切り替え（DirectX 12 → OpenGL → ソフトウェア描画）は、"
         "わざと開けなくして確かめてあります。",
         "<b>RAM 8 GB の PC では、まだ確かめていません。</b>"
@@ -644,7 +645,7 @@ def build(out_path):
     add(Paragraph("画像の読み込みから図までの時間です。焦点距離も手がかりも入れず、"
                   "インデックスファイルは 4′〜2000′ の全部（253 ファイル）を置いた状態で測りました。"
                   "Python の図の時間は、図を作るまで（画面に描く・PNG にするのは含みません）。"
-                  "exe の列は v7 の開発中の exe（2026-10-16。解析の中身は v7 と同じ）で測った値で、v8 の exe では測り直していません。",
+                  "exe の列は v7 の開発中の exe（2026-10-16。解析の中身は v7 と同じ）で測った値で、v8・v9 の exe では測り直していません。",
                   st.small))
     ext(table([
         ["画像", "exe（v7）", "Python"],
@@ -658,12 +659,12 @@ def build(out_path):
         ["焦点距離の書き違い（2500 mm と入力、実際は 818 mm）",
          "26.3 秒", "132.4 秒"],
     ], st, widths=[92 * mm, 28 * mm, CONTENT_W - 120 * mm], align=[None, "c", "c"]))
-    add(Paragraph("v8 はこれより速くなっています（24 メガ画素の照合を除く処理全体で 0.95 秒 → 0.73 秒、"
+    add(Paragraph("v8 以降はこれより速くなっています（24 メガ画素の照合を除く処理全体で 0.95 秒 → 0.73 秒、"
                   "解くのが難しい場面の照合で 1.5 〜 1.6 倍。測り方は docs/rust-port.md の 13.4 節で、"
                   "上の表とは指標が違います）。", st.body))
-    # 起動の時間は v8 の exe で 2026-10-25 に測った値(--first-frame を 3 回ずつ)。README の「起動と大きさ」と同じ値にそろえてある
-    add(Paragraph("起動は、最初の描画まで <b>0.39 〜 0.47 秒</b>（DirectX 12、3 回）・"
-                  "0.46 〜 0.56 秒（OpenGL、3 回。どちらも v8 の exe）でした（v6 はウィンドウが出るまで約 4 秒）。"
+    # 起動の時間は v9 の exe で 2026-11-17 に測った値(--first-frame を 3 回ずつ)。README の「起動と大きさ」と同じ値にそろえてある
+    add(Paragraph("起動は、最初の描画まで <b>0.44 〜 0.46 秒</b>（DirectX 12、3 回）・"
+                  "0.26 〜 0.35 秒（OpenGL、3 回。どちらも v9 の exe）でした（v6 はウィンドウが出るまで約 4 秒）。"
                   "解析の時間はβ版で測り直しても差がありませんでした。"
                   "解けない画像は、解析の制限時間（既定 300 秒）まで探して終わります"
                   "（過ぎるのは 0.006 秒以内でした）。"
@@ -738,11 +739,11 @@ def build(out_path):
 
     ext(h2("ノートブックと必要なライブラリ", st, "4.3"))
     ext(steps([
-        "<b>zahyou_v8.ipynb</b> と <b>zahyou_engine.py</b> の 2 つ"
+        "<b>zahyou_v9.ipynb</b> と <b>zahyou_engine.py</b> の 2 つ"
         "（GitHub の Releases か配布ページにあります。付録 B）を、"
         "分かりやすい場所（デスクトップに作った zahyou フォルダーなど）に"
         "<b>そろえて</b>置きます。片方だけでは動きません。",
-        "<b>zahyou_v8.ipynb</b> を右クリック →「プログラムから開く」→ VS Code を選びます。",
+        "<b>zahyou_v9.ipynb</b> を右クリック →「プログラムから開く」→ VS Code を選びます。",
         "画面右上の「カーネルの選択」を押し、<b>Python 環境</b> →"
         "先ほど入れた Python を選びます。",
         "いちばん上の <b>セル A</b> の中の <b>!pip install</b> で始まる行の "
@@ -794,7 +795,7 @@ def build(out_path):
                   "同じフォルダーをそのまま使えます。", st.small))
 
     ext(h2("動作確認", st, "4.5"))
-    add(Paragraph("VS Code で zahyou_v8.ipynb を開き、セル A → セル B → セル C の順に"
+    add(Paragraph("VS Code で zahyou_v9.ipynb を開き、セル A → セル B → セル C の順に"
                   "実行します。手元のテスト画像で結果の図が 2 枚出れば導入完了です。",
                   st.body))
     add(Paragraph("オフライン解析だけを試したいときは、セル C の "
@@ -1118,35 +1119,35 @@ def build(out_path):
     add(Paragraph("設定（目標・焦点距離・配色・API キー）も、覚えた座標や画素スケールも"
                   "そのまま引き継がれます。<b>インデックスファイルもそのままで構いません</b>。"
                   "v6 で方法を「オフライン (WSL) のみ」にしていたら、"
-                  "v8 でも「オフラインのみ」として読みます"
+                  "v9 でも「オフラインのみ」として読みます"
                   "（設定ファイルには v6 と同じ書き方で書くので、v6 に戻しても方法は変わりません）。"
                   "v6 で WSL に入れた astrometry.net はもう使いません（消し方は 9.2）。",
                   st.body))
     # v6 の更新係も v7 の更新係も、GitHub の latest の zahyou.exe をダウンロードして入れ替える。
-    # v6 の exe は .bak として残り、v7 の exe は .old になって v8 の起動で消える(zahyou-net の cleanup_old_versions)
-    ext(callout("v6・v7 から入れ替える", [
-        "<b>v6 と v7 の［使い方］タブの「更新を確認」→「更新する」で、どちらも v8 に入れ替わります</b>"
-        "（v6 からも、じかに v8 になります）。設定・覚えた座標・インデックスファイルは、そのまま使えます。",
-        "v7 の exe は、入れ替えのあいだだけ zahyou.exe.old として残り、v8 を起動したときに消えます。"
+    # v6 の exe は .bak として残り、v7・v8 の exe は .old になって v9 の起動で消える(zahyou-net の cleanup_old_versions)
+    ext(callout("v6・v7・v8 から入れ替える", [
+        "<b>v6・v7・v8 の［使い方］タブの「更新を確認」→「更新する」で、どれも v9 に入れ替わります</b>"
+        "（v6・v7 からも、じかに v9 になります）。設定・覚えた座標・インデックスファイルは、そのまま使えます。",
+        "v7・v8 の exe は、入れ替えのあいだだけ zahyou.exe.old として残り、v9 を起動したときに消えます。"
         "v6 の exe は zahyou.exe.bak（約 102 MB）として残ります。"
-        "v8 はこれを消さないので、v8 が動いたら消してかまいません。",
-        "<b>前のバージョンに戻すとき</b>は、v7 なら GitHub の Releases の v7 から zahyou.exe をダウンロードして上書きし、"
+        "v9 はこれを消さないので、v9 が動いたら消してかまいません。",
+        "<b>前のバージョンに戻すとき</b>は、v7・v8 なら GitHub の Releases のそのバージョンから zahyou.exe をダウンロードして上書きし、"
         "v6 なら zahyou.exe.bak を zahyou.exe に名前を戻して置くだけです。設定はそのまま使えます。"
         "API キーの欄の値は v6 では使わず、v6 で設定を保存すると消えます"
-        "（次に v8 を開くと既定のキーに戻ります）。",
+        "（次に v9 を開くと既定のキーに戻ります）。",
         "<b>β版（v7.0.0-beta.N）</b>の「更新を確認」では v7 が出ます（メジャーバージョンが同じものだけを探すため）。"
-        "v7 にしてから、もう一度「更新を確認」→「更新する」で v8 になります。",
+        "v7 にしてから、もう一度「更新を確認」→「更新する」で v9 になります。",
     ], st, kind="note"))
     add(Paragraph("いま使っているバージョンは、<b>ウィンドウのタイトル</b>で分かります"
-                  "（「zahyou v8 — …」。v7 の exe は「zahyou v7.0.0 — …」と出ます）。", st.body))
+                  "（「zahyou v9 — …」。v7 の exe は「zahyou v7.0.0 — …」と出ます）。", st.body))
     ext(callout("ノートブック版は 2 つとも入れ替えてください", [
-        "<b>zahyou_v8.ipynb</b> と <b>zahyou_engine.py</b> は組で動きます。"
+        "<b>zahyou_v9.ipynb</b> と <b>zahyou_engine.py</b> は組で動きます。"
         "片方だけ新しくすると、設定の名前が食い違って動かなくなることがあります。",
         "入れ替えたあとは、ノートブックを開き直して"
         "<b>セル A からやり直して</b>ください"
         "（開いたままだと、古いエンジンが読み込まれたまま残ります）。",
-        "前のノートブック（v7 の zahyou_v7.ipynb・v6 の zahyou_v6.ipynb・β版の zahyou_v7_beta.ipynb）から"
-        "移るときは、<b>zahyou_v8.ipynb</b> を開いてください（古いノートブックは消してかまいません）。",
+        "前のノートブック（v8 の zahyou_v8.ipynb・v7 の zahyou_v7.ipynb・v6 の zahyou_v6.ipynb・β版の zahyou_v7_beta.ipynb）から"
+        "移るときは、<b>zahyou_v9.ipynb</b> を開いてください（古いノートブックは消してかまいません）。",
     ], st))
 
     ext(h2("やめる（消す）", st, "9.2"))
@@ -1252,7 +1253,7 @@ def build(out_path):
     ext(bullets([
         "GitHub の Releases（最新版）："
         "https://github.com/Akashi3060/zahyou/releases/latest<br/>"
-        "付けているもの: zahyou.exe（デスクトップ版）・zahyou_v8.ipynb と zahyou_engine.py"
+        "付けているもの: zahyou.exe（デスクトップ版）・zahyou_v9.ipynb と zahyou_engine.py"
         "（ノートブック版）・zahyou-manual-v4.pdf（このマニュアル）・LICENSE.txt・"
         "THIRD-PARTY-NOTICES.md（exe に入っているライブラリの一覧）・SHA256SUMS.txt（全部の SHA256）",
         "ソース：https://github.com/Akashi3060/zahyou",

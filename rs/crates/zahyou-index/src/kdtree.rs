@@ -294,9 +294,9 @@ pub(crate) fn ball_visit<S: KdInt, const D: usize>(
             let val = (raw & !meta.mask) as f64;
             let q = qt[dim];
             let mut rest = 0.0;
-            for k in 0..D {
+            for (k, g) in f.g2.iter().enumerate() {
                 if k != dim {
-                    rest += f.g2[k];
+                    rest += g;
                 }
             }
             let lo_r = f.lo[dim].max(val);
@@ -600,9 +600,9 @@ pub(crate) fn ball_visit_ref<S: KdInt, const D: usize>(
         let val = (raw & !meta.mask) as f64;
         let q = qt[dim];
         let mut rest = 0.0;
-        for k in 0..D {
+        for (k, g) in f.g2.iter().enumerate() {
             if k != dim {
-                rest += f.g2[k];
+                rest += g;
             }
         }
         let lo_r = f.lo[dim].max(val);

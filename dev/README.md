@@ -1,13 +1,13 @@
-# dev/ — zahyou_v8.ipynb の材料とテスト
+# dev/ — zahyou_v9.ipynb の材料とテスト
 
-`zahyou_v8.ipynb` はここのファイルから **生成** している。ノートブックを直接編集すると
+`zahyou_v9.ipynb` はここのファイルから **生成** している。ノートブックを直接編集すると
 次の生成で上書きされるので、直すときはこちらを直すこと。
-ノートブックの名前の数は exe のメジャーバージョンで、`build_nb.py` が `rs/Cargo.toml` のバージョンから決める（8.0.0 → `zahyou_v8.ipynb`。
+ノートブックの名前の数は exe のメジャーバージョンで、`build_nb.py` が `rs/Cargo.toml` のバージョンから決める（9.0.0 → `zahyou_v9.ipynb`。
 バージョンを上げたら直下のノートブックを `git mv` で改名する。[../docs/release-v7.md](../docs/release-v7.md) の 2 節）。
 
 `build_nb.py` は **2 つの成果物**を書き出す（引数なしで走らせると、リポジトリ直下の 2 つを書き換える）。
 
-* `zahyou_v8.ipynb` … markdown + 3 つの短いセル（合計 90 行ほど）。直下のものは**セルの中身だけを id ごとに
+* `zahyou_v9.ipynb` … markdown + 3 つの短いセル（合計 90 行ほど）。直下のものは**セルの中身だけを id ごとに
   差し替え**、出力の例は残す
 * `zahyou_engine.py` … 解析の中身（オフライン解析の自前のエンジンを含む）。セル A がこれを読み込む。
   `test_solver_real.py --engine` も直下のこれを使う（exe は Rust で書き直したもので、これを読まない）
@@ -64,7 +64,7 @@ exe と同じバージョン。バージョンを上げるときの直し方は 
 ## テスト
 
 ```
-python build_nb.py               # 直下の zahyou_engine.py・zahyou_v8.ipynb (セルの中身だけ) と、
+python build_nb.py               # 直下の zahyou_engine.py・zahyou_v9.ipynb (セルの中身だけ) と、
 #                                    テスト用の dev/zahyou.ipynb・dev/zahyou_engine.py を書く
 python test_solver_wcs.py        # solver_wcs:   TAN の往復・フィット・FITS ヘッダー
 python test_solver_index.py      # solver_index: インデックスの読み込み・kd-tree の探索・ファイルの検査
@@ -173,7 +173,7 @@ python make_index_zips.py 5204 5203 5202 --out C:\AstrometryData\dist
 python make_manual.py                 # ../天体画像解析プログラム「zahyou」導入・運用マニュアルv4.pdf
 ```
 
-マニュアル v4 は、v7 から（デスクトップ版が Rust の exe になってから）の本文。v8 でもバージョンは v4 のままで、中身だけを直した
+マニュアル v4 は、v7 から（デスクトップ版が Rust の exe になってから）の本文。v8・v9 でもバージョンは v4 のままで、中身だけを直した
 （解析の時間・メモリの数字は v7 の開発中の exe で 2026-10-16 に測ったもの）。v6（WSL を使うバージョン）の v3 の PDF は
 7.0.0 の準備でリポジトリから消した（commit `0b73d36`(旧タグ v7.0.0-beta.2)の木に残っている。配布ページも v4 に差し替える。
 [../docs/release-v7.md](../docs/release-v7.md) の 8 節）。
@@ -210,4 +210,4 @@ v6 と試作版の Python の exe（PyInstaller）用の表示（リポジトリ
 
 ---
 
-必要なければ `dev/` ごと消してよい（`zahyou_v8.ipynb` と `zahyou_engine.py` だけで動く）。
+必要なければ `dev/` ごと消してよい（`zahyou_v9.ipynb` と `zahyou_engine.py` だけで動く）。
