@@ -48,6 +48,8 @@ jobs:
           rust-toolchain: stable
       - name: 入れて呼べるか確かめる(星図データは無いので「解なし」を返すことまで)
         shell: bash
+        env:
+          PYTHONIOENCODING: utf-8   # Windows の画面は cp1252 で、ログの日本語を出すと落ちる
         run: |
           python -m pip install --no-index --find-links rs/py/dist zahyou-native
           python - <<'PY'
