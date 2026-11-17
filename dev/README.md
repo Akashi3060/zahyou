@@ -69,7 +69,8 @@ python build_nb.py               # 直下の zahyou_engine.py・zahyou_v9.ipynb 
 python test_solver_wcs.py        # solver_wcs:   TAN の往復・フィット・FITS ヘッダー
 python test_solver_index.py      # solver_index: インデックスの読み込み・kd-tree の探索・ファイルの検査
 python test_solver_core.py       # solver_core:  quad 作り・コード・照合・検証・改良・解の判定
-python test_solver_synth.py      # 合成星野をブラインドとヒントで解く
+python test_solver_synth.py      # 合成星野をブラインドとヒントで解く(ブラインドの ra0 は Python では 60 秒に収まらず FAIL。
+#                                    既知の失敗として受け入れている。2026-11-17 の決定。Rust の解き方では解ける)
 python test_solver_real.py       # 実写を解いて、v6 で求めた正解と比べる
 python test_solver_real.py --engine --both   # 同じことを、組み立てた直下の zahyou_engine.py と sv_solve 直接で
 python test_robust.py            # いろいろな画像で星が検出できるか (38 ケース)
@@ -167,6 +168,14 @@ python make_index_zips.py 5204 5203 5202 --out C:\AstrometryData\dist
 （[../rs/THIRD-PARTY-NOTICES.md](../rs/THIRD-PARTY-NOTICES.md) の「インデックスファイル」）。zip の中の README には、その条件
 （Gaia は CC BY-NC 3.0 IGO・商用は ESA の許可）・クレジット ESA/Gaia/DPAC・Gaia の定型の謝辞・論文を入れてある。
 **README を直したら zip を作り直して、配布ページの zip も差し替える**（TrueNAS の root で `cat >`。手順の例は docs/release-v7.md 10 節の v9）。
+
+基本セットの `AstrometryData.zip`（4100 系 13 ファイルと 5205・5206 の 96 ファイル、11′〜2000′）は詰め直さず、
+配布中の zip の後ろに README（`AstrometryData/README-index-base.txt`）だけを足す。FITS の部分は配布中の zip とバイト単位で同じまま、
+大きさも README の分しか変わらない（配布ページの説明文などの「869 MB」をそのまま使える）。
+
+```
+python make_index_zips.py --base-from <配布中の AstrometryData.zip> --out D:\dist
+```
 
 ## マニュアル PDF
 
