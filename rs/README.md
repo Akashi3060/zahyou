@@ -132,7 +132,7 @@ $PY -B testdata/bench_solver.py --out py.json # Python 側(解法。同じ星・
 cargo run --release -p zahyou-image --example bench_image   # 画像の読み込み・前処理・検出
 ```
 
-Python と比べるときは、同じ機械で、ほかの重い処理(ビルドなど)が動いていないときに測る。
+Python と比べるときは、同じマシンで、ほかの重い処理(ビルドなど)が動いていないときに測る。
 
 ## 同梱物の表示とライセンス
 
