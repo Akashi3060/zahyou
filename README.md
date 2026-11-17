@@ -606,7 +606,11 @@ python --version
 
 ```
 !pip install astroquery astropy matplotlib Pillow reproject ipywidgets scipy
+!pip install zahyou-native --no-index --find-links https://github.com/Akashi3060/zahyou/releases/expanded_assets/v8
 ```
+
+2 行目は、オフライン解析を exe と同じ Rust 版の解き方で速くする部品です（Windows・Mac・Linux。入れなくても動きますが、
+星の並びによっては時間内に解けないことがあります）。この Release に添えた wheel を入れます（`rs/py/README.md`）。
 
 ここまでで**オンライン解析は動きます。** 一度試してみてください。
 

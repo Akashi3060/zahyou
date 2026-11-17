@@ -407,6 +407,22 @@ def codetol_for(dimquads):
     return CODETOL * (math.sqrt(0.5) if int(dimquads) == 3 else 1.0)
 
 
+def solver_pos(f):
+    """出力の星の番号 → 解法の並びでの位置(0 始まり)。解法は星を明るい順に並べたあと画面に散らす(一様化。
+    solver_core の sv_order_stars = _SvField.order)ので、明るい順とは違う。quad 作りに使うのは、この並びの先頭
+    QUAD_STARS 個。solver_core が無ければ明るい順の位置で代える。"""
+    xy = np.asarray(f["xy"], dtype=np.float64).reshape(-1, 2)
+    flux = np.asarray(f["flux"], dtype=np.float64).reshape(-1)
+    try:
+        import solver_core as sc
+        order = np.asarray(sc.sv_order_stars(xy, flux, f["width"], f["height"], sc.SvParams.uniformize_boxes))
+    except (ImportError, AttributeError):
+        order = np.argsort(-np.where(np.isfinite(flux), flux, -np.inf), kind="stable")
+    pos = np.empty(len(order), dtype=np.int64)
+    pos[order] = np.arange(len(order))
+    return pos
+
+
 def wellposed(c, f, catalog):
     """この星野が「設計どおりの解法なら解ける形」か。
 
@@ -414,11 +430,14 @@ def wellposed(c, f, catalog):
     4 星(三角形は 3 星)が全部「出力した本物の星」にあり(1″ 以内)、画素で計算したコードと索引のコードの
     距離が codetol_for 以内のもの(= 照合で当たるはずの quad)を数える。コードは索引の星の順 A, B, C, D のまま
     計算するので正準化は要らない。鏡像(det CD > 0)の星野は x と y を入れ替えて計算する(設計書 3.4)。
-    戻り値 {"quads": 組める数, "good": 許容内の数, "good_top": 許容内で星が全部明るい順 QUAD_STARS 番以内の数,
-    "first": 許容内で最も早く組める quad の (最後の星の順位, 距離, 索引名), "dist_max": 組める quad の距離の最大}。
+    星の順位は解法の並び(solver_pos)で数える。
+    戻り値 {"quads": 組める数, "good": 許容内の数, "good_top": 許容内で星が全部解法の並びの QUAD_STARS 番以内の数,
+    "first": 許容内で最も早く組める quad の (最後の星の解法の並びでの位置, 距離, 索引名),
+    "dist_max": 組める quad の距離の最大}。
     """
     W, H = f["width"], f["height"]
     truth = f["truth"]
+    pos = solver_pos(f)
     real = np.array(f["meta"]["is_real"], dtype=bool)
     ridx = np.nonzero(real)[0]
     rxyz = np.array([f["meta"]["star_xyz"][k] for k in ridx], dtype=np.float64).reshape(-1, 3)
@@ -453,7 +472,7 @@ def wellposed(c, f, catalog):
             w = (z[:, 2:] - z[:, :1]) / (z[:, 1:2] - z[:, :1]) * (1 + 1j)
             mine = np.stack([w.real, w.imag], axis=-1).reshape(len(qi), -1)
             dist = np.linalg.norm(mine - fi.codes(qi), axis=1)
-            last = ranks.max(axis=1)
+            last = pos[ranks].max(axis=1)                     # 解法の並びで、quad が組めるようになる位置
             good = dist <= codetol_for(fi.dimquads)
             out["quads"] += int(len(qi))
             out["good"] += int(good.sum())
@@ -482,8 +501,11 @@ def selfcheck_wellposed(fields, catalog):
         return True, "空の星野が無い(乱数の星野だけ)"
     rows.sort(key=lambda t: (t[0], t[1]))
     few = "、".join(f"{n} {g} 個(最初は {r['first'][0] + 1} 番目の星まで)" for g, n, r in rows[:4] if r["first"])
-    msg = (f"空の星野 {len(rows)} 件とも、明るい順 {QUAD_STARS} 個で組めてコードが許容({CODETOL}、三角形は "
-           f"{codetol_for(3):.4f})以内の索引の quad がある。少ないもの: {few}")
+    late = max(((r["first"][0], n) for _, n, r in rows if r["first"]), default=None)
+    msg = (f"空の星野 {len(rows)} 件とも、解法の並び(明るい順のあと画面に散らした順)の先頭 {QUAD_STARS} 個で"
+           f"組めてコードが許容({CODETOL}、三角形は {codetol_for(3):.4f})以内のインデックスの quad がある。"
+           f"少ないもの: {few}"
+           + (f"。最初の quad がいちばん遅く組めるもの: {late[1]}({late[0] + 1} 番目の星まで)" if late else ""))
     return (not bad), (msg if not bad else "; ".join(bad[:6]))
 
 
@@ -667,7 +689,7 @@ def run_solve(c, f, catalog, solver):
         rec["over_s"] = round(dt - deadline_s, 3)
         return ok, f"{msg}  {dt:.1f} 秒{info}", rec
     if sol is None:
-        why = (f"。当たるはずの quad {wp['good_top']} 個、最初は {wp['first'][0] + 1} 番目の星まで"
+        why = (f"。当たるはずの quad {wp['good_top']} 個、最初は解法の並びで {wp['first'][0] + 1} 番目の星まで"
                f"({wp['first'][2]}、距離 {wp['first'][1]})" if wp and wp["first"] else "")
         return False, f"解けなかった({dt:.1f} 秒、締め切り {deadline_s:g} 秒){why}", rec
     try:

@@ -1,8 +1,10 @@
 # ==============================================================================
 #  セル A : 準備 (解析エンジンの読み込み)
 #
-#  初回だけ次の行の # を外して実行してください (以降は # を付けたままで結構です)。
+#  初回だけ次の 2 行の # を外して実行してください (以降は # を付けたままで結構です)。
+#  2 行目はオフライン解析を Rust 版で速くする部品です (Windows・Mac・Linux。入れなくても動きます)。
 # !pip install astroquery astropy matplotlib Pillow reproject ipywidgets scipy
+# !pip install zahyou-native --no-index --find-links https://github.com/Akashi3060/zahyou/releases/expanded_assets/{RELEASE_TAG}
 # ==============================================================================
 
 import os
@@ -32,7 +34,7 @@ try:
 except ImportError as _e:
     raise SystemExit(
         f"必要なライブラリが足りません ({_e.name})。\n"
-        "  このセルの 5 行目の # を外して、一度だけ実行してください。")
+        "  このセルの 6 行目の # を外して、一度だけ実行してください。")
 
 print(f"準備できました。  Python {sys.version.split()[0]}"
       f" / 図のフォント: {ZAHYOU_FONT or '（日本語フォントなし）'}")

@@ -1,0 +1,13 @@
+[build-system]
+requires = ["maturin>=1.8,<2"]
+build-backend = "maturin"
+
+[project]
+name = "zahyou-native"
+description = "zahyou のオフライン解析(星図照合)の Rust 版を、ノートブック版から呼ぶための拡張モジュール"
+requires-python = ">=3.9"
+# zahyou 自身の LICENSE(MIT)は THIRD-PARTY-NOTICES.md の冒頭に入っている。
+# 表示は wheel の .dist-info/licenses/ に入る(rs/tools/gen_notices.py --wheel で作る)
+license = "MIT"
+license-files = ["THIRD-PARTY-NOTICES.md"]
+dynamic = ["version"]

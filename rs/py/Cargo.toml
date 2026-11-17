@@ -1,0 +1,31 @@
+# ノートブック版(Python)から Rust の解法を呼ぶ拡張モジュール zahyou_native。
+# exe の workspace(../Cargo.toml)には入れない(exe のビルド・テスト・同梱物の表示に影響させないため)。
+# ビルドのしかたと配り方は README.md。
+[package]
+name = "zahyou-native"
+version = "9.0.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+authors = ["Yoshitaka Fujikawa / AstroKIT, Kyushu Institute of Technology"]
+publish = false
+
+[lib]
+name = "zahyou_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+zahyou-solver = { path = "../crates/zahyou-solver" }
+zahyou-index = { path = "../crates/zahyou-index" }
+zahyou-wcs = { path = "../crates/zahyou-wcs" }
+# Python から呼ぶ部分(MIT / Apache-2.0)。abi3 にして、1 つの wheel で Python 3.9 以降のどれでも動くようにする
+pyo3 = { version = "0.25", features = ["extension-module", "abi3-py39", "generate-import-lib"] }
+
+[workspace]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "unwind"
