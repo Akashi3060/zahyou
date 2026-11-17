@@ -166,7 +166,7 @@ python make_index_zips.py 5204 5203 5202 --out C:\AstrometryData\dist
 中身の星のデータには元の星表（Tycho-2 / Gaia DR2）の条件がかかる
 （[../rs/THIRD-PARTY-NOTICES.md](../rs/THIRD-PARTY-NOTICES.md) の「インデックスファイル」）。zip の中の README には、その条件
 （Gaia は CC BY-NC 3.0 IGO・商用は ESA の許可）・クレジット ESA/Gaia/DPAC・Gaia の定型の謝辞・論文を入れてある。
-**README を直したら zip を作り直して、配布ページの zip も差し替える**（人の作業）。
+**README を直したら zip を作り直して、配布ページの zip も差し替える**（TrueNAS の root で `cat >`。手順の例は docs/release-v7.md 10 節の v9）。
 
 ## マニュアル PDF
 

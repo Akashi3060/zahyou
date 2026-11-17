@@ -1044,6 +1044,19 @@ f3f9e1eb5a05a726632a4b32d8e420a448b72a4147c231648a849c0697244b2f  zahyou_native-
 5197113893d0ada4fcc467464b49b6c10a7a7eb471c315580f7b7c3581e0e304  zahyou_native-9.0.0-cp39-abi3-win_amd64.whl
 ```
 
-- 残したもの: インデックスファイルの zip(と配布ページの `SHA256SUMS.txt`)は作り直していない。中の README は v8 までの言葉のまま
-  (ひな形の `dev/make_index_zips.py` は直してある。作り直すかは別に決める)。
+- **インデックスファイルの zip も差し替えた**(同じ日の 20:47。ユーザーの指示「配布ページのインデックスファイルも今回の変更を適用して」)。
+  - 配布中の `AstrometryData-index-5202/5203/5204.zip` の中の README は 8 月に作ったもので、WSL の設定の説明・「星図データ」「段」のまま、
+    データの条件(Gaia の CC BY-NC 3.0 IGO など)も入っていなかった。基本セットの `AstrometryData.zip` は FITS だけで、文の入ったファイルは無いので触っていない。
+  - `python dev/make_index_zips.py 5204 5203 5202 --out %USERPROFILE%\zahyou-index-zips-v9` で作り直した(`C:\AstrometryData` から、圧縮レベル 1)。
+    中の FITS 144 個は、名前・大きさ・CRC32 とも配布中の zip と同じで、違うのは README だけ。`testzip` も OK。大きさは README の分だけ約 1 KB 増えた
+    (配布ページの説明文の 868 MB・1.7 GB・3.4 GB は変わらない)。
+  - TrueNAS の root(一時 cronjob)で、3 つの zip と配布ページの `SHA256SUMS.txt`(zip 用)を `cat >` で入れ替えた。スクリプトは先に、新しいファイルの SHA256 と、
+    今の中身が 8 月のものであることを確かめる。inode・所有者・ACL は前のまま。公開 URL から 4 つをダウンロードして、SHA256 が同じことを確かめた。
+
+```
+# AstrometryData 追加分  sha256  サイズ
+e198e0ec5761ded05228222fe3f275ffaf6635d82ade4498bf7d692c2318f93a  AstrometryData-index-5204.zip  910424521
+4415ce4fa720ce3017601ddd93ed04c51a0f82cac4c0d7c57dc5777e409a631b  AstrometryData-index-5203.zip  1838276861
+d410376cf4c330fcc6f5363ad9bdf35810a657d277d2b596c8d4c35aa0a4cdfe  AstrometryData-index-5202.zip  3661346499
+```
 - 次に配るときの注意: v9 から、Release のアセットに wheel 4 つが入る。wheel は手元ではなく main の wheels ワークフローでビルドする(6 節)。
