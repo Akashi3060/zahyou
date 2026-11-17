@@ -180,12 +180,12 @@ def run():
             if _cancel_requested():
                 return None
             index_dir = globals().get("INDEX_DIR") or DEFAULT_INDEX_DIR
-            _log("\n[オフライン] 星図データを確認しています...")
+            _log("\n[オフライン] インデックスファイルを確認しています...")
             diag = solver_diagnostics(index_dir)
             for m in diag["messages"]:
                 _log(f"⚠️ {m}")
             if diag["ok"]:
-                _log(f"  - 星図データ {len(diag['indexes'])} ファイル ({index_dir})")
+                _log(f"  - インデックスファイル {len(diag['indexes'])} 個 ({index_dir})")
                 wcs_header = solve_offline(
                     bundle, sources, work_dir, timeout=OFFLINE_TIMEOUT,
                     focal_length_mm=FOCAL_LENGTH_MM, hint_radec=hint,
@@ -245,7 +245,7 @@ def run():
                     _log(f"  検出した星と {d[i]:.1f} px "
                          f"({d[i] * summary['scale']:.1f}″) で一致しました。")
                 else:
-                    _log("  目標そのものは、この検出しきい値では拾えていません "
+                    _log("  目標そのものは、このしきい値では検出できていません "
                          "(暗い星なら正常です)。")
         else:
             _log("\n  目標は画面の外です。矢印の向きへ動かしてください。")

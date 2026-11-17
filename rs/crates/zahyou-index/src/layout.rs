@@ -177,20 +177,20 @@ pub(crate) fn layout_from_source<S: BlockSource>(src: &mut S, size: u64, fname: 
     let h0 = &hdus[0].header;
     for key in ["INDEXID", "HEALPIX", "HPNSIDE", "DIMQUADS", "NQUADS", "NSTARS", "SCALE_L", "SCALE_U"] {
         if !h0.contains(key) {
-            return bad(format!("索引のヘッダーに {key} がありません"));
+            return bad(format!("インデックスファイルのヘッダーに {key} がありません"));
         }
     }
     for (i, h) in hdus.iter().enumerate() {
         // 値の空のカードは Python 版では None = 無いのと同じ
         let e = h.header.get("ENDIAN").filter(|v| **v != FitsValue::Null);
         if i == 0 && e.is_none() {
-            return bad("索引のヘッダーに ENDIAN がありません".to_string());
+            return bad("インデックスファイルのヘッダーに ENDIAN がありません".to_string());
         }
         if let Some(v) = e
             && h.header.str("ENDIAN") != Some(INDEX_ENDIAN)
         {
             return bad(format!(
-                "ENDIAN = {} の索引は読めません(読めるのは {} だけ)",
+                "ENDIAN = {} のインデックスファイルは読めません(読めるのは {} だけ)",
                 v.py_repr(),
                 str_repr(INDEX_ENDIAN)
             ));
@@ -217,7 +217,7 @@ pub(crate) fn layout_from_source<S: BlockSource>(src: &mut S, size: u64, fname: 
     match g_tile {
         None => {
             if healpix != -1 {
-                return bad(format!("全天の名前なのにタイルの索引です(HEALPIX = {healpix})"));
+                return bad(format!("全天の名前なのにタイルのインデックスファイルです(HEALPIX = {healpix})"));
             }
         }
         Some(t) => {

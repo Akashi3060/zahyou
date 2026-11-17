@@ -13,8 +13,8 @@
     zahyou_engine.py / zahyou_v8.ipynb / dev/ / docs/(Python 版)
 
 オフライン解析のエンジン(`zahyou-solver`・`zahyou-index`・`zahyou-wcs`)も zahyou 自身のコードです。
-`zahyou.exe` に入っている第三者のソフトウェア(この文書の後半)、星図データ
-(index ファイル)とその元になった星表は含みません。
+`zahyou.exe` に入っている第三者のソフトウェア(この文書の後半)、
+インデックスファイルとその元になった星表は含みません。
 
 ```text
 MIT License
@@ -47,11 +47,11 @@ SOFTWARE.
 `dev/solver_core.py`)を Rust に移したもので、zahyou 自身のコードとして MIT ライセンスで配ります。
 WSL も astrometry.net の実行ファイルも使いません。
 
-解き方(星 4 つ(広い段は 3 つ)の並びの幾何ハッシュ → 照合 → ベイズの検証 → 改良)は、
+解き方(星 4 つ(広い画角のスケールは 3 つ)の並びの幾何ハッシュ → 照合 → ベイズの検証 → 改良)は、
 下の論文と、astrometry.net の公開文書と BSD-3 の部分のソースを読んでまとめた調べ物をもとに、
 Python 版で自分で書き直したものです。GPL の部分(FITS の入出力層 `qfits-an` など)は読んでいません。
 **astrometry.net のコードは含んでいません**(取り込みも移植もしていません)。
-FITS の読み込みは FITS 規格から書きました。索引ファイルの形式は、実物のファイルを読んで調べました
+FITS の読み込みは FITS 規格から書きました。インデックスファイルの形式は、実物のファイルを読んで調べました
 (`docs/index-format.md`)。
 
 - Lang, D., Hogg, D. W., Mierle, K., Blanton, M., & Roweis, S. (2010),
@@ -61,10 +61,10 @@ FITS の読み込みは FITS 規格から書きました。索引ファイルの
 
 ## 同梱していないもの
 
-### 星図データ(index ファイル)
+### インデックスファイル
 
 zahyou の実行ファイルには同梱していません。exe は［準備］タブが下記の原典から
-落とします。中身の星のデータには、元になった星表の条件がかかります。
+ダウンロードします。中身の星のデータには、元になった星表の条件がかかります。
 
 - 4100 シリーズ … Tycho-2 星表から作られたもの。<https://data.astrometry.net/4100/>
 - 5200 シリーズ … Gaia DR2 と Tycho-2 から作られたもの。
@@ -88,7 +88,7 @@ zahyou の実行ファイルには同梱していません。exe は［準備］
 > participating in the Gaia Multilateral Agreement.
 
 **配布ページ(Nextcloud)に置いてある `AstrometryData*.zip` は、この
-index ファイルをそのまま詰め直したものです。** 中身は上記の原典と同一で、
+インデックスファイルをそのまま詰め直したものです。** 中身は上記の原典と同一で、
 回線の細い場所でまとめて取れるようにしてあるだけです。
 元データの権利は Gaia(ESA/Gaia/DPAC)および Tycho-2 の各制作者にあり、
 上の条件(Gaia は非商用・クレジット)はこの zip にもそのままかかります。
@@ -114,7 +114,7 @@ index ファイルをそのまま詰め直したものです。** 中身は上�
 それぞれの著作権は各プロジェクトに属し、各ライセンスの条件で配布されています。
 ライセンス式が `A OR B` のものは、そのどれか 1 つの条件で使っています(本文は、配布物にあるものをすべて載せています)。
 
-- Rust のクレート: **213 個**(`cargo metadata`、ターゲット `x86_64-pc-windows-gnu`。ビルドのときだけ使う 18 個と、試験のときだけ使う 1 個は除く)
+- Rust のクレート: **213 個**(`cargo metadata`、ターゲット `x86_64-pc-windows-gnu`。ビルドのときだけ使う 18 個と、テストのときだけ使う 1 個は除く)
   - うち 21 個は proc-macro(コンパイルのときにコードを生成するもの)とその依存です。exe にコードは入りませんが、念のため載せています
 - egui の既定の書体 4 つ(exe に埋め込まれる。下の「画面の既定の書体」)
 - リンクのときに結合される実行時ライブラリ(下の「Rust の標準ライブラリと実行時ライブラリ」)
@@ -174,7 +174,7 @@ Bitstream Vera License です。Noto Emoji は SIL Open Font License 1.1、Ubunt
 
 `ring` 0.17.14(TLS の暗号。`ureq` → `rustls` が HTTPS の通信で使う)は、ビルドのときに
 **配布物に入っている C のソースを C コンパイラー(MSYS2 UCRT64 の gcc)で組み立て**、
-アセンブリの部分は**配布物に入っている組み立て済みの目的ファイル**(BoringSSL 由来の perlasm を
+アセンブリの部分は**配布物に入っている組み立て済みのオブジェクトファイル**(BoringSSL 由来の perlasm を
 NASM 形式で組み立てたもの。`pregenerated/*-nasm.o`)を使って、静的ライブラリ `ring_core_0_17_14_` にまとめ、exe に結合しています。
 これは ring 自身のコード(BoringSSL・fiat-crypto 由来の部分を含む)を Rust から呼んでいるもので、
 **システムの C ライブラリ(OpenSSL など)への FFI ではありません**。exe が読み込む DLL は
@@ -184,7 +184,7 @@ Windows のシステムのものだけです。ライセンスは Apache-2.0 AND
 ### Rust の標準ライブラリと実行時ライブラリ
 
 `x86_64-pc-windows-gnu` 向けにリンクすると、次のものが exe に静的に結合されます(`rustc --print link-args` で確かめたもの)。
-コンパイラーは rustc 1.99.1 (58cf8f9c3 2026-10-13) (Rev1, Built by MSYS2 project)、リンカーは MSYS2 UCRT64 の gcc 16.2.0。
+コンパイラーは rustc 1.100.0 (0ef1bc386 2026-11-09) (Rev1, Built by MSYS2 project)、リンカーは MSYS2 UCRT64 の gcc 16.2.0。
 
 | 結合されるもの | ライセンス式 | 表示 |
 |---|---|---|
@@ -197,7 +197,7 @@ Windows のシステムのものだけです。ライセンスは Apache-2.0 AND
 - 標準ライブラリの rlib: `addr2line`・`adler2`・`alloc`・`cfg_if`・`compiler_builtins`・`core`・`gimli`・`hashbrown`・`libc`・`memchr`・`miniz_oxide`・`object`・`panic_unwind`・`rustc_demangle`・`rustc_std_workspace_alloc`・`rustc_std_workspace_core`・`std`・`std_detect`・`unwind`・`windows_link`。
   Rust の配布物の表示(実行時-1)のとおり、標準ライブラリは Apache-2.0 OR MIT です(本文は下の「ライセンス本文」の Apache-2.0・MIT と同じ)。
 - `compiler_builtins` には LLVM の compiler-rt の C が入っています。LLVM の例外(実行時-2)により、
-  組み込まれた目的コードについては Apache-2.0 の表示の条件(4 条 (a)(b)(d))がかかりません。
+  組み込まれたオブジェクトコードについては Apache-2.0 の表示の条件(4 条 (a)(b)(d))がかかりません。
 - libgcc と libgcc_eh は GPL-3.0-or-later に GCC 実行時ライブラリ例外 3.1 が付いたものです(実行時-5)。
   この例外のもとでは、これらを結合した exe を任意の条件で配れます(zahyou は MIT)。
 - MinGW-w64 の表示(実行時-3)の最後の節にある Wine 由来のヘッダー(LGPL)は、C をコンパイルするときの
@@ -207,7 +207,7 @@ Windows のシステムのものだけです。ライセンスは Apache-2.0 AND
 
 「本文」の番号は、下の「ライセンス本文」の番号です。
 
-| クレート | 版 | ライセンス式 | 本文 | 備考 |
+| クレート | バージョン | ライセンス式 | 本文 | 備考 |
 |---|---|---|---|---|
 | `ab_glyph` | 0.2.32 | Apache-2.0 | 1 |  |
 | `ab_glyph_rasterizer` | 0.1.10 | Apache-2.0 | 1 |  |
@@ -426,7 +426,7 @@ Windows のシステムのものだけです。ライセンスは Apache-2.0 AND
 ## ライセンス本文
 
 同じ本文は 1 回だけ載せ、その本文に当たるクレートと、それぞれの著作権表示を並べています。
-著作権表示は各クレートのライセンスファイルの中の行をそのまま写したものです(ファイルに著作権の行が無いものは、代わりに Cargo.toml の作者を添えています)。
+著作権表示は各クレートのライセンスファイルの中の行をそのままコピーしたものです(ファイルに著作権の行が無いものは、代わりに Cargo.toml の作者を添えています)。
 Apache-2.0 の本文の末尾にある付録(使い方の例)は、標準のものそのままのときは省いています。
 
 Apache-2.0 の 4 条 (d) の NOTICE ファイルを配布物に持つクレートはありません(あれば、その中身をそのまま下に載せます)。
@@ -3080,7 +3080,7 @@ licensed under the Apache License, Version 2.0 <LICENSE-APACHE> or
 
 ## 実行時ライブラリの表示
 
-MSYS2 UCRT64 のツールチェーンに入っている表示のファイルを、そのまま写しています(HTML のものは文字だけにしています)。
+MSYS2 UCRT64 のツールチェーンに入っている表示のファイルを、そのままコピーしています(HTML のものは文字だけにしています)。
 
 ### 実行時-1: Rust の標準ライブラリ(std・core・alloc とその依存)
 
@@ -3136,6 +3136,14 @@ Exceptions:
 File/Directory: mod.rs
 
 License: Apache-2.0 OR MIT
+
+Copyright: The Rust Project Developers (see https://thanks.rust-lang.org)
+
+File/Directory:
+
+License: Apache-2.0 WITH LLVM-exception AND (Apache-2.0 OR MIT)
+
+Copyright: 2003-2019 University of Illinois at Urbana-Champaign
 
 Copyright: The Rust Project Developers (see https://thanks.rust-lang.org)
 

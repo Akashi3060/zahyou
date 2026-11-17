@@ -5,12 +5,12 @@
 [../docs/design-native-solver.md](../docs/design-native-solver.md)、インデックスファイルの形式は [../docs/index-format.md](../docs/index-format.md)。
 
 ```
-crates/zahyou-wcs     座標・TAN/SIP の WCS・当てはめ・FITS のカード
-crates/zahyou-index   索引ファイル(astrometry.net の index-*.fits)の読み取りと探索(unsafe は mmap の 1 か所だけ)
-crates/zahyou-image   画像の読み込み・前処理・星の検出(標準の検出と、解法に渡す深い検出)
+crates/zahyou-wcs     座標・TAN/SIP の WCS・フィット・FITS のカード
+crates/zahyou-index   インデックスファイル(astrometry.net の index-*.fits)の読み取りと探索(unsafe は mmap の 1 か所だけ)
+crates/zahyou-image   画像の読み込み・前処理・星の検出(標準の検出と、解法に渡すディープ検出)
 crates/zahyou-solver  解法(quad 法)と、オフライン解析の試行のはしご(solve_offline)
 crates/zahyou-plot    図(撮影時の向き・北が上)と PNG
-crates/zahyou-net     更新・星図データのダウンロード・天体名の解決・nova.astrometry.net
+crates/zahyou-net     更新・インデックスファイルのダウンロード・天体名の解決・nova.astrometry.net
 app                   画面(eframe/egui)と、画面を出さない入口。exe は zahyou.exe
 testdata              Python 基準実装から作った照合用の値(JSON)と、それを作るスクリプト(gen_*.py)
 app/testdata          解析の流れ全体(本物の解法つき)を Python の run() と比べる値(gen_run_solver.py)
@@ -44,7 +44,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace                                   # 既定(3 分ほど)
 cargo test --workspace -- --ignored --nocapture          # 重いもの・外に問い合わせるもの(15 分ほど)
 cargo test -p zahyou run_solver_vs_python -- --nocapture # 解析の流れ全体を本物の解法で Python と比べる(18 場面)
-cargo test -p zahyou run_solver_vs_python_all -- --ignored --nocapture   # 締め切りまで探す 2 場面も込みで 20 場面(1 分ほど)
+cargo test -p zahyou run_solver_vs_python_all -- --ignored --nocapture   # タイムアウトまで探す 2 場面も込みで 20 場面(1 分ほど)
 ```
 
 - テストの画像は `$ZAHYOU_TEST_IMAGES/…`(既定はホームフォルダー)か、リポジトリからの相対。リポジトリに無い
@@ -80,10 +80,10 @@ zahyou.exe --selftest <画像> [--offline|--online] [--out f]   自己診断(解
 zahyou.exe --shot <png> [--tab run|env|help] [--run] [--blind] [--image p] [--out-tab orig|northup|log]
            [--dark|--light] [--size WxH] [--left-end]   画面を自分で撮って閉じる(--left-end は［解析］の左の列を
                                               いちばん下 = API キーの欄まで送って撮る)
-zahyou.exe --bench [--out f.json]             解析の段ごとの速さ(ZAHYOU_BENCH_IMAGES に ; 区切りで画像)
+zahyou.exe --bench [--out f.json]             解析の段階ごとの速さ(ZAHYOU_BENCH_IMAGES に ; 区切りで画像)
 zahyou.exe --bench-gui [<画像>] [--out f]     画面まわりの速さ
 zahyou.exe --bench-ui <画像> [--glow|--dx12] [--gpu …] [--mem lean|perf] [--no-vsync] [--cycles N] [--out f.json]
-                                              描画方式の物差し(本物の窓で図を自動で動かす。docs/rust-port.md 9 節)
+                                              描画方式のベンチマーク(本物のウィンドウで図を自動で動かす。docs/rust-port.md 9 節)
 zahyou.exe --engine-check / --update-check [--out f]
 隠し: --debug-wcs <.wcs>(オフライン解析の代わりにその WCS を解にする)・--first-frame <txt>・--no-startup-checks・
       --mem lean|perf・--no-vsync・--no-hw(OpenGL をハードウェア支援なしで開く)・--render-step N(開き直しが自分で付ける)
@@ -126,7 +126,7 @@ $PY -B app/testdata/gen_run_solver.py         # run() を本物の解法で 20 �
 
 ```bash
 cargo build --release -p zahyou && ZAHYOU_CACHE=... target/release/zahyou.exe --bench --out rust.json
-$PY -B testdata/bench_pipeline.py             # Python 側(解析の段ごと)
+$PY -B testdata/bench_pipeline.py             # Python 側(解析の段階ごと)
 cargo run --release -p zahyou-solver --example bench_solver -- --out rust.json --python py.json
 $PY -B testdata/bench_solver.py --out py.json # Python 側(解法。同じ星・同じ条件)
 cargo run --release -p zahyou-image --example bench_image   # 画像の読み込み・前処理・検出

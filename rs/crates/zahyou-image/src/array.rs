@@ -464,7 +464,7 @@ mod tests {
                         let new = luminance_interleaved(&mut a, n, ch, w, blk).unwrap();
                         assert_eq!(new.len(), n);
                         for i in 0..n {
-                            assert_eq!(new[i].to_bits(), old[i].to_bits(), "ch {ch} {h}x{wd} 区切り {blk} 添字 {i}");
+                            assert_eq!(new[i].to_bits(), old[i].to_bits(), "ch {ch} {h}x{wd} ブロック {blk} 添字 {i}");
                         }
                     }
                     // reduce_to_2d を通しても同じ(形と説明も)

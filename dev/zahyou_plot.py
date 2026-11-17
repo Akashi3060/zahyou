@@ -98,7 +98,7 @@ def report_offsets(center, target):
     ra_dir = "東" if ra_min > 0 else "西"
     dec_dir = "北" if dec_min > 0 else "南"
     _log("\n  画像中心から目標までのずれ")
-    _log(f"    全角距離      : {sep.arcmin:.3f}′  ({sep.arcsec:.1f}″)")
+    _log(f"    角距離        : {sep.arcmin:.3f}′  ({sep.arcsec:.1f}″)")
     _log(f"    赤経(RA) 方向 : {abs(ra_min):.3f}′ {ra_dir}へ")
     _log(f"    赤緯(Dec)方向 : {abs(dec_min):.3f}′ {dec_dir}へ")
     return sep, ra_min, dec_min, ra_dir, dec_dir

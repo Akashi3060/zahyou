@@ -678,7 +678,7 @@ fn upsample(p: &Plane, fh: usize, fv: usize, w: usize, h: usize) -> Result<Vec<u
                 *v = p.at(x / fh, y / fv) as u8;
             }
         }),
-        _ => return Err("JPEG の色差の倍率に対応していません".into()),
+        _ => return Err("JPEG の色差のサンプリング係数に対応していません".into()),
     }
     Ok(out)
 }
@@ -782,7 +782,7 @@ pub(crate) fn decode(d: &[u8]) -> Result<Jpeg, String> {
                 let mcuy = h.div_ceil(8 * vmax);
                 for c in comps.iter_mut() {
                     if hmax % c.h != 0 || vmax % c.v != 0 {
-                        return Err("JPEG の色差の倍率が整数ではありません".into());
+                        return Err("JPEG の色差のサンプリング係数の比が整数ではありません".into());
                     }
                     c.bw = mcux * c.h;
                     c.bh = mcuy * c.v;

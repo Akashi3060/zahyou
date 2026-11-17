@@ -24,7 +24,7 @@ dev/solver_index.py   索引ファイル: FITS の表を生のバイトで読む
 dev/solver_core.py    解法: 星の並べ替え、quad 作り、コード、照合、検証(対数オッズ)、改良、探索の本体 sv_solve
 dev/solver_synth.py   試験用: 索引の星から「正解つきの合成星野」を作る(エンジンには入れない)
 dev/zahyou_core.py    既存。WSL の部分(_bash・run_solve_field など)を消し、solve_offline が sv_solve を呼ぶ
-gui/zahyou_env.py     既存。WSL の導入・設定ファイルを消し、星図データの検査を足す
+gui/zahyou_env.py     既存。WSL の導入・設定ファイルを消し、インデックスファイルの検査を足す
 gui/zahyou_gui.py     既存。［準備］タブの WSL の行、中止(pkill)、文言を直す
 ```
 
@@ -306,7 +306,7 @@ SIP の `A_ORDER`・`A_p_q`・`B_…`・`AP_…`・`BP_…`、それに `COMMENT
 
 ## 6. GUI の変更
 
-- ［準備］タブ: 表は「星図データ」「検査」「総合」の 3 行。「個別に: WSL / astrometry.net / 設定ファイル」の行を消す。
+- ［準備］タブ: 表は「インデックスファイル」「検査」「総合」の 3 行。「個別に: WSL / astrometry.net / 設定ファイル」の行を消す。
   「まとめて準備する」は足りないスケールをダウンロードする(おすすめ)だけ、「状態を確認」は走査と検査。ダウンロードは `.part` に書いてから
   名前を変え、ヘッダーを検査する。
 - ［解析］タブ: 方法の選択肢「オフライン (WSL) のみ」→「オフラインのみ」。`gui.json` の古い文言はそのまま読み替える。

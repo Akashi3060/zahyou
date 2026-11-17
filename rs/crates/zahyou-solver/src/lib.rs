@@ -307,7 +307,7 @@ pub(crate) fn solve_in(
         Ok(None) => ("unsolved", Ok(None)),
         Err(Abort::TimeUp) => {
             log(&format!(
-                "締め切り: quad {} 個・仮説 {} 個を試して解けず(対数オッズの最大 {:.1}、{:.1} 秒){}",
+                "タイムアウト: quad {} 個・仮説 {} 個を試して解けず(対数オッズの最大 {:.1}、{:.1} 秒){}",
                 pyfmt::fmt_int(st.quads),
                 pyfmt::fmt_int(st.hyps),
                 st.logodds_max,
@@ -381,7 +381,7 @@ pub fn verify_wcs(
     params: &Params,
 ) -> Result<VerifyReport, String> {
     let store = verify::Store::new(catalog);
-    let files = catalog.series.get(&indexid).filter(|f| !f.is_empty()).ok_or_else(|| format!("系列 {indexid} の索引がありません"))?;
+    let files = catalog.series.get(&indexid).filter(|f| !f.is_empty()).ok_or_else(|| format!("系列 {indexid} のインデックスファイルがありません"))?;
     let xy: Vec<[f64; 2]> = stars.iter().map(|s| [s.x, s.y]).collect();
     let flux: Vec<f64> = stars.iter().map(|s| s.flux).collect();
     let field = field::Field::new(&xy, Some(&flux), width as f64, height as f64, params);
@@ -407,7 +407,7 @@ pub fn verify_wcs(
     let mut gamma = 0.0;
     if let Some((qf, name, qi)) = quad {
         if qf.len() != qi.len() || !(3..=4).contains(&qf.len()) {
-            return Err(format!("quad の星の数が合いません(画像 {}、索引 {})", qf.len(), qi.len()));
+            return Err(format!("quad の星の数が合いません(画像 {}、インデックス {})", qf.len(), qi.len()));
         }
         if let Some(&bad) = qf.iter().find(|&&i| i >= xy.len()) {
             return Err(format!("quad の画像の星の番号 {bad} が星の数 {} の外です", xy.len()));
@@ -415,7 +415,7 @@ pub fn verify_wcs(
         let fid = files
             .iter()
             .position(|&i| catalog.files[i].name == name)
-            .ok_or_else(|| format!("系列 {indexid} に索引 {name} がありません"))?;
+            .ok_or_else(|| format!("系列 {indexid} にインデックスファイル {name} がありません"))?;
         let (a, b) = (xy[qf[0]], xy[qf[1]]);
         h.dq = qf.len();
         h.qfield[..h.dq].copy_from_slice(qf);
@@ -426,8 +426,8 @@ pub fn verify_wcs(
         gamma = 1.0;
     }
     let res = verify::verify_one(&field, &sc, params, &h, verify::Proj::Wcs(wcs), None, gamma, true).map_err(|e| match e {
-        Abort::Corrupt { msg, .. } => format!("星図データが壊れています: {msg}"),
-        Abort::Unavailable { msg, .. } => format!("星図データを今は開けません: {msg}"),
+        Abort::Corrupt { msg, .. } => format!("インデックスファイルが壊れています: {msg}"),
+        Abort::Unavailable { msg, .. } => format!("インデックスファイルを今は開けません: {msg}"),
         other => format!("{other:?}"),
     })?;
     Ok(VerifyReport {
@@ -569,7 +569,7 @@ mod tests {
     fn index_open_for_writing_is_not_called_broken() {
         if !cfg!(windows) {
             // 共有モードで書き込み中の索引を断るのも、索引の表を開くのも Windows だけ(zahyou-index の map_readonly)
-            eprintln!("SKIP: index_open_for_writing_is_not_called_broken: Windows 以外では索引の表を開かない");
+            eprintln!("SKIP: index_open_for_writing_is_not_called_broken: Windows 以外ではインデックスの表を開かない");
             return;
         }
         let idx = std::env::var_os("ZAHYOU_INDEX_DIR")
@@ -615,7 +615,7 @@ mod tests {
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).expect("一時フォルダー");
             for t in use_tags {
-                std::fs::copy(idx.join(format!("index-{t}.fits")), dir.join(format!("index-{t}.fits"))).expect("写す");
+                std::fs::copy(idx.join(format!("index-{t}.fits")), dir.join(format!("index-{t}.fits"))).expect("コピーする");
             }
             let cat = Catalog::scan(&dir);
             // std の OpenOptions は共有を全部許して開く(ほかのプロセスが書き込み用に開いているのと同じ)
@@ -638,10 +638,10 @@ mod tests {
             }
             assert!(!store.is_broken(cat.files.iter().position(|x| x.name == "index-4116").expect("4116")));
             if sub == "five" {
-                let name = got.expect("ほかの索引で解けるはず");
+                let name = got.expect("ほかのインデックスで解けるはず");
                 assert_ne!(name, "index-4116");
             } else {
-                assert_eq!(got, None, "開けない索引しか無いので解けないはず");
+                assert_eq!(got, None, "開けないインデックスしか無いので解けないはず");
             }
             // 閉じたあとの次の試行(同じ Store)では開き直して使う
             drop(writer);

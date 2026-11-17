@@ -301,12 +301,12 @@ impl IndexData {
     fn map(f: &IndexFile) -> Result<IndexData, IndexError> {
         if cfg!(target_endian = "big") {
             return Err(IndexError::Unsupported(
-                "ビッグエンディアンの CPU では索引を読めません(表はリトルエンディアン)".to_string(),
+                "ビッグエンディアンの CPU ではインデックスファイルを読めません(表はリトルエンディアン)".to_string(),
             ));
         }
         if cfg!(not(windows)) {
             return Err(IndexError::Unsupported(
-                "Windows 以外では索引を読めません(使っている間にファイルが書き換えられないことを OS が守らないため)"
+                "Windows 以外ではインデックスファイルを読めません(使っている間にファイルが書き換えられないことを OS が守らないため)"
                     .to_string(),
             ));
         }
@@ -726,7 +726,7 @@ mod tests {
     fn check_cone(d: &IndexData, c: Vec3, r: f64, label: &str) -> usize {
         let with = d.stars_in_cone_with(c, r, true);
         let without = d.stars_in_cone_with(c, r, false);
-        assert_eq!(with, without, "{label}: 前ふるいで答えが変わった c={c:?} r={r}");
+        assert_eq!(with, without, "{label}: プレフィルターで答えが変わった c={c:?} r={r}");
         assert_eq!(d.stars_in_cone(c, r), with, "{label}");
         for m in [1u32, 2, 3, 7] {
             let p = |id: u32| id % m == m - 1;
@@ -798,7 +798,7 @@ mod tests {
             assert!(nonempty > n / 4, "{tag}: 星の入る円錐が少ない({nonempty}/{n})");
             rows.push(format!("{tag} {n} 回 {found} 星"));
         }
-        eprintln!("円錐の前ふるいあり・なし・any が一致: {}", rows.join("、"));
+        eprintln!("円錐のプレフィルターあり・なし・any が一致: {}", rows.join("、"));
     }
 
     /// 星の値を書き換えた(単位ベクトルでない)索引の写しでも、前ふるいあり・なしの答えが同じ。
@@ -874,7 +874,7 @@ mod tests {
         drop(d);
         f.close();
         let _ = std::fs::remove_dir_all(&dir);
-        eprintln!("星を書き換えた索引({} 星)で前ふるいあり・なしが一致(半分の長さの星 {nhalf} 個が元の向きで見つかった)", changed.len());
+        eprintln!("星を書き換えたインデックス({} 星)でプレフィルターあり・なしが一致(半分の長さの星 {nhalf} 個が元の向きで見つかった)", changed.len());
     }
 
     /// 木 1 本で、今の ball_visit と変える前の形(ball_visit_ref)が、同じ問い合わせに同じ葉を同じ順に知らせる。
@@ -981,6 +981,6 @@ mod tests {
             assert!(total > 10_000, "{tag}: 当たりが少ない({total})");
             rows.push(format!("{tag}(D={dim})当たり {total}"));
         }
-        eprintln!("code_ball の前ふるいあり・なしが一致: {}", rows.join("、"));
+        eprintln!("code_ball のプレフィルターあり・なしが一致: {}", rows.join("、"));
     }
 }

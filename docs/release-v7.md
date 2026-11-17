@@ -114,9 +114,9 @@ Release を作って試したり、nova へ送ったりはしていない。ソ�
 | 3 | 直下のノートブックの名前 `zahyou_v<大きな版>.ipynb` | `git mv zahyou_v7.ipynb zahyou_v8.ipynb`。`dev/build_nb.py` と `make_release_assets.py` は名前を Cargo のバージョンから決める | テスト `version_in_docs_matches_cargo`(直下に無いと落ちる)・`test_make_release_assets.py`・6 節の notebook の検査 |
 | 4 | `dev/nb_main.py` の `NB_VERSION`(ノートブック版のログの見出し) | バージョン名(`"v8"`)→ `python dev/build_nb.py`(直下の `zahyou_engine.py` を作り直す) | テスト `version_in_docs_matches_cargo` と 6 節の notebook の検査 |
 | 5 | `rs/THIRD-PARTY-NOTICES.md`(MIT の範囲の一覧にノートブックの名前が入る。exe に埋め込まれる) | 3 節の `python rs/tools/gen_notices.py`(名前は Cargo のバージョンから入る)。作り直したら exe もそのあとでビルドする | 3 節の `gen_notices.py --check` と 6 節の notices の検査 |
-| 6 | `dev/make_manual.py` のバージョンの文字(冒頭の説明・表紙の表の「版」の行・9.1 の「ウィンドウのタイトル」)と、ノートブックの名前(4.3・4.5・9.1・付録 B) | 手で | テストでは分からない(β のバージョンの文字だけはテストが拾う)。下の grep で探す |
+| 6 | `dev/make_manual.py` のバージョンの文字(冒頭の説明・表紙の表の「バージョン」の行・9.1 の「ウィンドウのタイトル」)と、ノートブックの名前(4.3・4.5・9.1・付録 B) | 手で | テストでは分からない(β のバージョンの文字だけはテストが拾う)。下の grep で探す |
 | 7 | `README.md` のバージョンの文字(「起動と大きさ」の表の見出し・入れ替えの節の「ウィンドウのタイトル」・冒頭の HTML コメント)とノートブックの名前 | 手で。exe の大きさと起動の時間は 4 節でビルドした exe の実測に。**比較の表(ほかのソルバーとの比較)の行は、そのバージョンで測り直したときだけバージョンを上げる**(測り直さないなら、測ったバージョンのまま残す) | 同上 |
-| 8 | `docs/img/app-help.png`(［使い方］の「いまの版」が写る) | 4 節でビルドした exe で `python rs/tools/shoot_docs.py --exe … --only app-help`(5 節) | テストでは分からない。撮ったものを目で見る |
+| 8 | `docs/img/app-help.png`(［使い方］の「いまのバージョン」が写る) | 4 節でビルドした exe で `python rs/tools/shoot_docs.py --exe … --only app-help`(5 節) | テストでは分からない。撮ったものを目で見る |
 | 9 | マニュアル PDF(`…マニュアルv4.pdf`。6 の文字と 8 の写真を貼っている) | 6 と 8 のあとで `python dev/make_manual.py`(5 節) | 6 節の manual の検査(作り直したものとバイト単位で比べる) |
 | 10 | `dev/README.md` のノートブックの名前 | 手で | テストでは分からない。下の grep で探す |
 | 11 | β版を出すときだけ: `rs/app/src/ui/help_tab.rs` のβ版の説明 3 行(「このバージョンは v7 のβ版です…」。前のメジャーバージョンへの戻し方を含む) | 手で書き直す | テスト `beta_版の間だけ更新の扱いを説明する`(メジャーバージョンをバージョンから組み立てて探すので、書き直し忘れると落ちる) |
@@ -213,7 +213,7 @@ IMG="$USERPROFILE\\Downloads\\Capture_00001 00_10_33.fits"
 
 - 期待値: `--selftest --offline` が **25/25**(空の cache.json で 1.594′・0.916′ 東・1.304′ 北・1.4610″/px。10.6 節)。
   exe のプロパティでファイル バージョン `7.0.0-beta.N`。`--update-check` は、まだ出していないバージョンなら「最新版です (v7.0.0-beta.N)」。
-  正式版(`7.0.0`)なら、ファイル バージョン `7.0.0`(プレリリースの印なし)、`--update-check` は Release の前なら
+  正式版(`7.0.0`)なら、ファイル バージョン `7.0.0`(プレリリースのフラグなし)、`--update-check` は Release の前なら
   「最新版です (v7.0.0)。公開されている最新版 v6 より新しいバージョンを使っています。」(latest が今より古いバージョンなら誘わない)。
 - 手でも 1 回起動して、［解析］で基準の画像を解き、［準備］の表が「オフライン解析できます」、タイトル・［使い方］に `v7.0.0-beta.N (β版)`
   (正式版なら `v7.0.0`。「(β版)」は付かない)、
@@ -269,7 +269,7 @@ python dev/make_manual.py                                     # 天体画像解�
   ALL_PROXY・HTTPS_PROXY・HTTP_PROXY で渡す。撮る前に同じ環境の `--update-check` が外へ出ずに失敗することを確かめ、止まらなければ
   `"api_key": ""` に切り替えて警告する)。API キーの欄は既定のキーの伏せ字のまま写る。［使い方］の 1 枚だけはネットのまま撮る
   (起動時の更新の確認 = GitHub の一覧を読むだけ。止めると「更新を確認できませんでした」と写る)。
-- バージョンを上げたら、少なくとも `app-help.png`(「いまの版」)は撮り直す(`--only app-help`)。
+- バージョンを上げたら、少なくとも `app-help.png`(「いまのバージョン」)は撮り直す(`--only app-help`)。
 - 画面の並びが変わったら、切り抜きの枠(`shoot_docs.py` の NUMBERS など)を、撮ったものを見て直す。
 - **ページ数を書く箇所が複数ある**(Release 本文と配布ページの txt に書くなら、PDF を組んでから数える)。2026-10-16 の下書きは 33 ページ。
 - `make_manual.py` は作成日時などを固定して組む(ReportLab の invariant)ので、同じ make_manual.py とフォントからは同じバイトの PDF になる。
@@ -289,7 +289,7 @@ python rs/tools/make_release_assets.py --exe "$(cygpath -w $EXE)" --out "$(cygpa
 
 | アセットの名前 | 元 | 中身の検査 |
 |---|---|---|
-| `zahyou.exe` | 4 節の `$EXE`(**名前は必ず `zahyou.exe`**。更新の確認はこの名前で探す) | バージョン情報(FileVersion・ProductVersion・数のバージョン・プレリリースの印)と `--engine-check` の version= が `rs/Cargo.toml` のバージョンと同じ(FileVersion はバージョンのまま、ProductVersion と version= はバージョン名。2 節)。**ビルドした人のホームのパス(USERPROFILE)が 0 か所**(paths。区切り `\` `/`・MSYS の `/c/…`・大文字小文字・UTF-8 と UTF-16 のどれでも数える。4.1 節) |
+| `zahyou.exe` | 4 節の `$EXE`(**名前は必ず `zahyou.exe`**。更新の確認はこの名前で探す) | バージョン情報(FileVersion・ProductVersion・数のバージョン・プレリリースのフラグ)と `--engine-check` の version= が `rs/Cargo.toml` のバージョンと同じ(FileVersion はバージョンのまま、ProductVersion と version= はバージョン名。2 節)。**ビルドした人のホームのパス(USERPROFILE)が 0 か所**(paths。区切り `\` `/`・MSYS の `/c/…`・大文字小文字・UTF-8 と UTF-16 のどれでも数える。4.1 節) |
 | `zahyou_v<大きな版>.ipynb`(β版なら `zahyou_v8_beta.ipynb` の形) | リポジトリ直下の同じ名前のノートブック(バージョンを上げたら改名する。2 節の 3。v7 は 2026-10-18 に `zahyou_v6.ipynb` から改名した。配る名前はバージョンから決まる。β版の名前は前のバージョンと紛れないよう) | セルの並びと中身が `dev/build_nb.py` の出力と同じ(出力の例はリポジトリのものを残す) |
 | `zahyou_engine.py` | リポジトリ直下 | `dev/build_nb.py` の出力と同じ・`NB_VERSION` がバージョン名(2 節) |
 | `zahyou-manual-v4.pdf` | `天体画像解析プログラム「zahyou」導入・運用マニュアルv4.pdf` | `dev/make_manual.py` で作り直したものとバイト単位で同じ |
@@ -300,7 +300,7 @@ python rs/tools/make_release_assets.py --exe "$(cygpath -w $EXE)" --out "$(cygpa
 - 検査が 1 つでも落ちたら、何も書かずに終了コード 1。`--skip version|paths|notices|manual|notebook` は試しのとき用(最後に「確かめていない」と出る)。
 - paths の検査は、この道具を走らせた PC の USERPROFILE を探す(exe をビルドした PC で走らせる前提)。
 - 出力先は、空か無いフォルダーで、リポジトリの外に限る(直下に .gitignore が無いので)。
-- 文字のファイル(.ipynb・.py・.txt・.md)は改行を LF にそろえて書く(作業ツリーが CRLF でも SHA256 が変わらない。`LICENSE.txt` は
+- テキストファイル(.ipynb・.py・.txt・.md)は改行を LF にそろえて書く(作業ツリーが CRLF でも SHA256 が変わらない。`LICENSE.txt` は
   v6 の Release のものと同じ SHA256 になった)。exe と PDF はそのままコピーする。
 - テスト: `python -B rs/tools/test_make_release_assets.py`(release の exe があれば `ZAHYOU_RELEASE_EXE` で渡すとバージョン情報・同梱物の表示・
   ホームのパスが無いことも確かめる。34 本(2026-10-18 に改名のテストを、2026-10-24 にバージョン名とノートブックの元の名前のテストを足した)。4 節の置き換えを付けずにビルドした exe なら、ホームのパスのテストが落ちる)。
@@ -324,7 +324,7 @@ gh release create v7.0.0-beta.N --repo Akashi3060/zahyou --target native-rs --pr
   --title "zahyou v7.0.0-beta.N (β版)" --notes-file release-notes-v7.0.0-beta.N.md \
   "$DIST/zahyou.exe" "$DIST/zahyou_v7_beta.ipynb" "$DIST/zahyou_engine.py" "$DIST/zahyou-manual-v4.pdf" \
   "$DIST/LICENSE.txt" "$DIST/THIRD-PARTY-NOTICES.md" "$DIST/SHA256SUMS.txt"
-# 出す前に確かめる: pre-release の印が付いている・Latest でない・下書き・資産が 7 つで digest が SHA256SUMS.txt と同じ
+# 出す前に確かめる: pre-release にチェックが入っている・Latest でない・下書き・アセットが 7 つで digest が SHA256SUMS.txt と同じ
 gh release view v7.0.0-beta.N --repo Akashi3060/zahyou --json isPrerelease,isDraft,assets \
   --jq '"prerelease=\(.isPrerelease) draft=\(.isDraft)", (.assets[]|[.name,.size,.digest]|@tsv)'
 gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                                # v6 のまま
@@ -336,7 +336,7 @@ gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false --latest=fa
    作るときに断られたら、作るときの `--latest=false` を外し、出すとき(`gh release edit`)だけに付ける。
 3. **公開したβのアセットは差し替えない**。直したら N を上げて新しい Release にする(βの更新の確認は「今より新しいバージョン」しか出さないので、
    同じタグのビルドし直しはβの利用者に届かない)。
-4. **間違えて正式の Release(pre-release の印なし)で出すと、そのまま v6 の全員に入れ替えが出る**。印を付け忘れたら、すぐ pre-release に直す。
+4. **間違えて正式の Release(pre-release のチェックなし)で出すと、そのまま v6 の全員に入れ替えが出る**。チェックを入れ忘れたら、すぐ pre-release に直す。
 5. Release 本文に書くこと(v6 の本文を土台に): β版であること・v6 の更新には出ないこと・v6 との行き来(1 節)、ダウンロードの警告(5 枚の図。
    exe の中身によらない)、画面の写真(raw の URL は **`…/zahyou/v7.0.0-beta.N/docs/img/…`(タグ)**で書く。`main` には β の写真が無い)、
    v6 からの変更(WSL 不要・Rust・速さと大きさ。数字は README の「実測値」と同じもの)、API キーの欄と、外へ送るもの(まず星の位置、
@@ -350,7 +350,7 @@ gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false --latest=fa
    - (a) `gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name` が **`v6` のまま**
    - (b) v6 の exe の「更新を確認」が「最新版です」(v6 の exe を一時の LOCALAPPDATA で起動して)
    - (c) 一つ前のβ版の exe の `--update-check` が「新しいバージョンがあります: v7.0.0-beta.N」(N ≥ 2 のとき)
-   - (d) 新しいβ版の exe の `--update-check` が「最新版です (v7.0.0-beta.N / 日付 バージョン)」
+   - (d) 新しいβ版の exe の `--update-check` が「最新版です (v7.0.0-beta.N / 日付 版)」
    - (e) 作者以外の PC(か、別の Windows のユーザー)で Edge からダウンロードし、README の 5 枚の警告の順に出るか(今の図は v6 の exe のとき)。
      想定のノート PC(Windows 11・RAM 8 GB)で 1 台は起動と解析を確かめ、README の「確かめた PC は 1 台だけ」を書き足す
 7. β の間に v6 の修正バージョンを出すときは、ふつうの Release(Latest)でよい(β の利用者はメジャーバージョン 7 しか見ないので影響しない)。
@@ -380,7 +380,7 @@ gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false --latest=fa
    2〜6 節をやり直す(バージョンを上げると「(β版)」は自然に消える。ノートブックのアセット名は `zahyou_v7.ipynb` になる)。
    → バージョンを `7.0.0` にしたのは 2026-10-18(済み)。統合と 4〜6 節は残り(上)。
 2. README を正式版の形にする: β版のタグへのリンク(`releases/tag/v7.0.0-beta.N`)を `releases/latest` に戻し、「いまの v7 はβ版です」と
-   「v6 とβ版」の段落、ノートブックの入手先の β の注記を書き換える(README 冒頭の HTML コメントに書いてある)。マニュアルの表紙の「版」の行と
+   「v6 とβ版」の段落、ノートブックの入手先の β の注記を書き換える(README 冒頭の HTML コメントに書いてある)。マニュアルの表紙の「バージョン」の行と
    2.1・9.1・付録 B も同じ。2 節のテスト `version_in_docs_matches_cargo` が、β のバージョンの文字の残りを場所つきで出す。
    → **済み(2026-10-18)**。「いまの v7 はβ版です」は「v6 を使っている方へ」の案内に、「v6 とβ版」は「v6 から入れ替える」
    (v6 の「更新する」で入れ替わる・`zahyou.exe.bak` が残る・設定とインデックスファイルはそのまま・WSL は要らない・β版の利用者には 7.0.0 が出る)に、
@@ -489,8 +489,8 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
   `zahyou_engine.py` `27186b85…8b8e`、`zahyou-manual-v4.pdf`(33 ページ)`d62c2e83…81e2`、`LICENSE.txt` `4efc7bab…a3f8`、
   `THIRD-PARTY-NOTICES.md` `f037a257…bdd4`。GitHub の各アセットの digest は SHA256SUMS.txt と全部同じ
 - 出したあと(7 節の 6): (a) latest は `v6` のまま。(b) Release からダウンロードした v6 の exe(`5f771f33…3605`)の `--update-check` は
-  「最新版です (v6 / 2026-09-17 バージョン)」。(d) Release からダウンロードしたβの exe(SHA256 は SHA256SUMS.txt と一致)の `--update-check` は
-  「最新版です (v7.0.0-beta.1 / 2026-10-16 バージョン)」。どれも ZAHYOU_CACHE・ZAHYOU_SETTINGS・LOCALAPPDATA を一時に向けて動かし、
+  「最新版です (v6 / 2026-09-17 版)」。(d) Release からダウンロードしたβの exe(SHA256 は SHA256SUMS.txt と一致)の `--update-check` は
+  「最新版です (v7.0.0-beta.1 / 2026-10-16 版)」。どれも ZAHYOU_CACHE・ZAHYOU_SETTINGS・LOCALAPPDATA を一時に向けて動かし、
   利用者の cache.json・gui.json の sha256 は前後で同じ。**(e) 別の PC・想定のノート PC はまだ**(0 節の 1 の本物の nova の確かめも、まだ)
 - 分かったこと:
   - `gh release create … --prerelease --latest=false --draft` は断られずに通った(7 節の 2 の「確かめていない」の答え)。
@@ -547,9 +547,9 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
 - アセット(6 節の 5 つの検査が全部 OK、`sha256sum -c` OK、GitHub の digest も全部一致): `zahyou.exe` `ae4bc3c9…4a41`、
   `zahyou_v7_beta.ipynb` `03839c92…259d`(β1 と同じ)、`zahyou_engine.py` `54c4d0d5…22c7`、`zahyou-manual-v4.pdf` `c5a59af1…ae1a`、
   `LICENSE.txt`・`THIRD-PARTY-NOTICES.md` は β1 と同じ
-- 出したあと: (a) latest は `v6` のまま。(b) v6 の exe の `--update-check` は「最新版です (v6 / 2026-09-17 バージョン)」。
-  (c) β1 の exe は「新しいバージョンがあります: v7.0.0-beta.2 (2026-10-16 バージョン / 14 MB)」。(d) Release からダウンロードした β2 の exe(SHA256 一致)は
-  「最新版です (v7.0.0-beta.2 / 2026-10-16 バージョン)」。日付は GitHub の公開時刻(UTC。22:23Z)の日付なので、日本時間の 10-17 より 1 日前に見える。
+- 出したあと: (a) latest は `v6` のまま。(b) v6 の exe の `--update-check` は「最新版です (v6 / 2026-09-17 版)」。
+  (c) β1 の exe は「新しいバージョンがあります: v7.0.0-beta.2 (2026-10-16 版 / 14 MB)」。(d) Release からダウンロードした β2 の exe(SHA256 一致)は
+  「最新版です (v7.0.0-beta.2 / 2026-10-16 版)」。日付は GitHub の公開時刻(UTC。22:23Z)の日付なので、日本時間の 10-17 より 1 日前に見える。
   どれも一時の設定で動かし、利用者の cache.json・gui.json の sha256 は前後で同じ。**(e) 別の PC・想定のノート PC は、β1 と同じくまだ**
 
 ### 2026-10-18 の追記(ユーザーの指示: 本物の nova での確かめ・動作環境・β1 の案内・超広角・公開ソースのパス)
@@ -592,7 +592,7 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
   ede638c・b2ad026・7f1cfbb)。画面写真 13 枚を 7.0.0 の exe で撮り直した(基準の画像は作者の名前の入らない C:\Users\Public\Documents\zahyou-shot に
   コピーして開いた。［解析］の画像欄に作者のホームのパスが写っていたため)。マニュアル v4 を作り直した(33 ページ)。7739799
 - exe: 4 節のとおり CARGO_ENCODED_RUSTFLAGS(置き換え 2 つ)を付けて target-release でビルドした(2 分 11 秒)。14,040,576 バイト `5ab3dec6…bae4`、
-  作者のホームのパス 0 か所、バージョン情報 7.0.0・v7.0.0・プレリリースの印なし。`--selftest --offline` 25/25、`--engine-check` の version= v7.0.0。
+  作者のホームのパス 0 か所、バージョン情報 7.0.0・v7.0.0・プレリリースのフラグなし。`--selftest --offline` 25/25、`--engine-check` の version= v7.0.0。
   `--first-frame` DX12 376〜387 ms・OpenGL 438〜456 ms(同じ日に交互に測った β2 の exe も同じ値。β2 の公開の日の 350 ms・190〜239 ms との差は PC の状態)
 - テスト(同じフラグ・target-release): `cargo test --workspace -- --include-ignored` **284 本通過・失敗 0**(16 分 42 秒)、clippy 指摘 0、
   check_licenses・`gen_notices --check`・test_tools OK、`test_make_release_assets.py` 32 本(この exe を渡して)、`dev/test_online_settings.py` 14/14
@@ -603,7 +603,7 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
   (2026-10-18 23:38 UTC)→ ユーザーの指示でタグを **`v7`** に付け替えた(同じ commit に `v7` を付けて push → `gh release edit v7.0.0 --tag v7`
   で Release を移し、本文の `…/v7.0.0/…` を `…/v7/…` に → どの Release も使わなくなった `v7.0.0` のタグを消した)
 - 出したあと(5 節): latest は `v7`。Release からダウンロードした exe の SHA256 は SHA256SUMS.txt と一致。更新の確認(一時の設定で): 7.0.0 は
-  「最新版です (v7 / 2026-10-18 バージョン)」、β1・β2・v6 は「新しい版があります: v7」。**v6 の exe のコピーで `--update-apply`** を一時のフォルダーで動かし、
+  「最新版です (v7 / 2026-10-18 版)」、β1・β2・v6 は「新しい版があります: v7」。**v6 の exe のコピーで `--update-apply`** を一時のフォルダーで動かし、
   zahyou.exe が 7.0.0(`5ab3dec6…`)に入れ替わり、v6 の exe が zahyou.exe.bak(`5f771f33…`)として残ることを確かめた。利用者の cache.json・gui.json は前後で同じ
 - **配布ページ(Nextcloud)を v7 に差し替えた**(ユーザーの決定どおり)。TrueNAS の root(一時 cronjob)で: zahyou.exe・zahyou_engine.py・
   THIRD-PARTY-NOTICES.md・はじめにお読みください.txt(v7 用に書き直し、BOM 付き UTF-8・CRLF)は `cat >` で中身だけ入れ替え(inode・所有者
@@ -893,7 +893,7 @@ f677908c1c64fc1965de7076c670f5ed7ef6cf773a6296be35b35e60e40b451e  THIRD-PARTY-NO
 4. 下書きを作り、確かめた: prerelease=false・タイトル「zahyou v8」・アセット 7 つ。アセットの digest は 6 つとも SHA256SUMS.txt と同じ。
    本文のリンク 17 個はどれも 200、本文の大文字の SHA256 は zahyou.exe の digest と同じ。そのあと `--latest` で出し、`releases/latest` は v8 になった。
 5. 配っている v7 の exe(Release v7 からダウンロードした `5ab3dec6…`)のコピーを一時のフォルダーに置き、一時の LOCALAPPDATA で `--update-check --update-apply` を動かした。
-   - 「新しいバージョンがあります: v8 (2026-10-25 バージョン / 14 MB)」と出て、ダウンロードした exe の SHA256 が一致し、入れ替わった(`zahyou.exe` = `86d1e160…`、`zahyou.exe.old` = v7)。
+   - 「新しいバージョンがあります: v8 (2026-10-25 版 / 14 MB)」と出て、ダウンロードした exe の SHA256 が一致し、入れ替わった(`zahyou.exe` = `86d1e160…`、`zahyou.exe.old` = v7)。
    - v8 を画面で 1 回起動すると、`zahyou.exe.old` が消えた(API キーを空にしてオフラインのみで起動し、起動したその 1 つだけを PID で閉じた)。
    - 利用者の cache.json・gui.json は前後で同じ。
 6. 配布ページを差し替えた。TrueNAS の root(一時 cronjob)で、スクリプトは先に新しいファイルの SHA256 と、今の中身が v7 であることを確かめる。

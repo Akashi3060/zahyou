@@ -192,7 +192,7 @@ def run_scene(ns, work, scene):
     params = dict(BASE)
     params.update(over)
     if not os.path.isdir(INDEX_DIR) and "INDEX_DIR" not in over:
-        rec["skipped"] = f"星図データがありません: {INDEX_DIR}"
+        rec["skipped"] = f"インデックスファイルがありません: {INDEX_DIR}"
         return rec
     cache = os.path.join(work, f"cache_{name}.json")
     c = {"targets": {TARGET: {"ra": TARGET_RADEC[0], "dec": TARGET_RADEC[1], "name": TARGET}}, "rigs": {}}

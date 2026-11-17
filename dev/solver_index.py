@@ -166,13 +166,13 @@ def _sv_index_layout(path, name=None):
     H0 = hdus[0]["header"]
     for key in ("INDEXID", "HEALPIX", "HPNSIDE", "DIMQUADS", "NQUADS", "NSTARS", "SCALE_L", "SCALE_U"):
         if key not in H0:
-            raise ValueError(f"索引のヘッダーに {key} がありません")
+            raise ValueError(f"インデックスファイルのヘッダーに {key} がありません")
     for h in hdus:
         e = h["header"].get("ENDIAN")
         if h is hdus[0] and e is None:
-            raise ValueError("索引のヘッダーに ENDIAN がありません")
+            raise ValueError("インデックスファイルのヘッダーに ENDIAN がありません")
         if e is not None and e != SV_INDEX_ENDIAN:
-            raise ValueError(f"ENDIAN = {e!r} の索引は読めません(読めるのは {SV_INDEX_ENDIAN!r} だけ)")
+            raise ValueError(f"ENDIAN = {e!r} のインデックスファイルは読めません(読めるのは {SV_INDEX_ENDIAN!r} だけ)")
 
     indexid = _sv_fits_int(H0, "INDEXID")
     healpix = _sv_fits_int(H0, "HEALPIX")
@@ -188,7 +188,7 @@ def _sv_index_layout(path, name=None):
         raise ValueError(f"名前と中身の系列が違います(名前 {m.group(1)}、INDEXID = {indexid})")
     if m.group(2) is None:
         if healpix != -1:
-            raise ValueError(f"全天の名前なのにタイルの索引です(HEALPIX = {healpix})")
+            raise ValueError(f"全天の名前なのにタイルのインデックスファイルです(HEALPIX = {healpix})")
     else:
         if healpix != int(m.group(2)):
             raise ValueError(f"名前と中身のタイル番号が違います(名前 {m.group(2)}、HEALPIX = {healpix})")
@@ -541,9 +541,9 @@ def _sv_check_lr(tree):
     """木の葉の範囲 lr が単調非減少で、最後が ndata − 1 か(壊れていると点の番号が範囲の外になる)。"""
     lr = tree.lr.astype(np.int64)
     if len(lr) == 0 or int(lr[-1]) != tree.ndata - 1:
-        return f"{tree.name} の木の葉の範囲(lr)の最後が点の数と合いません(中身が壊れています。落とし直してください)"
+        return f"{tree.name} の木の葉の範囲(lr)の最後が点の数と合いません(中身が壊れています。ダウンロードし直してください)"
     if len(lr) > 1 and bool(np.any(lr[1:] < lr[:-1])):
-        return f"{tree.name} の木の葉の範囲(lr)が増える順になっていません(中身が壊れています。落とし直してください)"
+        return f"{tree.name} の木の葉の範囲(lr)が増える順になっていません(中身が壊れています。ダウンロードし直してください)"
     return None
 
 
@@ -683,7 +683,7 @@ class SvIndexFile:
         out = self._quads[np.asarray(quad_ids, dtype=np.int64)].astype(np.int64)
         if out.size and (int(out.max()) >= self.nstars or int(out.min()) < 0):
             raise SvIndexCorrupt(self, f"quad の星番号が星の数 {self.nstars:,} の外です"
-                                       "(中身が壊れています。落とし直してください)")
+                                       "(中身が壊れています。ダウンロードし直してください)")
         return out
 
     def codes(self, quad_ids):
@@ -823,7 +823,7 @@ class SvIndexCatalog:
                 continue
             key = (f.indexid, f.healpix)
             if key in seen:
-                self.problems.append((p, f"同じ索引が 2 つあります({os.path.basename(seen[key])} と同じ中身)"))
+                self.problems.append((p, f"同じインデックスファイルが 2 つあります({os.path.basename(seen[key])} と同じ中身)"))
                 continue
             seen[key] = p
             self.files.append(f)
@@ -837,7 +837,7 @@ class SvIndexCatalog:
             best = max(set(sig), key=sig.count)
             bad = [f for f, s in zip(fs, sig) if s != best]
             for f in bad:
-                self.problems.append((f.path, "同じ系列のほかのファイルと段の値(DIMQUADS・SCALE・HPNSIDE)が違います"))
+                self.problems.append((f.path, "同じ系列のほかのファイルとヘッダーの値(DIMQUADS・SCALE・HPNSIDE)が違います"))
                 self.files.remove(f)
             self.series[iid] = [f for f, s in zip(fs, sig) if s == best]
 

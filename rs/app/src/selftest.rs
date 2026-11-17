@@ -77,7 +77,7 @@ pub fn selftest_rows(
     let index_dir = index_dir.map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from(pipeline::DEFAULT_INDEX_DIR));
     let diag = pipeline::solver_diagnostics(&index_dir);
     out.push(Check::new(
-        "星図データを調べられる",
+        "インデックスファイルを調べられる",
         true,
         format!(
             "{} ファイル / {}",
@@ -331,7 +331,7 @@ pub fn bench_image(label: &str, path: &Path, repeat: usize) -> Result<BenchImage
         stages.push(Stage { name: "解法", seconds: Some(t), note });
         wcs = sol.ok().flatten().map(|s| s.wcs);
     } else {
-        stages.push(Stage { name: "解法", seconds: None, note: "星図データが無い".to_string() });
+        stages.push(Stage { name: "解法", seconds: None, note: "インデックスファイルが無い".to_string() });
     }
     let wcs_note = if wcs.is_some() { "解いた WCS" } else { "画像の WCS" };
     let wcs = wcs.or_else(|| crate::scale::existing_wcs(&loaded.header));

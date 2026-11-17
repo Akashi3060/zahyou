@@ -100,17 +100,17 @@ pub fn survey(index_dir: &Path) -> Survey {
     let good = idx.files - bad.len();
     let mut notes = Vec::new();
     if !idx.ok {
-        notes.push(format!("{} に星図データ (index-*.fits) がありません。", index_dir.display()));
+        notes.push(format!("{} にインデックスファイル (index-*.fits) がありません。", index_dir.display()));
     }
     for (s, n) in &idx.partial {
         notes.push(format!(
-            "index-{s} は {} ファイル中 {n} しかありません (落とすのを途中で止めたもの)。もう一度落とせば続きから補います。",
+            "index-{s} は {} ファイル中 {n} しかありません (ダウンロードを途中で止めたもの)。もう一度ダウンロードすれば続きから補います。",
             index_names(*s).len()
         ));
     }
     if !bad.is_empty() {
         notes.push(format!(
-            "中身のおかしい星図データが {} 個あります (解析では読み飛ばします)。その段を落とし直してください。",
+            "中身のおかしいインデックスファイルが {} 個あります (解析では読み飛ばします)。そのスケールをダウンロードし直してください。",
             bad.len()
         ));
         for (name, why) in bad.iter().take(5) {
@@ -139,19 +139,19 @@ pub fn report(st: &Survey, log: &dyn Fn(&str)) {
     let idx = &st.index;
     let chk = &st.check;
     if idx.ok {
-        log(&format!("  星図データ : {} ファイル / {}  ({})", idx.files, human(idx.bytes as f64), idx.dir.display()));
+        log(&format!("  インデックス : {} ファイル / {}  ({})", idx.files, human(idx.bytes as f64), idx.dir.display()));
     } else {
-        log(&format!("  星図データ : ありません  ({})", idx.dir.display()));
+        log(&format!("  インデックス : ありません  ({})", idx.dir.display()));
     }
     if chk.checked > 0 {
         if chk.bad.is_empty() {
-            log(&format!("  検査       : {} ファイルとも正常", chk.checked));
+            log(&format!("  検査         : {} ファイルとも正常", chk.checked));
         } else {
-            log(&format!("  検査       : {} / {} ファイルに問題", chk.bad.len(), chk.checked));
+            log(&format!("  検査         : {} / {} ファイルに問題", chk.bad.len(), chk.checked));
         }
     }
     if let Some((lo, hi)) = idx.fov {
-        log(&format!("  解ける画角 : {}′ 〜 {}′", g(lo), g(hi)));
+        log(&format!("  解ける画角   : {}′ 〜 {}′", g(lo), g(hi)));
     }
     for m in &st.notes {
         log(&format!("  ⚠️ {m}"));
@@ -192,14 +192,14 @@ pub fn prepare_all(
 ) -> Survey {
     let sep = "=".repeat(56);
     log(&sep);
-    log("1. 星図データ");
+    log("1. インデックスファイル");
     let st = survey(index_dir);
     let need = need_scales(scales, &st.index.scales);
     let extra: Vec<u32> = need.iter().copied().filter(|s| allowed.is_some_and(|a| !a.contains(s))).collect();
     if !extra.is_empty() {
         let list: Vec<String> = extra.iter().map(|s| s.to_string()).collect();
         log(&format!(
-            "  確認したあとで足りない段が増えました ({})。落とさずに止めます。もう一度押すと、増えたぶんも含めて容量を確かめます。",
+            "  確認したあとで足りないスケールが増えました ({})。ダウンロードせずに止めます。もう一度押すと、増えたぶんも含めて容量を確かめます。",
             list.join(", ")
         ));
         report(&st, log);
@@ -207,7 +207,7 @@ pub fn prepare_all(
     }
     if !need.is_empty() {
         let list: Vec<String> = need.iter().map(|s| s.to_string()).collect();
-        log(&format!("  足りない段: {}", list.join(", ")));
+        log(&format!("  足りないスケール: {}", list.join(", ")));
         let r = zahyou_net::fetch_index(&names_of(&need), index_dir, progress, stop, log);
         if !r.ok {
             let st = survey(index_dir);
@@ -257,8 +257,8 @@ mod tests {
         // 了承したのは 5203 だけなのに、5202 も足りない
         let st = prepare_all(&dir, &[5202, 5203], Some(&[5203]), &log, &prog, &stop);
         let ls = lines.lock().unwrap().clone();
-        assert!(ls.iter().any(|l| l.contains("確認したあとで足りない段が増えました (5202)")), "{ls:?}");
-        assert!(!ls.iter().any(|l| l.contains("足りない段: ")), "落とそうとした: {ls:?}");
+        assert!(ls.iter().any(|l| l.contains("確認したあとで足りないスケールが増えました (5202)")), "{ls:?}");
+        assert!(!ls.iter().any(|l| l.contains("足りないスケール: ")), "ダウンロードしようとした: {ls:?}");
         assert!(!fetched.load(std::sync::atomic::Ordering::Relaxed));
         assert!(!st.ready);
         let _ = std::fs::remove_dir_all(&dir);
@@ -302,11 +302,11 @@ mod broken_tests {
         let st = survey(&dir);
         assert_eq!(st.index.files, 3);
         assert_eq!(st.index.partial.get(&5206), Some(&2));
-        assert!(st.index.scales.is_empty(), "壊れた段は「そろった段」に入れない: {:?}", st.index.scales);
+        assert!(st.index.scales.is_empty(), "壊れたスケールは「そろったスケール」に入れない: {:?}", st.index.scales);
         assert_eq!(st.check.bad.len(), 3);
         assert!(!st.ready);
         assert!(st.notes.iter().any(|n| n.contains("48 ファイル中 2")));
-        assert!(st.notes.iter().any(|n| n.contains("中身のおかしい星図データが 3 個")));
+        assert!(st.notes.iter().any(|n| n.contains("中身のおかしいインデックスファイルが 3 個")));
         let lines = std::sync::Mutex::new(Vec::new());
         report(&st, &|l| lines.lock().unwrap().push(l.to_string()));
         assert!(lines.lock().unwrap().iter().any(|l| l.contains("3 / 3 ファイルに問題")));

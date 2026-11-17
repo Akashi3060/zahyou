@@ -110,7 +110,7 @@ pub(crate) fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
 fn solution_note(s: &Solution) -> String {
     let mut parts = Vec::new();
     if !s.index_name.is_empty() {
-        parts.push(format!("索引 {}", s.index_name));
+        parts.push(format!("インデックス {}", s.index_name));
     }
     parts.push(format!("一致 {} 個", s.nmatch));
     parts.push(format!("対数オッズ {:.1}", s.logodds));
@@ -172,25 +172,25 @@ pub(crate) fn run(req: &OfflineRequest, catalog: &Catalog, params: &Params, ctl:
     let (deep_src, u, dinfo) = match deep {
         Ok(r) => r,
         Err(p) => {
-            log(&format!("\n  ⚠️ 深い検出に失敗したので、標準の検出の星だけで解きます: panic: {}", panic_text(&*p)));
+            log(&format!("\n  ⚠️ ディープ検出に失敗したので、標準の検出の星だけで解きます: panic: {}", panic_text(&*p)));
             (Vec::new(), None, None)
         }
     };
     if !deep_src.is_empty() {
         log(&format!(
-            "\n  - 深い検出 (解析エンジンに渡す星): {}、星を {} 個検出 (しきい値 {}σ)",
+            "\n  - ディープ検出 (解析エンジンに渡す星): {}、星を {} 個検出 (しきい値 {}σ)",
             deep_how(dinfo.as_ref()),
             deep_src.len(),
             u.map_or("None".to_string(), |u| fmt_g(u, 6))
         ));
     } else if dinfo.is_some() {
         // Python の `elif dinfo:`(検出を最後まで進めて、星が 0 個だったとき)
-        log("\n  - 深い検出: 星が見つかりませんでした。");
+        log("\n  - ディープ検出: 星が見つかりませんでした。");
     }
     let to_stars = |s: &[Source]| -> Vec<FieldStar> { s.iter().map(|c| FieldStar { x: c.x, y: c.y, flux: c.flux }).collect() };
     let deep_stars = to_stars(&deep_src);
     let std_stars = to_stars(req.sources);
-    let star_sets: Vec<(&str, &[FieldStar])> = [("深い検出", &deep_stars[..]), ("標準の検出", &std_stars[..])]
+    let star_sets: Vec<(&str, &[FieldStar])> = [("ディープ検出", &deep_stars[..]), ("標準の検出", &std_stars[..])]
         .into_iter()
         .filter(|(_, s)| s.len() >= 3)
         .collect();

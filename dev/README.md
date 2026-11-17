@@ -25,7 +25,7 @@
 | `nb_pick.py` | セル B（`pick_image()` の 1 行） |
 | `nb_settings.py` | セル C 冒頭のユーザー設定項目（インデックスファイルの置き場所 `INDEX_DIR` もここ） |
 | `solver_wcs.py` | 幾何: 単位ベクトル ↔ 赤経赤緯、TAN 投影、TAN/SIP のフィット、FITS ヘッダー |
-| `solver_index.py` | インデックスファイル: FITS の表を生のバイトで読む、kd-tree の探索、段とタイルの選び方、検査 |
+| `solver_index.py` | インデックスファイル: FITS の表を生のバイトで読む、kd-tree の探索、スケールとタイルの選び方、検査 |
 | `solver_core.py` | 解法: 星の並べ替え、quad 作り、コード、照合、検証（対数オッズ）、改良、探索の本体 `sv_solve` |
 | `solver_synth.py` | テスト用: インデックスの星から「正解つきの合成星野」を作る（エンジンには入れない） |
 | `zahyou_core.py` | 画像読み込み・前処理・星検出・スケール推定・オフライン解析の段取り（`solve_offline` → `sv_solve`）・オンライン解析・目標の名前解決 |
@@ -65,9 +65,9 @@ exe と同じバージョン。バージョンを上げるときの直し方は 
 
 ```
 python build_nb.py               # 直下の zahyou_engine.py・zahyou_v8.ipynb (セルの中身だけ) と、
-#                                    試験用の dev/zahyou.ipynb・dev/zahyou_engine.py を書く
-python test_solver_wcs.py        # solver_wcs:   TAN の往復・当てはめ・FITS ヘッダー
-python test_solver_index.py      # solver_index: 索引の読み込み・kd-tree の探索・ファイルの検査
+#                                    テスト用の dev/zahyou.ipynb・dev/zahyou_engine.py を書く
+python test_solver_wcs.py        # solver_wcs:   TAN の往復・フィット・FITS ヘッダー
+python test_solver_index.py      # solver_index: インデックスの読み込み・kd-tree の探索・ファイルの検査
 python test_solver_core.py       # solver_core:  quad 作り・コード・照合・検証・改良・解の判定
 python test_solver_synth.py      # 合成星野をブラインドとヒントで解く
 python test_solver_real.py       # 実写を解いて、v6 で求めた正解と比べる
@@ -135,7 +135,7 @@ python fetch_index.py --check 5202 5203 5204  # 検証だけ
 - ダウンロードし終えたら「サイズ一致」と「FITS として開けて `INDEXID` / `HPNSIDE` /
   `NQUADS` が正しい」まで確かめる。壊れていれば消して次回取り直す
 
-段ごとの実サイズ:
+スケールごとの実サイズ:
 
 | スケール | 実サイズ | zip 後 |
 |---|---|---|
@@ -159,11 +159,11 @@ python fetch_index.py --check 5202 5203 5204  # 検証だけ
 python make_index_zips.py 5204 5203 5202 --out C:\AstrometryData\dist
 ```
 
-段ごとに `AstrometryData-index-<段>.zip` を作る。中身は `AstrometryData/index-....fits`
+スケールごとに `AstrometryData-index-<スケール>.zip` を作る。中身は `AstrometryData/index-....fits`
 なので、`C:\` 直下に展開すればマニュアル 4.4 の配置になる（v4。v3 では 2.3）。
-段ごとの README と `SHA256SUMS.txt` も一緒に出力する。
+スケールごとの README と `SHA256SUMS.txt` も一緒に出力する。
 中身の星のデータには元の星表（Tycho-2 / Gaia DR2）の条件がかかる
-（[../rs/THIRD-PARTY-NOTICES.md](../rs/THIRD-PARTY-NOTICES.md) の「星図データ」）。zip の中の README には、その条件
+（[../rs/THIRD-PARTY-NOTICES.md](../rs/THIRD-PARTY-NOTICES.md) の「インデックスファイル」）。zip の中の README には、その条件
 （Gaia は CC BY-NC 3.0 IGO・商用は ESA の許可）・クレジット ESA/Gaia/DPAC・Gaia の定型の謝辞・論文を入れてある。
 **README を直したら zip を作り直して、配布ページの zip も差し替える**（人の作業）。
 

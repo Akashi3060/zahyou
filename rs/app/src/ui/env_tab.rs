@@ -30,7 +30,7 @@ impl ZahyouApp {
         widgets::head(ui, th, "オフライン解析に必要なもの");
         ui.add_space(4.0);
         let rows = [
-            ("星図データ", self.env_rows[0].0, self.env_rows[0].1.clone()),
+            ("インデックスファイル", self.env_rows[0].0, self.env_rows[0].1.clone()),
             ("検査", self.env_rows[1].0, self.env_rows[1].1.clone()),
             ("総合", self.env_rows[2].0, self.env_rows[2].1.clone()),
         ];
@@ -66,12 +66,12 @@ impl ZahyouApp {
             self.placed.push(Placed { name: "中止 (準備)".into(), rect: b.rect, frame });
         });
         ui.add_space(4.0);
-        widgets::muted(ui, th, "解析は zahyou の中で行うので、要るのは星図データだけです (WSL は要りません)。");
+        widgets::muted(ui, th, "解析は zahyou の中で行うので、要るのはインデックスファイルだけです (WSL は要りません)。");
         ui.add_space(8.0);
 
         let rec_gb = zahyou_net::scales_mb(&zahyou_net::recommended_scales()) as f64 / 1024.0;
         let minfov = survey::g(zahyou_net::RECOMMENDED_MIN_FOV);
-        let (placed, grect) = widgets::group(ui, th, "星図データ", |ui| {
+        let (placed, grect) = widgets::group(ui, th, "インデックスファイル", |ui| {
             let mut placed: Vec<(String, egui::Rect)> = Vec::new();
             ui.horizontal(|ui| {
                 ui.label("置き場所");
@@ -94,11 +94,11 @@ impl ZahyouApp {
                 });
             });
             ui.add_space(6.0);
-            let b = ui.button(format!("おすすめをまとめて落とす (約 {rec_gb:.1} GB)"));
+            let b = ui.button(format!("おすすめをまとめてダウンロード (約 {rec_gb:.1} GB)"));
             if b.clicked() {
                 self.request(Action::DownloadRecommended);
             }
-            placed.push(("おすすめをまとめて落とす".into(), b.rect));
+            placed.push(("おすすめをまとめてダウンロード".into(), b.rect));
             widgets::muted(
                 ui,
                 th,
@@ -107,7 +107,7 @@ impl ZahyouApp {
             ui.add_space(4.0);
             ui.separator();
             ui.add_space(4.0);
-            widgets::muted(ui, th, "焦点距離が分かるなら、要る段だけに絞れます");
+            widgets::muted(ui, th, "焦点距離が分かるなら、要るスケールだけに絞れます");
             ui.horizontal_wrapped(|ui| {
                 ui.label("焦点距離 [mm]");
                 let e = ui.add(TextEdit::singleline(&mut self.s.focal).desired_width(64.0));
@@ -118,12 +118,12 @@ impl ZahyouApp {
                 placed.push(("センサー横幅".into(), e.rect));
             });
             ui.add_space(4.0);
-            let b = ui.button("必要な段を選ぶ");
+            let b = ui.button("必要なスケールを選ぶ");
             if b.clicked() {
                 self.request(Action::Recommend);
             }
-            placed.push(("必要な段を選ぶ".into(), b.rect));
-            widgets::muted(ui, th, "この 2 つから画角を出して、要る段だけに印を付けます");
+            placed.push(("必要なスケールを選ぶ".into(), b.rect));
+            widgets::muted(ui, th, "この 2 つから画角を出して、要るスケールだけにチェックを入れます");
             ui.add_space(4.0);
 
             // 段の一覧。番号順ではなく画角の順(4100 系のあとに 5200 系が来ると、はしごが途中で切れて見える)
@@ -155,11 +155,11 @@ impl ZahyouApp {
                 });
             });
             ui.add_space(6.0);
-            let b = ui.button("選んだ段を落とす");
+            let b = ui.button("選んだスケールをダウンロード");
             if b.clicked() {
                 self.request(Action::DownloadIndex);
             }
-            placed.push(("選んだ段を落とす".into(), b.rect));
+            placed.push(("選んだスケールをダウンロード".into(), b.rect));
             placed
         });
         for (name, rect) in placed {

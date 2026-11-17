@@ -364,7 +364,7 @@ mod tests {
             let win = Rect::from_min_size(Pos2::ZERO, size);
             for name in [API_KEY_FIELD, "表示", "元に戻す"] {
                 let p = app.placed.iter().find(|p| p.name == name).unwrap_or_else(|| panic!("{name} が置かれていない"));
-                assert!(win.contains_rect(p.rect), "{name} が窓の外 ({size:?} 拡大率 {ppp}): {:?}", p.rect);
+                assert!(win.contains_rect(p.rect), "{name} がウィンドウの外 ({size:?} 拡大率 {ppp}): {:?}", p.rect);
                 assert!(p.frame.expand(1.0).contains_rect(p.rect), "{name} が［解析］の枠からはみ出た ({size:?} 拡大率 {ppp})");
             }
             let (ok, msg) = api_key_selftest(&app);

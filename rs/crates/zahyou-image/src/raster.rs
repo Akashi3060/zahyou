@@ -157,7 +157,7 @@ fn png_mode(b: &[u8]) -> Result<&'static str, String> {
         (3, _) => "P",
         (4, _) => "LA",
         (6, _) => "RGBA",
-        _ => return Err(format!("PNG の色の型 {ct} を知りません")),
+        _ => return Err(format!("PNG のカラータイプ {ct} に対応していません")),
     })
 }
 

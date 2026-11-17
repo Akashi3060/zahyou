@@ -772,7 +772,7 @@ mod tests {
             assert_eq!(got.std.to_bits(), want.std.to_bits(), "std n={n} full=false");
         }
         // 塊の数が長さに単調でないこと(clip_finish が比べる理由)。スレッド数を決めて確かめる
-        let pool = rayon::ThreadPoolBuilder::new().num_threads(8).build().expect("rayon のスレッドの束");
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(8).build().expect("rayon のスレッドプール");
         pool.install(|| {
             assert_eq!(n_parts(655_360), 10);
             assert_eq!(n_parts(655_361), 9);

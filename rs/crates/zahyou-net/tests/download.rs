@@ -95,7 +95,7 @@ fn fetch_with_range_and_skip_existing() {
     // 区切りごとの Range
     let gets: Vec<String> = srv.requests().iter().filter(|q| q.method == "GET").filter_map(|q| q.header("range").map(String::from)).collect();
     assert!(gets.contains(&"bytes=0-4095".to_string()) && gets.contains(&"bytes=4096-8191".to_string()), "{gets:?}");
-    assert!(r.log.iter().any(|l| l.contains("3 ファイル /") && l.contains("へ落とします")));
+    assert!(r.log.iter().any(|l| l.contains("3 ファイル /") && l.contains("へダウンロードします")));
     assert!(r.log.iter().any(|l| l == "  完了: 3/3 ファイル"));
 
     // もう一度: すべて落ちている(HEAD だけ)
@@ -103,7 +103,7 @@ fn fetch_with_range_and_skip_existing() {
     let r = run(&dest, &o, &names(), None);
     assert!(r.res.ok);
     assert_eq!((r.res.planned, r.res.already), (0, 3));
-    assert!(r.log.iter().any(|l| l == "  すべて落ちています (3 ファイル)。"));
+    assert!(r.log.iter().any(|l| l == "  すべてダウンロード済みです (3 ファイル)。"));
     assert!(srv.requests().iter().all(|q| q.method == "HEAD"));
 }
 
@@ -175,7 +175,7 @@ fn fetch_gives_up_rejects_corrupt_and_missing() {
     assert_eq!(failed, vec!["index-4119.fits", "index-5206-02.fits", "index-5206-03.fits", "readme.txt"]);
     assert!(r.log.iter().any(|l| l == "    index-4119.fits: あきらめました。"));
     assert_eq!(r.log.iter().filter(|l| l.contains("index-4119.fits") && l.contains("続きから再開します")).count(), 5);
-    assert!(r.log.iter().any(|l| l.contains("index-5206-02.fits: 落としたファイルの中身がおかしいので消します (INDEXID が名前と違います (5205))")));
+    assert!(r.log.iter().any(|l| l.contains("index-5206-02.fits: ダウンロードしたファイルの中身がおかしいので消します (INDEXID が名前と違います (5205))")));
     assert!(r.log.iter().any(|l| l.starts_with("    index-5206-03.fits: 大きさを取れません")));
     assert!(!dest.join("index-5206-02.fits").exists(), "中身のおかしいファイルは消す");
     // 4119 の .part は残る(次に続きから)
@@ -275,7 +275,7 @@ fn fetch_default_validates_with_zahyou_index() {
     let r = run(&dest, &FetchOptions { segment: 64 << 10, ..o }, &names, None);
     assert!(!r.res.ok);
     assert_eq!(r.res.failed, vec!["index-5206-05.fits".to_string()]);
-    let why = r.log.iter().find(|l| l.contains("index-5206-05.fits: 落としたファイルの中身がおかしいので消します")).expect("消した記録");
+    let why = r.log.iter().find(|l| l.contains("index-5206-05.fits: ダウンロードしたファイルの中身がおかしいので消します")).expect("消した記録");
     eprintln!("zahyou-index が偽物を弾いた理由: {why}");
     assert!(!dest.join("index-5206-05.fits").exists());
     // 軽い検査だけなら通る(表が無いことまでは見ない)

@@ -1488,7 +1488,7 @@ def sv_solve(xy, flux, width, height, catalog, *, scale_lo=None, scale_hi=None, 
     except _SvTimeUp:
         status = "deadline"
         if log:
-            log(f"締め切り: quad {st['quads']:,} 個・仮説 {st['hyps']:,} 個を試して解けず"
+            log(f"タイムアウト: quad {st['quads']:,} 個・仮説 {st['hyps']:,} 個を試して解けず"
                 f"(対数オッズの最大 {st.get('logodds_max', -math.inf):.1f}、{time.monotonic() - t0:.1f} 秒)"
                 + sv_passed_note(st))
     except SvCancelled:
@@ -1525,7 +1525,7 @@ def _sv_search(xy, flux, width, height, catalog, scale_lo, scale_hi, hint, clock
     st["scale"] = (s_lo, s_hi)
     if not files:
         if log:
-            log("使える星図データ(索引)がありません")
+            log("使えるインデックスファイルがありません")
         return None
     # 索引ごとの AB の範囲と、系列の中の位置
     info = []
@@ -1543,7 +1543,7 @@ def _sv_search(xy, flux, width, height, catalog, scale_lo, scale_hi, hint, clock
     if log:
         series = sorted({f.indexid for f, _, _, _ in info})
         log(f"星 {field.n} 個(quad に {field.nq} 個)、スケール {s_lo:.3g}〜{s_hi:.3g}″/px、"
-            f"索引 {len(info)} 本(系列 {', '.join(map(str, series))})"
+            f"インデックス {len(info)} 本(系列 {', '.join(map(str, series))})"
             + ("" if hint is None else f"、ヒント ({hint[0]:.3f}, {hint[1]:+.3f}) 半径 {hint[2]:g}°"))
     L2, inside = sv_quad_geometry(field.P, p.codetol)
     pending = {dq: [] for dq in dqs}
@@ -1622,15 +1622,15 @@ def _sv_flush(field, catalog, info, pending, s_lo, s_hi, hint_t, clock, log, p, 
                 catalog.mark_broken(e.file, str(e))
                 st.setdefault("broken", []).append(str(e))
                 if log:
-                    log(f"星図データが壊れているので、この先は使いません: {e}")
+                    log(f"インデックスファイルが壊れているので、この先は使いません: {e}")
                 members = [(f, fid) for f, fid in members if f.broken is None]
                 continue
             except (ValueError, IndexError) as e:
                 bad_series.add(iid)
                 st.setdefault("broken", []).append(f"index-{iid}: {type(e).__name__}: {e}")
                 if log:
-                    log(f"星図データ index-{iid} を読めないので、この探索では使いません"
-                        f"(中身が壊れているかもしれません。落とし直してください): {type(e).__name__}: {e}")
+                    log(f"インデックスファイル index-{iid} を読めないので、この探索では使いません"
+                        f"(中身が壊れているかもしれません。ダウンロードし直してください): {type(e).__name__}: {e}")
                 sol = None
             break
         if sol is not None:
@@ -1727,7 +1727,7 @@ def _sv_verify_and_pick(field, catalog, f, hy, clock, log, p, st, fl):
                 # ここで None を返すと、解けている画像が「解けず」になる。解として返すかは、改良の後の判定(試した数で上げる値・
                 # tune-up の一致の増え)で決まるので、ログは「解が見つかった」と言い切らない
                 if log:
-                    log("締め切りを過ぎましたが、solve を超えた候補があるので改良を済ませます")
+                    log("タイムアウトしましたが、solve を超えた候補があるので改良を済ませます")
                 wcs, res1 = _sv_refine(field, catalog, f, hy1, p.tweak_order,
                                        clock=_SvClock(None, clock.cancel))
             lo = float(res1["best"][0])

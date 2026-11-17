@@ -69,7 +69,7 @@ impl<'a> Store<'a> {
             }
         }
         let Some(r) = cell.get() else {
-            return Err(Abort::Corrupt { file: i, msg: format!("{name}: 索引を開けません") });
+            return Err(Abort::Corrupt { file: i, msg: format!("{name}: インデックスファイルを開けません") });
         };
         match r {
             Ok(d) => Ok(d),
@@ -660,7 +660,7 @@ mod tests {
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| std::path::PathBuf::from(r"C:\AstrometryData"));
         if !cfg!(windows) || !dir.is_dir() {
-            eprintln!("SKIP series_cone_matches_reference: 星図データが無い");
+            eprintln!("SKIP series_cone_matches_reference: インデックスファイルが無い");
             return;
         }
         let cat = Catalog::scan(&dir);

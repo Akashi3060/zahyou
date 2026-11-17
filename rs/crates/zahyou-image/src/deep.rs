@@ -959,7 +959,7 @@ mod tests {
                 n_grid += block_grid(&sm, &bad, false, (ny, nx), nbox, BlockFn::MadSigma).is_some() as usize;
             }
         }
-        assert!((2..8).contains(&n_grid), "升の地図あり {n_grid} 件");
+        assert!((2..8).contains(&n_grid), "ブロックのグリッドあり {n_grid} 件");
     }
 
     #[test]

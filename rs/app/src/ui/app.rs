@@ -235,7 +235,7 @@ impl ZahyouApp {
             let idx = &st.index;
             if st.ready {
                 let fov = idx.fov.map(|(a, b)| format!(" / 画角 {}′〜{}′", survey::g(a), survey::g(b))).unwrap_or_default();
-                job.log(&format!("✅ オフライン解析できます (星図データ {} ファイル{fov})", idx.files));
+                job.log(&format!("✅ オフライン解析できます (インデックスファイル {} 個{fov})", idx.files));
             } else {
                 job.log("❌ オフライン解析はまだ使えません。");
             }
@@ -243,7 +243,7 @@ impl ZahyouApp {
                 job.log(&format!("  ⚠️ {m}"));
             }
             if !st.ready {
-                job.log("「まとめて準備する」を押すと星図データを落とします。");
+                job.log("「まとめて準備する」を押すと、インデックスファイルをダウンロードします。");
             }
             job.send(Msg::Env(Box::new(st)));
         });
@@ -613,11 +613,11 @@ impl ZahyouApp {
 
     // ============================================================ 準備 ===
     pub fn choose_indexdir(&mut self, host: Host) {
-        if let Some(d) = Self::file_dialog(host).set_title("星図データの置き場所").pick_folder() {
+        if let Some(d) = Self::file_dialog(host).set_title("インデックスファイルの置き場所").pick_folder() {
             let d = d.display().to_string();
             self.s.indexdir = d.clone();
             self.forget_env();
-            self.log_env_line(&format!("星図データの置き場所: {d}"));
+            self.log_env_line(&format!("インデックスファイルの置き場所: {d}"));
             self.log_env_line("  「状態を確認」を押すと、この場所で調べ直します。");
         }
     }
@@ -633,10 +633,10 @@ impl ZahyouApp {
     /// 「状態を確認」
     pub fn survey(&mut self, host: Host) {
         let dir = self.index_dir();
-        self.bg(host, "星図データを調べています...", LogTo::Env, move |job| {
+        self.bg(host, "インデックスファイルを調べています...", LogTo::Env, move |job| {
             let log = |l: &str| job.log(l);
             log(&"=".repeat(56));
-            log("状態を確認しています (星図データを 1 本ずつ検査します)...");
+            log("状態を確認しています (インデックスファイルを 1 本ずつ検査します)...");
             let st = survey::survey(&dir);
             survey::report(&st, &log);
             let msg = if st.ready {
@@ -664,7 +664,7 @@ impl ZahyouApp {
             let mut text = format!("{} ファイル / {}", idx.files, zahyou_net::human(idx.bytes as f64));
             if !idx.partial.is_empty() {
                 let p: Vec<String> = idx.partial.keys().map(|s| s.to_string()).collect();
-                text += &format!("  (途中の段 {})", p.join(", "));
+                text += &format!("  (未完了 {})", p.join(", "));
             }
             (Some(idx.partial.is_empty()), text)
         };
@@ -703,7 +703,7 @@ impl ZahyouApp {
         self.marks.iter().filter(|(_, v)| **v).map(|(k, _)| *k).collect()
     }
 
-    /// 「必要な段を選ぶ」
+    /// 「必要なスケールを選ぶ」
     pub fn recommend(&mut self, host: Host) {
         let focal = self.s.focal.trim().parse::<f64>();
         let sensor = self.s.sensor.trim().parse::<f64>();
@@ -732,32 +732,32 @@ impl ZahyouApp {
                         fov_h = Some(h);
                         log(&format!("画像 {nx} x {ny} 画素 → 画角 {fov_w:.1}′ x {h:.1}′"));
                         if nx.max(ny) as f64 >= 1.8 * nx.min(ny) as f64 {
-                            log(&format!("  縦横比が大きいので、短辺 {:.1}′ に合う段も入れます。", fov_w.min(h)));
+                            log(&format!("  縦横比が大きいので、短辺 {:.1}′ に合うスケールも入れます。", fov_w.min(h)));
                         }
                     }
                     Err(_) => log("画像の大きさを読めませんでした (LoadError)。横幅だけで選びます。"),
                 }
             } else {
                 log(&format!(
-                    "⚠️ 横幅の画角 {fov_w:.1}′ だけで選びます。必要な段は短いほうの辺で決まるので、[解析] タブで画像を選んでから押し直してください。"
+                    "⚠️ 横幅の画角 {fov_w:.1}′ だけで選びます。必要なスケールは短いほうの辺で決まるので、[解析] タブで画像を選んでから押し直してください。"
                 ));
             }
             let want = zahyou_net::recommend_scales(fov_w, fov_h);
             let need: Vec<u32> = want.iter().copied().filter(|s| !have.contains(s)).collect();
             let mb = zahyou_net::scales_mb(&need) as f64;
-            log(&format!("  必要な段 {}", survey::list_repr(&want)));
+            log(&format!("  必要なスケール {}", survey::list_repr(&want)));
             let need_s = if need.is_empty() { "なし".to_string() } else { survey::list_repr(&need) };
             log(&format!("  まだ無いのは {need_s} (約 {:.1} GB)", mb / 1024.0));
             job.send(Msg::Marks(need.clone()));
             if need.is_empty() {
-                "必要な段はすべてそろっています。".into()
+                "必要なスケールはすべてそろっています。".into()
             } else {
-                format!("{} 段に印を付けました (約 {:.1} GB)", need.len(), mb / 1024.0)
+                format!("スケール {} 個にチェックを入れました (約 {:.1} GB)", need.len(), mb / 1024.0)
             }
         });
     }
 
-    /// 「おすすめをまとめて落とす」
+    /// 「おすすめをまとめてダウンロード」
     pub fn download_recommended(&mut self, host: Host) {
         let want = zahyou_net::recommended_scales();
         let have = self.have_scales();
@@ -768,15 +768,15 @@ impl ZahyouApp {
         }
         let minfov = survey::g(zahyou_net::RECOMMENDED_MIN_FOV);
         if need.is_empty() {
-            self.log_env_line(&format!("おすすめの段 (画角 {minfov}′ 以上) はすべてそろっています。"));
-            self.status = "おすすめの段はすべてそろっています。".into();
+            self.log_env_line(&format!("おすすめのスケール (画角 {minfov}′ 以上) はすべてそろっています。"));
+            self.status = "おすすめのスケールはすべてそろっています。".into();
             return;
         }
         let mb = zahyou_net::scales_mb(&need) as f64;
-        self.log_env_line(&format!("おすすめの段 {}", survey::list_repr(&want)));
+        self.log_env_line(&format!("おすすめのスケール {}", survey::list_repr(&want)));
         self.log_env_line(&format!("  まだ無いのは {} (約 {:.1} GB)", survey::list_repr(&need), mb / 1024.0));
         let q = format!(
-            "画角 {minfov}′ 以上をぜんぶそろえます。\n足りない {} 段 / 約 {:.1} GB を\n{} へ落とします。よろしいですか?\n\n回線にもよりますが、数十分かかります。\n途中で中止しても、次に押せば続きから再開します。",
+            "画角 {minfov}′ 以上をぜんぶそろえます。\n足りないスケール {} 個 / 約 {:.1} GB を\n{} へダウンロードします。よろしいですか?\n\n回線にもよりますが、数十分かかります。\n途中で中止しても、次に押せば続きから再開します。",
             need.len(),
             mb / 1024.0,
             self.index_dir().display()
@@ -790,16 +790,16 @@ impl ZahyouApp {
         self.start_download(host, need);
     }
 
-    /// 「選んだ段を落とす」
+    /// 「選んだスケールをダウンロード」
     pub fn download_index(&mut self, host: Host) {
         let scales = self.marked();
         if scales.is_empty() {
-            self.info(host, "落とす段にチェックを入れてください。");
+            self.info(host, "ダウンロードするスケールにチェックを入れてください。");
             return;
         }
         let mb = zahyou_net::scales_mb(&scales) as f64;
         let q = format!(
-            "{} 段 / 約 {:.1} GB を\n{} へ落とします。よろしいですか?\n\n途中で中止しても、次に押せば続きから再開します。",
+            "スケール {} 個 / 約 {:.1} GB を\n{} へダウンロードします。よろしいですか?\n\n途中で中止しても、次に押せば続きから再開します。",
             scales.len(),
             mb / 1024.0,
             self.index_dir().display()
@@ -812,7 +812,7 @@ impl ZahyouApp {
 
     fn start_download(&mut self, host: Host, scales: Vec<u32>) {
         let dir = self.index_dir();
-        self.bg(host, "星図データを落としています...", LogTo::Env, move |job| {
+        self.bg(host, "インデックスファイルをダウンロードしています...", LogTo::Env, move |job| {
             bridge::release_indexes();
             let log = |l: &str| job.log(l);
             let prog = |d: u64, t: u64| job.progress(d, t);
@@ -824,18 +824,18 @@ impl ZahyouApp {
             if !r.ok && (r.cancelled || job.cancelled()) {
                 "中止しました。".into()
             } else if !r.ok {
-                "落とせなかったファイルがあります。ログを見てください。".into()
+                "ダウンロードできなかったファイルがあります。ログを見てください。".into()
             } else if ready {
-                "星図データを入れました。".into()
+                "インデックスファイルを入れました。".into()
             } else {
-                "落とし終えましたが、まだ足りません。".into()
+                "ダウンロードは終わりましたが、まだ足りません。".into()
             }
         });
     }
 
     /// 「まとめて準備する」(Python の _prepare_all)
     ///
-    /// 段に印を付けてあればその段を、無ければおすすめの段(画角 4′ 以上)をそろえる。そろっていれば検査だけ。
+    /// スケールにチェックを入れてあればそのスケールを、無ければおすすめのスケール(画角 4′ 以上)をそろえる。そろっていれば検査だけ。
     /// 落とす段があるときは、印の有無にかかわらず押したときの置き場所で数え直して容量を見せて聞く。聞いた段より
     /// 多く足りなくなっていたら(聞いている間に消したなど)、ワーカーは落とさずに止める。
     pub fn prepare_all(&mut self, host: Host) {
@@ -844,12 +844,12 @@ impl ZahyouApp {
         if !need.is_empty() {
             let mb = zahyou_net::scales_mb(&need) as f64;
             let head = if scales.is_empty() {
-                format!("段が選ばれていないので、おすすめ (画角 {}′ 以上) をそろえます。\n", survey::g(zahyou_net::RECOMMENDED_MIN_FOV))
+                format!("スケールが選ばれていないので、おすすめ (画角 {}′ 以上) をそろえます。\n", survey::g(zahyou_net::RECOMMENDED_MIN_FOV))
             } else {
-                "印を付けた段をそろえます。\n".to_string()
+                "チェックを入れたスケールをそろえます。\n".to_string()
             };
             let q = format!(
-                "{head}足りない {} 段 / 約 {:.1} GB を\n{} へ落とします。よろしいですか?\n\n(段は下のチェックか「必要な段を選ぶ」で指定できます。\n途中で中止しても、次に押せば続きから再開します)",
+                "{head}足りないスケール {} 個 / 約 {:.1} GB を\n{} へダウンロードします。よろしいですか?\n\n(スケールは下のチェックか「必要なスケールを選ぶ」で指定できます。\n途中で中止しても、次に押せば続きから再開します)",
                 need.len(),
                 mb / 1024.0,
                 self.index_dir().display()
@@ -917,7 +917,7 @@ impl ZahyouApp {
             return;
         };
         let q = format!(
-            "{}（{} 版）に入れ替えます。\n\n  1. 新しい zahyou.exe を落とします（{:.0} MB）\n  2. 中身を確かめます（SHA256）\n  3. zahyou を閉じて入れ替え、起動し直します\n\nいまの版は zahyou.exe.old に名前を変えておき、次に起動したときに消します。\n設定と、覚えた座標はそのまま引き継がれます。",
+            "{}（{} 版）に入れ替えます。\n\n  1. 新しい zahyou.exe をダウンロードします（{:.0} MB）\n  2. 中身を確かめます（SHA256）\n  3. zahyou を閉じて入れ替え、起動し直します\n\nいまのバージョンは zahyou.exe.old に名前を変えておき、次に起動したときに消します。\n設定と、覚えた座標はそのまま引き継がれます。",
             rel.tag,
             rel.updated,
             rel.size as f64 / 1e6
@@ -1105,7 +1105,7 @@ mod result_memory_tests {
         app.show_result(r);
         assert!(app.figs[0].is_some() && app.fig_src[0].is_some());
         app.clear_figures();
-        assert_eq!(Arc::strong_count(&mine.scene), 1, "画面の形をまだ誰かが持っている");
+        assert_eq!(Arc::strong_count(&mine.scene), 1, "シーンをまだ誰かが持っている");
         assert_eq!(Arc::strong_count(&mine.source), 1, "元の図をまだ誰かが持っている");
         // 中止・解けなかった結果は表示しないので、受け取ったらすぐ手放す
         for (solved, cancelled) in [(false, true), (false, false)] {
@@ -1124,7 +1124,7 @@ mod log_text_tests {
     fn 異体字セレクターを落とす() {
         let mut b = String::new();
         super::push_log_text(&mut b, "⚠\u{FE0F} 目標の座標が無い");
-        super::push_log_text(&mut b, "  ✅ 解析成功 (深い検出)");
-        assert_eq!(b, "⚠ 目標の座標が無い\n  ✅ 解析成功 (深い検出)\n");
+        super::push_log_text(&mut b, "  ✅ 解析成功 (ディープ検出)");
+        assert_eq!(b, "⚠ 目標の座標が無い\n  ✅ 解析成功 (ディープ検出)\n");
     }
 }

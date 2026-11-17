@@ -53,7 +53,7 @@ impl fmt::Display for FitError {
             FitError::Coincident => write!(f, "画像の点か星がすべて同じ位置にある"),
             FitError::RankDeficient { order, terms, rank } => write!(
                 f,
-                "多項式(次数 {order})を当てるには点が足りないか、並びが縮退している(項 {terms}、階数 {rank})"
+                "多項式(次数 {order})をフィットするには点が足りないか、並びが縮退している(項 {terms}、階数 {rank})"
             ),
             FitError::SingularCd => write!(f, "CD が特異(点が一直線に並んでいる)"),
             FitError::OrderTooHigh(n) => write!(f, "次数 {n} は扱えない(SIP は {} 次まで)", MAX_SIP_ORDER - 1),
