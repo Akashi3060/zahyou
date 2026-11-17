@@ -1,50 +1,50 @@
 # -*- coding: utf-8 -*-
-"""Release(β版・正式版)に付ける資産を 1 つのフォルダーにそろえ、中身を検査して SHA256SUMS.txt を作る。
+"""Release(β版・正式版)に付けるアセットを 1 つのフォルダーにそろえ、中身を検査して SHA256SUMS.txt を作る。
 
     python rs/tools/make_release_assets.py --exe <release ビルドの zahyou.exe> --out <リポジトリの外のフォルダー>
 
-そろえるもの(v6 の Release に合わせる。名前は版から決まる):
+そろえるもの(v6 の Release に合わせる。名前はバージョンから決まる):
 
     zahyou.exe                Rust 版の release ビルド(--exe。名前は必ず zahyou.exe = 更新の確認がこの名前で探す)
-    zahyou_v8.ipynb           ノートブック版(リポジトリ直下の zahyou_v<大きな版>.ipynb。名前は版から決める。β版なら zahyou_v8_beta.ipynb
-                              = v6 と紛れないよう版の名前で)。セル A はエンジンを「同じフォルダーの zahyou_engine.py」で探すので、
+    zahyou_v8.ipynb           ノートブック版(リポジトリ直下の zahyou_v<メジャーバージョン>.ipynb。名前はバージョンから決める。β版なら zahyou_v8_beta.ipynb
+                              = v6 と紛れないようバージョン名で)。セル A はエンジンを「同じフォルダーの zahyou_engine.py」で探すので、
                               ノートブックの名前を変えても動く
     zahyou_engine.py          ノートブック版の解析エンジン(リポジトリ直下のもの)
     zahyou-manual-v4.pdf      導入・運用マニュアル(リポジトリ直下の「…マニュアルv4.pdf」。v4 は dev/make_manual.py の VERSION)
-    LICENSE.txt               LICENSE の写し
+    LICENSE.txt               LICENSE のコピー
     THIRD-PARTY-NOTICES.md    rs/THIRD-PARTY-NOTICES.md(Rust 版の exe の同梱物。exe に埋め込んだものと同じ)
     zahyou_native-*.whl       ノートブック版の拡張モジュール(rs/py)の wheel 4 つ(--wheels のフォルダーから。GitHub Actions の
-                              wheels ワークフローで建てたもの。ノートブックのセル A の 2 つ目の pip の行がこの Release から探す)
+                              wheels ワークフローでビルドしたもの。ノートブックのセル A の 2 つ目の pip の行がこの Release から探す)
     SHA256SUMS.txt            上の全部の SHA256(`sha256sum -c SHA256SUMS.txt` で確かめられる形。改行は LF)
 
 検査(1 つでも落ちたら、何も書かずに終了コード 1):
 
-    version   exe の版情報(FileVersion・ProductVersion・数の版・プレリリースの印)と `--engine-check` の version= が、
-              rs/Cargo.toml の [workspace.package] version と一致する(FileVersion はその版のまま、ProductVersion と
-              version= は版名 = 末尾の 0 を省いた形。8.0.0 → v8。rs/app/build.rs の version_label と同じ決まり)
-    paths     exe に、建てた人のホームフォルダーのパス(USERPROFILE。例 C:\\Users\\<名前>)が 1 か所も無い。
+    version   exe のバージョン情報(FileVersion・ProductVersion・数のバージョン・プレリリースのフラグ)と `--engine-check` の version= が、
+              rs/Cargo.toml の [workspace.package] version と一致する(FileVersion はそのバージョンのまま、ProductVersion と
+              version= はバージョン名 = 末尾の 0 を省いた形。8.0.0 → v8。rs/app/build.rs の version_label と同じ決まり)
+    paths     exe に、ビルドした人のホームフォルダーのパス(USERPROFILE。例 C:\\Users\\<名前>)が 1 か所も無い。
               区切り \\ と /・MSYS の /c/…・大文字小文字・UTF-8 と UTF-16 のどれでも数える。依存のパニック位置情報は、
-              手順書 4 節の --remap-path-prefix を付けずに建てると、CARGO_HOME の下のパスのまま残る
+              手順書 4 節の --remap-path-prefix を付けずにビルドすると、CARGO_HOME の下のパスのまま残る
     notices   exe に埋め込まれた同梱物の表示が rs/THIRD-PARTY-NOTICES.md と同じで、`gen_notices.py --check` で最新
               (cargo と rustc が要る。PATH に無ければ C:\\msys64\\ucrt64\\bin を足して探す)
-    manual    dev/make_manual.py を一時フォルダーで組み直したものが、リポジトリの PDF とバイト単位で同じ
-              (make_manual.py は作成日時などを固定して組むので、同じ中身なら同じバイトになる)
-    wheels    --wheels のフォルダーに、Cargo の版の zahyou_native の wheel が Windows x86_64・Mac(universal2)・
+    manual    dev/make_manual.py を一時フォルダーで作り直したものが、リポジトリの PDF とバイト単位で同じ
+              (make_manual.py は作成日時などを固定して作るので、同じ中身なら同じバイトになる)
+    wheels    --wheels のフォルダーに、Cargo のバージョンの zahyou_native の wheel が Windows x86_64・Mac(universal2)・
               Linux x86_64・Linux aarch64 の 4 つそろっていて、それぞれの .dist-info/licenses/THIRD-PARTY-NOTICES.md が
-              rs/py/THIRD-PARTY-NOTICES.md と同じで、拡張モジュールに建てた人のホームフォルダーのパスが無い
-              (手元で建てた wheel を混ぜない)。rs/py/Cargo.toml の版も Cargo の版と同じ
+              rs/py/THIRD-PARTY-NOTICES.md と同じで、拡張モジュールにビルドした人のホームフォルダーのパスが無い
+              (手元でビルドした wheel を混ぜない)。rs/py/Cargo.toml のバージョンも Cargo のバージョンと同じ
     notebook  dev/build_nb.py を一時フォルダーへ走らせた出力と比べて、直下の zahyou_engine.py が同じで、
-              zahyou_v<大きな版>.ipynb のセルの並びと中身が同じ(出力の例はリポジトリのものを残して配る)。
-              NB_VERSION が版名と同じ
+              zahyou_v<メジャーバージョン>.ipynb のセルの並びと中身が同じ(出力の例はリポジトリのものを残して配る)。
+              NB_VERSION がバージョン名と同じ
 
 `--skip <検査>` で検査を飛ばせる(試しのとき用。飛ばした検査は最後に「確かめていない」と出る)。
 出力先は、空か無いフォルダーで、リポジトリの外に限る(直下に .gitignore が無いので、誤って commit しないように)。
-文字のファイル(.ipynb・.py・.txt・.md)は改行を LF にそろえて書く(git の中と同じ形。作業ツリーが CRLF でも
-SHA256 が変わらないように。v6 の Release の LICENSE.txt も LF)。exe と PDF はそのまま写す。
+テキストファイル(.ipynb・.py・.txt・.md)は改行を LF にそろえて書く(git の中と同じ形。作業ツリーが CRLF でも
+SHA256 が変わらないように。v6 の Release の LICENSE.txt も LF)。exe と PDF はそのままコピーする。
 exe は `--engine-check` で 1 回起動する(画面は出さない。ZAHYOU_CACHE・ZAHYOU_SETTINGS・LOCALAPPDATA は一時フォルダーへ向ける)。
 build_nb.py は、どの出力先でも dev/_cell2_check.py を書く(.gitignore 済み)。
 
-標準ライブラリだけで動く(マニュアルを組み直すには reportlab と fontTools、build_nb.py には何も要らない)。
+標準ライブラリだけで動く(マニュアルを作り直すには reportlab と fontTools、build_nb.py には何も要らない)。
 """
 from __future__ import annotations
 
@@ -93,13 +93,13 @@ def split_version(version: str) -> tuple[tuple[int, int, int], str]:
     """'7.0.0-beta.1' → ((7, 0, 0), 'beta.1')。プレリリースが無ければ ''"""
     m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?", version)
     if not m:
-        raise ValueError(f"版の書き方が違います: {version!r}")
+        raise ValueError(f"バージョンの書き方が違います: {version!r}")
     return (int(m[1]), int(m[2]), int(m[3])), m[4] or ""
 
 
 def version_label(version: str) -> str:
-    """画面に出す版名(rs/app/build.rs の version_label と同じ決まり)。"v" + 大きな版、中か小が 0 でなければ ".中"、
-    小が 0 でなければ ".小"、プレリリースがあれば "-" + プレリリース。8.0.0 → v8、8.0.0-beta.1 → v8-beta.1、7.1.0 → v7.1"""
+    """画面に出すバージョン名(rs/app/build.rs の version_label と同じ決まり)。"v" + メジャーバージョン、マイナーかパッチが 0 でなければ ".マイナー"、
+    パッチが 0 でなければ ".パッチ"、プレリリースがあれば "-" + プレリリース。8.0.0 → v8、8.0.0-beta.1 → v8-beta.1、7.1.0 → v7.1"""
     (major, minor, patch), pre = split_version(version)
     s = f"v{major}"
     if minor or patch:
@@ -112,7 +112,7 @@ def version_label(version: str) -> str:
 
 
 def notebook_repo_path(version: str) -> Path:
-    """配るノートブックの元(直下の zahyou_v<大きな版>.ipynb。dev/build_nb.py の ROOT_NB と同じ名前)"""
+    """配るノートブックの元(直下の zahyou_v<メジャーバージョン>.ipynb。dev/build_nb.py の ROOT_NB と同じ名前)"""
     (major, _, _), _ = split_version(version)
     return REPO_DIR / f"zahyou_v{major}.ipynb"
 
@@ -143,9 +143,9 @@ def _align4(n: int) -> int:
 
 
 def pe_version_strings(data: bytes, keys=("FileVersion", "ProductVersion", "ProductName", "OriginalFilename")) -> dict[str, str]:
-    """exe の版情報(StringFileInfo の String 構造)から文字列を読む。
+    """exe のバージョン情報(StringFileInfo の String 構造)から文字列を読む。
 
-    String 構造は wLength・wValueLength・wType(1 = 文字)・szKey(UTF-16、0 終わり)・4 バイト境界までの詰め物・Value。
+    String 構造は wLength・wValueLength・wType(1 = テキスト)・szKey(UTF-16、NUL 終端)・4 バイト境界までのパディング・Value。
     リソースは 4 バイト境界に置かれるので、ファイルの中の位置でそろえてよい。"""
     out: dict[str, str] = {}
     for key in keys:
@@ -172,7 +172,7 @@ def pe_version_strings(data: bytes, keys=("FileVersion", "ProductVersion", "Prod
 
 
 def pe_fixed_info(data: bytes) -> dict | None:
-    """VS_FIXEDFILEINFO の数の版とフラグ(無ければ None)"""
+    """VS_FIXEDFILEINFO の数のバージョンとフラグ(無ければ None)"""
     i = data.find(VS_FIXEDFILEINFO_SIG)
     if i < 0 or len(data) < i + 52:
         return None
@@ -201,12 +201,12 @@ def engine_check_version(exe: Path) -> str:
 
 
 def check_version(exe: Path, version: str) -> list[str]:
-    """exe が version(Cargo の版)で建てたものか。食い違いの説明の一覧(空なら合格)"""
+    """exe が version(Cargo のバージョン)でビルドしたものか。食い違いの説明の一覧(空なら合格)"""
     problems = []
     data = exe.read_bytes()
     strings = pe_version_strings(data)
     if strings.get("FileVersion") != version:
-        problems.append(f"exe の FileVersion が {strings.get('FileVersion')!r}(Cargo の版は {version!r})")
+        problems.append(f"exe の FileVersion が {strings.get('FileVersion')!r}(Cargo のバージョンは {version!r})")
     label = version_label(version)
     if strings.get("ProductVersion") != label:
         problems.append(f"exe の ProductVersion が {strings.get('ProductVersion')!r}(期待は {label!r})")
@@ -215,12 +215,12 @@ def check_version(exe: Path, version: str) -> list[str]:
     core, pre = split_version(version)
     fixed = pe_fixed_info(data)
     if fixed is None:
-        problems.append("exe に数の版(VS_FIXEDFILEINFO)がありません")
+        problems.append("exe に数のバージョン(VS_FIXEDFILEINFO)がありません")
     else:
         if fixed["file_version"] != (*core, 0):
-            problems.append(f"exe の数の版が {fixed['file_version']}(期待は {(*core, 0)})")
+            problems.append(f"exe の数のバージョンが {fixed['file_version']}(期待は {(*core, 0)})")
         if fixed["prerelease"] != bool(pre):
-            problems.append(f"exe のプレリリースの印が {fixed['prerelease']}(版 {version})")
+            problems.append(f"exe のプレリリースのフラグが {fixed['prerelease']}(バージョン {version})")
     got = engine_check_version(exe)
     if got != label:
         problems.append(f"--engine-check の version= が {got!r}(期待は {label!r})")
@@ -264,7 +264,7 @@ def count_home_paths(data: bytes, home: str) -> dict[str, int]:
 
 
 def home_dirs() -> list[str]:
-    """建てた人のホームフォルダー(この道具は exe を建てた PC で走らせる)。
+    """ビルドした人のホームフォルダー(この道具は exe をビルドした PC で走らせる)。
     区切りと大文字小文字だけが違うもの(MSYS2 の Python の Path.home() は C:/Users/…)は 1 つにまとめる"""
     out: list[str] = []
     seen: set[str] = set()
@@ -277,7 +277,7 @@ def home_dirs() -> list[str]:
 
 
 def check_paths(exe: Path, homes: list[str] | None = None) -> list[str]:
-    """exe に建てた人のホームフォルダーのパスが入っていないか。見つかった説明の一覧(空なら合格)"""
+    """exe にビルドした人のホームフォルダーのパスが入っていないか。見つかった説明の一覧(空なら合格)"""
     data = exe.read_bytes()
     problems = []
     for home in homes if homes is not None else home_dirs():
@@ -285,20 +285,20 @@ def check_paths(exe: Path, homes: list[str] | None = None) -> list[str]:
         if sum(n.values()):
             problems.append(f"exe にホームフォルダーのパス {home} が {sum(n.values())} か所あります"
                             f"(UTF-8 {n['UTF-8']}・UTF-16 {n['UTF-16']}。依存のパニック位置情報なら、"
-                            "手順書 4 節の --remap-path-prefix を付けずに建てた exe)")
+                            "手順書 4 節の --remap-path-prefix を付けずにビルドした exe)")
     return problems
 
 
 # ------------------------------------------------------- ノートブック版の拡張モジュール ---
 
 def wheel_version(version: str) -> str:
-    """Cargo の版を wheel の名前の版(PEP 440)にする。maturin と同じ決まり: 8.0.0 → 8.0.0、8.0.0-beta.1 → 8.0.0b1"""
+    """Cargo のバージョンを wheel の名前のバージョン(PEP 440)にする。maturin と同じ決まり: 8.0.0 → 8.0.0、8.0.0-beta.1 → 8.0.0b1"""
     (ma, mi, pa), pre = split_version(version)
     if not pre:
         return f"{ma}.{mi}.{pa}"
     m = re.fullmatch(r"(alpha|beta|rc)\.?(\d+)", pre)
     if not m:
-        raise ValueError(f"wheel の版にできないプレリリース: {pre}")
+        raise ValueError(f"wheel のバージョンにできないプレリリース: {pre}")
     return f"{ma}.{mi}.{pa}{ {'alpha': 'a', 'beta': 'b', 'rc': 'rc'}[m[1]] }{m[2]}"
 
 
@@ -314,7 +314,7 @@ def check_wheels(wdir: Path | None, version: str, homes: list[str] | None = None
     problems = []
     py_ver = cargo_version(RS_DIR / "py" / "Cargo.toml", "package")
     if py_ver != version:
-        problems.append(f"rs/py/Cargo.toml の版 {py_ver} が rs/Cargo.toml の {version} と違います(release-v7.md 2 節の表の 12)")
+        problems.append(f"rs/py/Cargo.toml のバージョン {py_ver} が rs/Cargo.toml の {version} と違います(release-v7.md 2 節の表の 12)")
     wv = wheel_version(version)
     want_notices = (RS_DIR / "py" / "THIRD-PARTY-NOTICES.md").read_bytes().replace(b"\r\n", b"\n")
     found: dict[str, list[str]] = {name: [] for name, _ in WHEEL_PLATFORMS}
@@ -327,7 +327,7 @@ def check_wheels(wdir: Path | None, version: str, homes: list[str] | None = None
             problems.append(f"{f.name}: zahyou_native の abi3 の wheel の名前ではありません")
             continue
         if m[1] != wv:
-            problems.append(f"{f.name}: 版 {m[1]} が Cargo の版({wv})と違います")
+            problems.append(f"{f.name}: バージョン {m[1]} が Cargo のバージョン({wv})と違います")
         tags = m[2].split(".")
         hit = [name for name, ok in WHEEL_PLATFORMS if any(ok(t) for t in tags)]
         if len(hit) != 1:
@@ -351,7 +351,7 @@ def check_wheels(wdir: Path | None, version: str, homes: list[str] | None = None
                         c = count_home_paths(data, home)
                         if sum(c.values()):
                             problems.append(f"{f.name}: {n} にホームフォルダーのパス {home} が {sum(c.values())} か所あります"
-                                            "(手元で建てた wheel。配るのは GitHub Actions で建てたもの)")
+                                            "(手元でビルドした wheel。配るのは GitHub Actions でビルドしたもの)")
         except zipfile.BadZipFile:
             problems.append(f"{f.name}: zip として読めません")
     for name, got in found.items():
@@ -380,7 +380,7 @@ def check_notices(exe: Path) -> list[str]:
     problems = []
     notices = (RS_DIR / "THIRD-PARTY-NOTICES.md").read_bytes()
     if not notices_embedded(exe.read_bytes(), notices):
-        problems.append("exe に埋め込まれた同梱物の表示が rs/THIRD-PARTY-NOTICES.md と違います(表示を作り直したあとで exe を建て直す)")
+        problems.append("exe に埋め込まれた同梱物の表示が rs/THIRD-PARTY-NOTICES.md と違います(表示を作り直したあとで exe をビルドし直す)")
     r = subprocess.run([sys.executable, "-B", str(RS_DIR / "tools" / "gen_notices.py"), "--check"],
                        cwd=RS_DIR, env=tool_env(), capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode != 0:
@@ -392,18 +392,18 @@ def check_notices(exe: Path) -> list[str]:
 # ---------------------------------------------------------------- マニュアル ---
 
 def check_manual(version: str, work: Path) -> list[str]:
-    """make_manual.py を組み直して、リポジトリの PDF と同じバイトか"""
+    """make_manual.py で作り直して、リポジトリの PDF と同じバイトか"""
     repo_pdf = manual_repo_path(version)
     if not repo_pdf.exists():
-        return [f"{repo_pdf.name} がありません(python dev/make_manual.py で組む)"]
+        return [f"{repo_pdf.name} がありません(python dev/make_manual.py で作る)"]
     fresh = work / "manual.pdf"
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
     r = subprocess.run([sys.executable, "-B", str(DEV_DIR / "make_manual.py"), str(fresh)], cwd=DEV_DIR, env=env,
                        capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode != 0 or not fresh.exists():
-        return ["make_manual.py で組めません: " + " / ".join((r.stdout + r.stderr).strip().splitlines()[-3:])]
+        return ["make_manual.py で作れません: " + " / ".join((r.stdout + r.stderr).strip().splitlines()[-3:])]
     if fresh.read_bytes() != repo_pdf.read_bytes():
-        return [f"{repo_pdf.name} が今の make_manual.py で組んだものと違います(python dev/make_manual.py で組み直す)"]
+        return [f"{repo_pdf.name} が今の make_manual.py で作ったものと違います(python dev/make_manual.py で作り直す)"]
     return []
 
 
@@ -434,7 +434,7 @@ def compare_engines(built: Path, repo: Path) -> list[str]:
 
 
 def notebook_version(engine_text: str) -> str | None:
-    """ノートブック版のログの見出しの版(dev/nb_main.py の NB_VERSION)。見つからなければ None"""
+    """ノートブック版のログの見出しのバージョン(dev/nb_main.py の NB_VERSION)。見つからなければ None"""
     m = re.search(r'^NB_VERSION = "([^"]*)"$', engine_text, re.M)
     return m.group(1) if m else None
 
@@ -466,12 +466,12 @@ TEXT_SUFFIXES = (".ipynb", ".py", ".txt", ".md")
 
 @dataclass
 class Plan:
-    """配る資産(配る名前 → 元のファイル)"""
+    """配るアセット(配る名前 → 元のファイル)"""
     files: dict[str, Path] = field(default_factory=dict)
 
 
 def is_text_asset(name: str) -> bool:
-    """改行を LF にそろえて書く資産か"""
+    """改行を LF にそろえて書くアセットか"""
     return name.lower().endswith(TEXT_SUFFIXES)
 
 
@@ -516,14 +516,14 @@ def check_out_dir(out: Path, allow_in_repo: bool = False) -> str | None:
     """出力先に書いてよいか。だめなら理由"""
     out = out.resolve()
     if out.exists() and (not out.is_dir() or any(out.iterdir())):
-        return f"{out} は空のフォルダーではありません(資産を混ぜないため、空か無いフォルダーにする)"
+        return f"{out} は空のフォルダーではありません(アセットを混ぜないため、空か無いフォルダーにする)"
     if not allow_in_repo and (out == REPO_DIR or REPO_DIR in out.parents):
         return f"{out} はリポジトリの中です(誤って commit しないよう、リポジトリの外にする)"
     return None
 
 
 def assemble(plan: Plan, out: Path) -> list[str]:
-    """資産を写して SHA256SUMS.txt を書く。書いた名前の並び(SHA256SUMS.txt を除く)"""
+    """アセットをコピーして SHA256SUMS.txt を書く。書いた名前の並び(SHA256SUMS.txt を除く)"""
     missing = [str(src) for src in plan.files.values() if not src.exists()]
     if missing:
         raise FileNotFoundError("元のファイルがありません: " + ", ".join(missing))
@@ -541,7 +541,7 @@ def assemble(plan: Plan, out: Path) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--exe", type=Path, required=True, help="release ビルドの zahyou.exe")
-    ap.add_argument("--out", type=Path, required=True, help="資産を置くフォルダー(空か無い、リポジトリの外)")
+    ap.add_argument("--out", type=Path, required=True, help="アセットを置くフォルダー(空か無い、リポジトリの外)")
     ap.add_argument("--wheels", type=Path, help="zahyou-native の wheel 4 つのフォルダー(GitHub Actions の成果物 zahyou-native-wheels)")
     ap.add_argument("--skip", action="append", default=[], choices=CHECKS, help="飛ばす検査(試しのとき用。何度でも)")
     ap.add_argument("--allow-in-repo", action="store_true", help=argparse.SUPPRESS)  # 試験用
@@ -557,7 +557,7 @@ def main(argv: list[str] | None = None) -> int:
 
     version = cargo_version()
     manual_ver = manual_version()
-    print(f"版 {version}(rs/Cargo.toml)/ マニュアル {manual_ver} / exe {a.exe}")
+    print(f"バージョン {version}(rs/Cargo.toml)/ マニュアル {manual_ver} / exe {a.exe}")
     results: dict[str, list[str] | None] = {}
     with tempfile.TemporaryDirectory(prefix="zahyou-assets-") as t:
         work = Path(t)
@@ -581,7 +581,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"         {p}")
     failed = [n for n, r in results.items() if r]
     if failed:
-        print(f"検査に落ちたので、資産は書いていません: {', '.join(failed)}", file=sys.stderr)
+        print(f"検査に落ちたので、アセットは書いていません: {', '.join(failed)}", file=sys.stderr)
         return 1
 
     names = assemble(plan_assets(a.exe, version, manual_ver, wheel_files(a.wheels)), a.out)

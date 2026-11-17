@@ -1,7 +1,7 @@
 """ノートブック版の拡張モジュール zahyou-native(rs/py)が、Python の sv_solve と同じ解を返すかを確かめるテスト。
 
 zahyou_core._solve_stars(エンジンが使う入口)で解き、同じ星野を sv_solve で直接解いた解と比べる。
-比べるのは 索引・対数オッズ・一致の数・試した仮説の数・WCS(中心 1e-6″、CD 1e-12)。合成星野は test_solver_synth.py の場合
+比べるのは インデックス・対数オッズ・一致の数・試した仮説の数・WCS(中心 1e-6″、CD 1e-12)。合成星野は test_solver_synth.py の場合
 (ヒントつきの速いものと、解けない乱数の星野)。拡張が入っていなければ(pip install zahyou-native)全部 SKIP。
 
   python dev/test_native.py        (拡張を入れた Python で)
@@ -42,7 +42,7 @@ def main():
     cat = si.SvIndexCatalog(T.DATA)
     T._CATALOG[0] = cat
     if not cat.files:
-        print(f"  SKIP 全部: 星図データが無い({T.DATA})")
+        print(f"  SKIP 全部: インデックスファイルが無い({T.DATA})")
         return 0
     for name in CASES:
         c = next(x for x in T.CASES if x["name"] == name)
@@ -67,7 +67,7 @@ def main():
             bad.append(f"片方だけ解けた(Rust {nat is not None}・Python {py is not None})")
         elif nat is not None:
             if nat.index_name != py.index_name:
-                bad.append(f"索引 {nat.index_name} / {py.index_name}")
+                bad.append(f"インデックス {nat.index_name} / {py.index_name}")
             if abs(nat.logodds - py.logodds) > 1e-6:
                 bad.append(f"対数オッズ {nat.logodds} / {py.logodds}")
             for a in ("nmatch", "ndistract", "nfield", "nref", "hypotheses"):

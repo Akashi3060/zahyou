@@ -352,7 +352,7 @@ impl BenchApp {
                 if let Some(fig) = self.fig.as_mut() {
                     let _ = fig.show(ui, th);
                 } else {
-                    ui.label(egui::RichText::new(format!("描画方式の物差し: {label}")).color(th.muted));
+                    ui.label(egui::RichText::new(format!("描画方式のベンチマーク: {label}")).color(th.muted));
                 }
             });
     }
@@ -498,7 +498,7 @@ pub fn run(args: &[String]) -> i32 {
         .filter(|[w, h]| w.is_finite() && h.is_finite() && *w >= 200.0 && *h >= 200.0)
         .unwrap_or([1180.0, 780.0]);
     let viewport = egui::ViewportBuilder::default()
-        .with_title(format!("zahyou {APP_VER} — 描画方式の物差し"))
+        .with_title(format!("zahyou {APP_VER} — 描画方式のベンチマーク"))
         .with_inner_size(size)
         .with_app_id("zahyou-bench-ui")
         .with_icon(Arc::new(egui::IconData::default()));

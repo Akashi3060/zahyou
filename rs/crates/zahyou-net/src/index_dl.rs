@@ -314,7 +314,7 @@ fn padded(n: u64) -> u64 {
 fn check_layout(path: &Path) -> Result<(), String> {
     let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let Some((scale, tile)) = parse_index_name(&name) else {
-        return Err("索引ファイルの名前ではありません".into());
+        return Err("インデックスファイルの名前ではありません".into());
     };
     let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
     let mut f = File::open(path).map_err(|e| e.to_string())?;
@@ -570,7 +570,7 @@ pub fn fetch_index_with(
         match (parse_index_name(n), opts.url(n)) {
             (Some((s, _)), Some(url)) => jobs.push((n.clone(), url, s)),
             _ => {
-                log(&format!("    {n}: 索引ファイルの名前ではありません"));
+                log(&format!("    {n}: インデックスファイルの名前ではありません"));
                 res.failed.push(n.clone());
             }
         }
@@ -623,11 +623,11 @@ pub fn fetch_index_with(
     res.total_bytes = total;
 
     if todo.is_empty() {
-        log(&format!("  すべて落ちています ({} ファイル)。", res.already));
+        log(&format!("  すべてダウンロード済みです ({} ファイル)。", res.already));
         res.ok = res.failed.is_empty();
         return res;
     }
-    let mut msg = format!("  {} ファイル / {} を {} へ落とします。", todo.len(), human(total as f64), dest_dir.display());
+    let mut msg = format!("  {} ファイル / {} を {} へダウンロードします。", todo.len(), human(total as f64), dest_dir.display());
     if res.already > 0 {
         msg += &format!("  (既にある {} ファイルは飛ばします)", res.already);
     }
@@ -713,7 +713,7 @@ fn download_one(
             match check_index_file(path, opts.validate) {
                 Ok(()) => return Ok(true),
                 Err(why) => {
-                    log(&format!("    {name}: 中身がおかしいので落とし直します ({why})"));
+                    log(&format!("    {name}: 中身がおかしいのでダウンロードし直します ({why})"));
                     if let Err(e) = std::fs::remove_file(path) {
                         log(&format!("    {name}: 消せません ({e})"));
                         return Ok(false);
@@ -724,7 +724,7 @@ fn download_one(
             // v6 が残した途中のファイル → 続きから
             let r = if part.exists() { std::fs::remove_file(path) } else { std::fs::rename(path, &part) };
             if let Err(e) = r {
-                log(&format!("    {name}: 続きから落とす準備ができません ({e})"));
+                log(&format!("    {name}: 続きからダウンロードする準備ができません ({e})"));
                 return Ok(false);
             }
         }
@@ -754,7 +754,7 @@ fn finish(part: &Path, path: &Path, opts: &FetchOptions, log: &dyn Fn(&str)) -> 
     match check_index_file(path, opts.validate) {
         Ok(()) => true,
         Err(why) => {
-            log(&format!("    {name}: 落としたファイルの中身がおかしいので消します ({why})。"));
+            log(&format!("    {name}: ダウンロードしたファイルの中身がおかしいので消します ({why})。"));
             let _ = std::fs::remove_file(path);
             false
         }

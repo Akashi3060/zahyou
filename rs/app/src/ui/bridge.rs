@@ -29,7 +29,7 @@ pub struct ResultView {
     pub numbers: Option<[(String, String); 3]>,
     /// 数字の下の 1 行
     pub detail: Option<String>,
-    /// 状態バーに残す文
+    /// ステータスバーに残す文
     pub status: String,
     /// [撮影時の向き, 北が上](目標が無いときは 1 枚)
     pub figures: Vec<FigureOut>,
@@ -334,7 +334,7 @@ pub fn release_indexes() {
     pipeline::release_index_catalog();
 }
 
-/// 画像の縦横の画素数(準備タブの「必要な段を選ぶ」で短辺を見るため)
+/// 画像の縦横の画素数(準備タブの「必要なスケールを選ぶ」で短辺を見るため)
 pub fn image_size(path: &Path) -> Result<(usize, usize), String> {
     let l = zahyou_image::load_image_any(path).map_err(|e| e.to_string())?;
     Ok((l.data.width, l.data.height))
@@ -550,10 +550,10 @@ mod plot_tests {
         assert_eq!(new.len(), old.len());
         for (i, (n, o)) in new.iter().zip(&old).enumerate() {
             // 写していない(rgba の領域がそのまま)
-            assert_eq!(n.source.rgba.as_ptr(), ptrs[i], "図 {i} を写している");
+            assert_eq!(n.source.rgba.as_ptr(), ptrs[i], "図 {i} をコピーしている");
             // 保存に使う元の図も、画面の形も、旧版とバイト単位で同じ(f64 の Debug は往復できる最短の表記)
             assert_eq!(format!("{:?}", n.source), format!("{:?}", o.source), "図 {i}");
-            assert_eq!(scene_dump(&n.scene), scene_dump(&o.scene), "図 {i} の画面の形");
+            assert_eq!(scene_dump(&n.scene), scene_dump(&o.scene), "図 {i} のシーン");
         }
     }
 

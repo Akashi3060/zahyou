@@ -20,14 +20,14 @@ use zahyou_solver::{
     Control, FieldStar, Params, SolveDetail, SolveOptions, SolveRequest, solve_detailed,
 };
 
-/// Python 側と取り決めた呼び方の版。引数や戻り値の形を変えたら上げる(Python 側は合わなければ使わない)。
+/// Python 側と取り決めた呼び方のバージョン。引数や戻り値の形を変えたら上げる(Python 側は合わなければ使わない)。
 const API: u32 = 1;
 
 /// 星のリストから WCS を求める。解けなければ None。
 ///
-/// xy: [(x, y)](0 始まりの画素)、flux: 明るさ(xy と同じ長さ)、index_dir: 星図データのフォルダー、
-/// scale_lo / scale_hi: 画素スケールの範囲 [″/px](None なら手持ちの段から逆算)、hint: (赤経, 赤緯, 半径) 度、
-/// timeout: 締め切りまでの秒、cancel: 呼ぶと真偽を返す関数(真なら中止して InterruptedError)、log: 1 行ずつ受ける関数。
+/// xy: [(x, y)](0 始まりの画素)、flux: 明るさ(xy と同じ長さ)、index_dir: インデックスファイルのフォルダー、
+/// scale_lo / scale_hi: 画素スケールの範囲 [″/px](None なら手持ちのスケールから逆算)、hint: (赤経, 赤緯, 半径) 度、
+/// timeout: タイムアウトまでの秒、cancel: 呼ぶと真偽を返す関数(真なら中止して InterruptedError)、log: 1 行ずつ受ける関数。
 #[pyfunction]
 #[pyo3(signature = (xy, flux, width, height, index_dir, scale_lo=None, scale_hi=None, hint=None,
                     timeout=None, cancel=None, log=None))]
@@ -77,7 +77,7 @@ fn solve(
             let say = |m: &str| {
                 let _ = tx.send(m.to_string());
             };
-            // 目録は呼ぶたびに作り、終わったら閉じる(Windows で索引ファイルを開いたままにしない)
+            // 目録は呼ぶたびに作り、終わったら閉じる(Windows でインデックスファイルを開いたままにしない)
             let catalog = Catalog::scan(&index_dir);
             if catalog.files.is_empty() {
                 say("使えるインデックスファイルがありません");

@@ -69,7 +69,7 @@ impl Catalog {
                     let key = (f.indexid, f.healpix);
                     if let Some(first) = seen.get(&key) {
                         let base = first.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-                        cat.problems.push((p, format!("同じ索引が 2 つあります({base} と同じ中身)")));
+                        cat.problems.push((p, format!("同じインデックスファイルが 2 つあります({base} と同じ中身)")));
                         continue;
                     }
                     seen.insert(key, p);
@@ -106,7 +106,7 @@ impl Catalog {
                 } else {
                     cat.problems.push((
                         f.path.clone(),
-                        "同じ系列のほかのファイルと段の値(DIMQUADS・SCALE・HPNSIDE)が違います".to_string(),
+                        "同じ系列のほかのファイルとヘッダーの値(DIMQUADS・SCALE・HPNSIDE)が違います".to_string(),
                     ));
                 }
             }

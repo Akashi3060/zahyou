@@ -239,7 +239,7 @@ impl RunResult {
         ))
     }
 
-    /// 状態バーに残す文(Python の GUI `_final_msg`)。
+    /// ステータスバーに残す文(Python の GUI `_final_msg`)。
     pub fn status_text(&self) -> String {
         if self.cancelled {
             "中止しました。".to_string()
@@ -535,7 +535,7 @@ impl<'a> Runner<'a> {
                             d[i] * summary.scale
                         ));
                     } else {
-                        self.log("  目標そのものは、この検出しきい値では拾えていません (暗い星なら正常です)。");
+                        self.log("  目標そのものは、このしきい値では検出できていません (暗い星なら正常です)。");
                     }
                 }
             }
@@ -667,13 +667,13 @@ impl<'a> Runner<'a> {
         let p = self.p;
         let index_dir =
             if p.index_dir.as_os_str().is_empty() { PathBuf::from(DEFAULT_INDEX_DIR) } else { p.index_dir.clone() };
-        self.log("\n[オフライン] 星図データを確認しています...");
+        self.log("\n[オフライン] インデックスファイルを確認しています...");
         let diag = solver_diagnostics(&index_dir);
         for m in &diag.messages {
             self.log(&format!("⚠️ {m}"));
         }
         let catalog = diag.catalog.clone().filter(|_| diag.ok)?;
-        self.log(&format!("  - 星図データ {} ファイル ({})", diag.indexes.len(), index_dir.display()));
+        self.log(&format!("  - インデックスファイル {} 個 ({})", diag.indexes.len(), index_dir.display()));
 
         let (nx, ny) = (inp.loaded.data.width, inp.loaded.data.height);
         let pre = offline_prelog(inp.scale, inp.scale_why, nx, ny, &diag.indexes);
@@ -724,7 +724,7 @@ impl<'a> Runner<'a> {
             // 星が 1〜2 個なら解法が「❌ 星が N 個しかない」を出している。0 個の文はここで出す(Python と同じく案内は出さない)
             OfflineStop::TooFewStars if n_best == 0 => self.log("  ❌ 星が 1 つも無いので解析できません。"),
             OfflineStop::TooFewStars => {}
-            OfflineStop::NoIndex => self.log("  ❌ 使える星図データがありません。［準備］タブで落としてください。"),
+            OfflineStop::NoIndex => self.log("  ❌ 使えるインデックスファイルがありません。［準備］タブでダウンロードしてください。"),
             // 解法が「❌ オフライン解析が途中で失敗しました」を出している(Python も案内は出さない)
             OfflineStop::Failed => {}
         }
@@ -862,7 +862,7 @@ pub fn offsets(center: (f64, f64), target: (f64, f64)) -> Offsets {
 pub fn offsets_lines(o: &Offsets) -> Vec<String> {
     vec![
         "\n  画像中心から目標までのずれ".to_string(),
-        format!("    全角距離      : {:.3}′  ({:.1}″)", o.sep_arcmin, o.sep_arcmin * 60.0),
+        format!("    角距離        : {:.3}′  ({:.1}″)", o.sep_arcmin, o.sep_arcmin * 60.0),
         format!("    赤経(RA) 方向 : {:.3}′ {}へ", o.ra_arcmin.abs(), o.ra_dir),
         format!("    赤緯(Dec)方向 : {:.3}′ {}へ", o.dec_arcmin.abs(), o.dec_dir),
     ]
@@ -974,7 +974,7 @@ pub fn solver_diagnostics(index_dir: &Path) -> Diagnostics {
     let mut d = Diagnostics { ok: false, messages: Vec::new(), indexes: Vec::new(), catalog: None };
     if !index_dir.is_dir() {
         d.messages.push(format!(
-            "星図データの置き場所 {} がありません。［準備］タブで星図データを落とすか、置き場所を指定し直してください。",
+            "インデックスファイルの置き場所 {} がありません。［準備］タブでインデックスファイルをダウンロードするか、置き場所を指定し直してください。",
             index_dir.display()
         ));
         return d;
@@ -988,7 +988,7 @@ pub fn solver_diagnostics(index_dir: &Path) -> Diagnostics {
     let problems = &catalog.problems;
     if !problems.is_empty() {
         d.messages.push(format!(
-            "使えない星図データが {} 個あるので読み飛ばします。［準備］タブで落とし直してください。",
+            "使えないインデックスファイルが {} 個あるので読み飛ばします。［準備］タブでダウンロードし直してください。",
             problems.len()
         ));
         for (path, why) in problems.iter().take(5) {
@@ -1001,7 +1001,7 @@ pub fn solver_diagnostics(index_dir: &Path) -> Diagnostics {
     }
     if d.indexes.is_empty() {
         d.messages.push(format!(
-            "使える星図データ (index-*.fits) が {} に 1 つもありません。［準備］タブで落としてください。",
+            "使えるインデックスファイル (index-*.fits) が {} に 1 つもありません。［準備］タブでダウンロードしてください。",
             index_dir.display()
         ));
         return d;
@@ -1029,12 +1029,12 @@ pub fn offline_prelog<S: AsRef<str>>(
         _ => out.push(format!("  - 画素スケール: {how}")),
     }
     if installed.is_empty() {
-        out.push("  ❌ 使える星図データがありません。［準備］タブで落としてください。".to_string());
+        out.push("  ❌ 使えるインデックスファイルがありません。［準備］タブでダウンロードしてください。".to_string());
         return out;
     }
     if let Some((lo, hi)) = scale::index_coverage(installed) {
         out.push(format!(
-            "  - 手持ちの星図データが対応する画角: {}′ 〜 {}′ (index ファイル {} 個)",
+            "  - 手持ちのインデックスファイルが対応する画角: {}′ 〜 {}′ ({} 個)",
             fmt_g(lo),
             fmt_g(hi),
             installed.len()
@@ -1046,7 +1046,7 @@ pub fn offline_prelog<S: AsRef<str>>(
                 out.push(format!("{}{m}", if ok { "  - " } else { "  ⚠️ " }));
             }
             if !ok {
-                out.push(format!("     ※ 必要な段は横幅 {w:.1}′ ではなく短辺 {short:.1}′ で決まります。"));
+                out.push(format!("     ※ 必要なスケールは横幅 {w:.1}′ ではなく短辺 {short:.1}′ で決まります。"));
             }
         }
     }
@@ -1079,7 +1079,7 @@ pub fn offline_advice<S: AsRef<str>>(
         ));
     }
     if let Some((lo, hi)) = scale::index_coverage(installed) {
-        out.push(format!("     ・手持ちの星図データは画角 {}′〜{}′ しか解けません。", fmt_g(lo), fmt_g(hi)));
+        out.push(format!("     ・手持ちのインデックスファイルは画角 {}′〜{}′ しか解けません。", fmt_g(lo), fmt_g(hi)));
         match scale {
             Some(s) => {
                 let (w, h) = (nx as f64 * s / 60.0, ny as f64 * s / 60.0);
@@ -1095,7 +1095,7 @@ pub fn offline_advice<S: AsRef<str>>(
                 }
             }
             None => out.push(
-                "       画角が分かれば、足りない段を名指しできます。FOCAL_LENGTH_MM を書いてもう一度試してください。"
+                "       画角が分かれば、足りないスケールを名指しできます。FOCAL_LENGTH_MM を書いてもう一度試してください。"
                     .to_string(),
             ),
         }
@@ -1607,11 +1607,11 @@ mod tests {
         let v = log_version();
         // ログの見出し・画面の版名・exe の ProductVersion(build.rs)は同じ版名
         assert_eq!(v, crate::APP_VER);
-        assert_eq!(v, expected_label(), "build.rs の version_label と、ここで組み立てた版名が違う");
+        assert_eq!(v, expected_label(), "build.rs の version_label と、ここで組み立てたバージョン名が違う");
         // 版の文字はここに書かない。以前は `if 版 == "7.0.0-beta.2" { … }` の形で、版を上げて直し忘れると条件が外れ、
         // 黙って通っていた。代わりに cargo が分けた大・中・小・プレリリースと、更新の確認の読み方が同じかを見る
         // (読めないと、正式版の扱い = GitHub の latest だけを見ることになる)。文書に書いた版は次の試験
-        let parsed = zahyou_net::update::parse_version(&v).unwrap_or_else(|| panic!("版名を読めません: {v}"));
+        let parsed = zahyou_net::update::parse_version(&v).unwrap_or_else(|| panic!("バージョン名を読めません: {v}"));
         let num = |s: &str| s.parse::<u64>().unwrap();
         assert_eq!(
             (parsed.major, parsed.minor, parsed.patch),
@@ -1685,9 +1685,9 @@ mod tests {
                 }
             }
         }
-        assert!(bad.is_empty(), "Cargo.toml の版 {ver} と違う版が書いてある(docs/release-v7.md 2 節):\n{}", bad.join("\n"));
+        assert!(bad.is_empty(), "Cargo.toml のバージョン {ver} と違うバージョンが書いてある(docs/release-v7.md 2 節):\n{}", bad.join("\n"));
         if env!("CARGO_PKG_VERSION_PRE").starts_with("beta") {
-            assert!(seen >= 4, "β の版の文字が見つからない({seen} 個)。拾い方が壊れていないか");
+            assert!(seen >= 4, "β のバージョンの文字が見つからない({seen} 個)。抽出のしかたが壊れていないか");
         }
         // ノートブック版の見出しの版は、β でも正式版でも画面と同じ版名
         let label = expected_label();
@@ -1700,7 +1700,7 @@ mod tests {
         );
         // 配るノートブックは直下の zahyou_v<大きな版>.ipynb(dev/build_nb.py と make_release_assets.py が版から名前を決める)
         let nb_name = format!("zahyou_v{}.ipynb", env!("CARGO_PKG_VERSION_MAJOR"));
-        assert!(repo.join(&nb_name).is_file(), "直下に {nb_name} が無い(版を上げたら git mv で改名する。docs/release-v7.md 2 節)");
+        assert!(repo.join(&nb_name).is_file(), "直下に {nb_name} が無い(バージョンを上げたら git mv で改名する。docs/release-v7.md 2 節)");
         // 前の版の名前が残っていない(改名せずに build_nb.py で新しく作ると、前のものが残って 2 つになる)
         let mut nbs: Vec<String> = std::fs::read_dir(&repo)
             .unwrap()
@@ -1712,8 +1712,8 @@ mod tests {
             })
             .collect();
         nbs.sort();
-        assert_eq!(nbs, vec![nb_name], "直下の zahyou_v<数>.ipynb は今の版の 1 つだけのはず");
-        // ノートブック版の拡張モジュール(rs/py。workspace の外なので版を受け継げない)も同じ版
+        assert_eq!(nbs, vec![nb_name], "直下の zahyou_v<数>.ipynb は今のバージョンの 1 つだけのはず");
+        // ノートブック版の拡張モジュール(rs/py。workspace の外なのでバージョンを受け継げない)も同じバージョン
         let py = std::fs::read_to_string(repo.join("rs").join("py").join("Cargo.toml")).unwrap();
         assert!(
             py.lines().any(|l| l.trim() == format!("version = \"{ver}\"")),
@@ -1754,7 +1754,7 @@ mod tests {
 
     #[test]
     fn beta_labels_finds_only_short_labels() {
-        assert_eq!(beta_labels("題 zahyou v8-beta.1 (β版)。/tag/v8-beta.12) と v8.1-beta.2"), vec!["v8-beta.1", "v8-beta.12", "v8.1-beta.2"]);
+        assert_eq!(beta_labels("タイトル zahyou v8-beta.1 (β版)。/tag/v8-beta.12) と v8.1-beta.2"), vec!["v8-beta.1", "v8-beta.12", "v8.1-beta.2"]);
         // 数 3 つの形・v の無いもの・語の一部・数でないβの番号は拾わない
         assert!(beta_labels("v8.0.0-beta.1 と 8-beta.1 と dev8-beta.1 と v8-beta.N と v8-beta.1a").is_empty());
     }
@@ -2039,7 +2039,7 @@ pub(crate) mod pyref {
             }
         }
         let _ = std::fs::remove_dir_all(&dir);
-        eprintln!("画素スケールの推定 {n} 通り・機材の鍵・逆算した焦点距離・段の案内が Python と同じ");
+        eprintln!("画素スケールの推定 {n} 通り・機材のキー・逆算した焦点距離・スケールの案内が Python と同じ");
     }
 
     #[test]
@@ -2160,10 +2160,10 @@ pub(crate) mod pyref {
         for l in lines {
             let t = l.trim_start_matches('\n');
             if (t.starts_with("  [") && t.contains("] ") && t.contains("(最大 "))
-                || t.starts_with("  - 深い検出")
+                || t.starts_with("  - ディープ検出")
                 || t.starts_with("  ⏱")
                 || t.starts_with("    · ")
-                || t.starts_with("    索引 ")
+                || t.starts_with("    インデックス ")
                 || t.starts_with("  ✅ 解析成功 (")
             {
                 continue;
@@ -2211,16 +2211,16 @@ pub(crate) mod pyref {
     /// 画像のパス("$ZAHYOU_TEST_IMAGES/…")は resolve_image と同じ決まりでこの PC のパスにする。
     pub(crate) fn run_images(d: &Value, tag: &str) -> Option<(PathBuf, PathBuf, PathBuf)> {
         if d.get("skipped").is_some() {
-            eprintln!("SKIP: 基準値を作ったときに試験画像が無かった");
+            eprintln!("SKIP: 基準値を作ったときにテスト画像が無かった");
             return None;
         }
         let img = resolve_image(&s(&d["image"]));
         let Ok(bytes) = std::fs::read(&img) else {
-            eprintln!("SKIP: 試験画像がありません: {}", img.display());
+            eprintln!("SKIP: テスト画像がありません: {}", img.display());
             return None;
         };
         if sha2_like::sha256_hex(&bytes) != s(&d["image_sha256"]) {
-            eprintln!("SKIP: 試験画像の中身が基準値を作ったときと違います");
+            eprintln!("SKIP: テスト画像の中身が基準値を作ったときと違います");
             return None;
         }
         let cards: Vec<String> = d["wcs_cards"].as_array()?.iter().map(s).collect();
@@ -2301,7 +2301,7 @@ pub(crate) mod pyref {
             };
             let params = params_from(&r["params"], image);
             if s(&r["which"]) != "wcs" && !params.index_dir.is_dir() && name != "off_noindex" {
-                eprintln!("SKIP {name}: 星図データがありません");
+                eprintln!("SKIP {name}: インデックスファイルがありません");
                 continue;
             }
             let cache = dir.join(format!("cache_{name}.json"));
@@ -2375,7 +2375,7 @@ pub(crate) mod pyref {
             assert_eq!(got_rigs.as_object().map(|o| o.len()), want_rigs.as_object().map(|o| o.len()), "{name}");
         }
         let _ = std::fs::remove_dir_all(&dir);
-        eprintln!("run() のログ {n_runs} 通り・{n_lines} 行が Python と同じ(解法のはしごの行と所要時間を除く)");
+        eprintln!("run() のログ {n_runs} 通り・{n_lines} 行が Python と同じ(段階的な試行の行と所要時間を除く)");
     }
 
     /// WSL 版(astrometry.net)の正解 WCS(pipeline_run.json の wcs_cards = oracle/real_orig/solution.wcs)。
@@ -2413,7 +2413,7 @@ pub(crate) mod pyref {
         let Some((_, plain, dir)) = run_images(&d, "oracle") else { return };
         let index_dir = PathBuf::from(DEFAULT_INDEX_DIR);
         if !index_dir.is_dir() {
-            eprintln!("SKIP: 星図データがありません({DEFAULT_INDEX_DIR})");
+            eprintln!("SKIP: インデックスファイルがありません({DEFAULT_INDEX_DIR})");
             return;
         }
         let wcs = oracle_wcs(&d).expect("正解 WCS を読めない");
@@ -2486,7 +2486,7 @@ pub(crate) mod pyref {
         let Some(d) = load("pipeline_run.json") else { return };
         let Some((_, plain, dir)) = run_images(&d, "selftest") else { return };
         if !Path::new(DEFAULT_INDEX_DIR).is_dir() {
-            eprintln!("SKIP: 星図データがありません");
+            eprintln!("SKIP: インデックスファイルがありません");
             return;
         }
         let solver = oracle_solver(oracle_wcs(&d).unwrap());
@@ -2579,7 +2579,7 @@ pub(crate) mod pyref {
                      _: &Catalog,
                      _: &Params,
                      _: &Control|
-                     -> Result<OfflineOutcome, SolveError> { panic!("試験のための panic") };
+                     -> Result<OfflineOutcome, SolveError> { panic!("テストのための panic") };
                 let env2 = RunEnv {
                     cache_file: Some(dir2.join("c.json")),
                     offline_solver: Some(&boom),
@@ -2588,7 +2588,7 @@ pub(crate) mod pyref {
                 };
                 let params = RunParams { image_path: plain, solve_mode: SolveMode::Offline, ..Default::default() };
                 let res = run_with(&params, &env2, &AtomicBool::new(false), &quiet);
-                assert!(res.error.as_deref().unwrap_or("").contains("試験のための panic"), "{:?}", res.error);
+                assert!(res.error.as_deref().unwrap_or("").contains("テストのための panic"), "{:?}", res.error);
             }
             let _ = std::fs::remove_dir_all(&dir2);
         }
@@ -2752,7 +2752,7 @@ pub(crate) mod pyref {
         (t.starts_with("  [") && t.contains("(最大 "))
             || t.starts_with("    · ")
             || t.starts_with("  ⏱")
-            || t.starts_with("    索引 ")
+            || t.starts_with("    インデックス ")
             || t.starts_with("  ✅ 解析成功 (")
     }
 
@@ -2770,12 +2770,12 @@ pub(crate) mod pyref {
 
     #[test]
     fn mask_seconds_examples() {
-        assert_eq!(mask_seconds("\n  [1/4] 深い検出の星 15 個 + 全天  (最大 150 秒)"), "\n  [1/4] 深い検出の星 15 個 + 全天  (最大 X 秒)");
+        assert_eq!(mask_seconds("\n  [1/4] ディープ検出の星 15 個 + 全天  (最大 150 秒)"), "\n  [1/4] ディープ検出の星 15 個 + 全天  (最大 X 秒)");
         assert_eq!(
             mask_seconds("    · 解けました: index-5205-02、対数オッズ 87.8、一致 13 個、quad 1,234 個・仮説 56 個、0.12 秒"),
             "    · 解けました: index-5205-02、対数オッズ 87.8、一致 13 個、quad 1,234 個・仮説 56 個、X 秒"
         );
-        assert_eq!(mask_seconds("    索引 a / 一致 3 個 / 対数オッズ 50.0 / quad 7 個 / 0.0 秒"), "    索引 a / 一致 3 個 / 対数オッズ 50.0 / quad 7 個 / X 秒");
+        assert_eq!(mask_seconds("    インデックス a / 一致 3 個 / 対数オッズ 50.0 / quad 7 個 / 0.0 秒"), "    インデックス a / 一致 3 個 / 対数オッズ 50.0 / quad 7 個 / X 秒");
         assert_eq!(mask_seconds("最大 300 秒の 2 秒"), "最大 300 秒の 2 秒");
     }
 
@@ -2812,7 +2812,7 @@ pub(crate) mod pyref {
         ];
         let paths: Vec<PathBuf> = images.iter().map(|p| resolve_image(p)).filter(|p| p.is_file()).collect();
         if paths.len() < 3 || !Path::new(DEFAULT_INDEX_DIR).is_dir() {
-            eprintln!("SKIP: 画像か星図データが無い");
+            eprintln!("SKIP: 画像かインデックスファイルが無い");
             return;
         }
         let dir = temp_dir("concurrent");
@@ -2867,7 +2867,7 @@ pub(crate) mod pyref {
                 continue;
             }
             if !include_slow && SLOW_SCENES.contains(&name.as_str()) {
-                eprintln!("---- {name}: 締め切りまで探すので既定では飛ばす(run_solver_vs_python_all で回す)");
+                eprintln!("---- {name}: タイムアウトまで探すので既定では飛ばす(run_solver_vs_python_all で回す)");
                 continue;
             }
             let img = resolve_image(&s(&r["path"]));
@@ -2884,7 +2884,7 @@ pub(crate) mod pyref {
             }
             let params = params_from(&r["params"], img.clone());
             if !params.index_dir.is_dir() && name != "noindex" {
-                eprintln!("SKIP {name}: 星図データがありません");
+                eprintln!("SKIP {name}: インデックスファイルがありません");
                 continue;
             }
             let cache = dir.join(format!("cache_{name}.json"));

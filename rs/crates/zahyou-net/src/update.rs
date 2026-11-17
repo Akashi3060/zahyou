@@ -19,15 +19,15 @@
 //!
 //! v6 は PowerShell に任せていたが、PyInstaller の目印の受け渡しで起動に失敗したことがある(#23)。こちらは PowerShell を使わない。
 //!
-//! # どの版を探すか(版名 = 画面の APP_VER で決まる)
+//! # どのバージョンを探すか(バージョン名 = 画面の APP_VER で決まる)
 //!
-//! | いまの版 | 問い合わせ先 | 新しい版の見つけ方 |
+//! | いまのバージョン | 問い合わせ先 | 新しいバージョンの見つけ方 |
 //! |---|---|---|
 //! | `-dev` で終わる(試作版) | 問い合わせない | — |
-//! | プレリリース(`v7.0.0-beta.1` など。β版) | Releases の一覧(プレリリースも含む、`?per_page=100`) | 大きな版(major)が同じで、semver で今より新しいもののうち最も新しいもの |
+//! | プレリリース(`v7.0.0-beta.1` など。β版) | Releases の一覧(プレリリースも含む、`?per_page=100`) | メジャーバージョン(major)が同じで、semver で今より新しいもののうち最も新しいもの |
 //! | 正式版(`v6`・`v7.0.0` など) | Releases の latest(プレリリースを含まない) | latest の 1 つ |
 //!
-//! どちらも最後は資産 zahyou.exe の digest(SHA256)と動いている exe を比べる。
+//! どちらも最後はアセット zahyou.exe の digest(SHA256)と動いている exe を比べる。
 //!
 //! v7 のβ版は GitHub の<b>プレリリース</b>として出す。v6 の更新係(gui/zahyou_update.py)は latest しか見ないので、
 //! v6 の利用者にβ版は出てこない。β版の利用者は一覧から次のβ版・v7 の正式版を受け取る。
@@ -163,7 +163,7 @@ pub fn is_dev_version(version: &str) -> bool {
 }
 
 /// 版名に添える言葉。β版(-dev 以外のプレリリース。-beta.N・-rc.N など)なら "β版"、正式版・試作版・読めない版名は None。
-/// 画面の題や［使い方］の「いまの版」に「v7.0.0-beta.1 (β版)」のように添えるためのもの。
+/// ウィンドウのタイトルや［使い方］の「いまのバージョン」に「v7.0.0-beta.1 (β版)」のように添えるためのもの。
 pub fn prerelease_label(version: &str) -> Option<&'static str> {
     if is_dev_version(version) {
         return None;
@@ -265,7 +265,7 @@ fn release_from_value(data: &serde_json::Value) -> Result<ReleaseInfo, String> {
     let url = asset
         .get("browser_download_url")
         .and_then(|x| x.as_str())
-        .ok_or("資産に browser_download_url がありません")?
+        .ok_or("アセットに browser_download_url がありません")?
         .to_string();
     let digest = s(asset, "digest");
     Ok(ReleaseInfo {
@@ -393,7 +393,7 @@ pub fn check_update_at(api_url: &str, current_exe: &Path, version: &str, timeout
     {
         let mut out = UpdateCheck::simple(
             UpdateState::UpToDate,
-            &format!("最新版です ({version})。公開されている最新版 {} より新しい版を使っています。", info.tag),
+            &format!("最新版です ({version})。公開されている最新版 {} より新しいバージョンを使っています。", info.tag),
         );
         out.release = Some(info);
         return out;
@@ -466,7 +466,7 @@ fn compare_with_release(info: ReleaseInfo, current_exe: &Path, stop: &dyn Fn() -
         out.message = format!("最新版です ({} / {} 版)。", info.tag, info.updated);
     } else {
         out.state = UpdateState::Available;
-        out.message = format!("新しい版があります: {} ({} 版 / {:.0} MB)", info.tag, info.updated, info.size as f64 / 1e6);
+        out.message = format!("新しいバージョンがあります: {} ({} 版 / {:.0} MB)", info.tag, info.updated, info.size as f64 / 1e6);
         out.blocked = update_blocked_reason(current_exe);
     }
     out.release = Some(info);
@@ -522,7 +522,7 @@ pub fn download_update_opts(
     }
     let dest = with_suffix(current_exe, ".new");
     let total = info.size;
-    log(&format!("新しい版を落としています ({:.0} MB)...", total as f64 / 1e6));
+    log(&format!("新しいバージョンをダウンロードしています ({:.0} MB)...", total as f64 / 1e6));
     // 前に途中で止めたものは使わない(中身の出どころが分からないので最初から)
     if dest.exists() {
         std::fs::remove_file(&dest).map_err(|e| NetError::Failed(format!("{} を消せません ({e})", dest.display())))?;
@@ -550,9 +550,9 @@ pub fn download_update_opts(
             return Err(NetError::Cancelled);
         }
         Err(NetError::Failed(e)) => {
-            log(&format!("落とせませんでした: {e}"));
+            log(&format!("ダウンロードできませんでした: {e}"));
             remove();
-            return Err(NetError::Failed(format!("落とせませんでした: {e}")));
+            return Err(NetError::Failed(format!("ダウンロードできませんでした: {e}")));
         }
     }
     let got = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
@@ -619,7 +619,7 @@ pub fn apply_update(current_exe: &Path, new_file: &Path, relaunch: Option<&[OsSt
     }
     log("入れ替えて、起動し直します...");
     if let Err(e) = std::fs::rename(current_exe, &old) {
-        let m = format!("今の版を退避できません ({e})。");
+        let m = format!("今のバージョンを退避できません ({e})。");
         log(&m);
         return Err(NetError::Failed(m));
     }
@@ -627,8 +627,8 @@ pub fn apply_update(current_exe: &Path, new_file: &Path, relaunch: Option<&[OsSt
         // 戻せるなら戻す
         let back = std::fs::rename(&old, current_exe);
         let m = match back {
-            Ok(()) => format!("新しい版を置けませんでした ({e})。今の版はそのままです。"),
-            Err(e2) => format!("新しい版を置けませんでした ({e})。今の版は {} に残っています ({e2})。", old.display()),
+            Ok(()) => format!("新しいバージョンを置けませんでした ({e})。今のバージョンはそのままです。"),
+            Err(e2) => format!("新しいバージョンを置けませんでした ({e})。今のバージョンは {} に残っています ({e2})。", old.display()),
         };
         log(&m);
         return Err(NetError::Failed(m));
@@ -740,7 +740,7 @@ mod tests {
         assert_eq!(prerelease_label("v6"), None);
         assert_eq!(prerelease_label("v7-dev"), None);
         assert_eq!(prerelease_label("v7.0.0-dev"), None);
-        assert_eq!(prerelease_label("おかしな版"), None);
+        assert_eq!(prerelease_label("おかしなバージョン"), None);
         assert!(is_dev_version("v7-dev") && is_dev_version("v7.0.0-dev") && !is_dev_version("v7.0.0-beta.1"));
         assert_eq!(releases_list_url(API_URL), RELEASES_API_URL);
         assert_eq!(releases_list_url("http://127.0.0.1:1/repos/x/releases/latest"), "http://127.0.0.1:1/repos/x/releases?per_page=100");

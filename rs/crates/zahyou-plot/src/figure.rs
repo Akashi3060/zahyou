@@ -333,7 +333,7 @@ impl Offsets {
     pub fn report_lines(&self) -> Vec<String> {
         vec![
             "\n  画像中心から目標までのずれ".to_string(),
-            format!("    全角距離      : {:.3}′  ({:.1}″)", self.sep_arcmin, self.sep_arcsec),
+            format!("    角距離        : {:.3}′  ({:.1}″)", self.sep_arcmin, self.sep_arcsec),
             format!("    赤経(RA) 方向 : {:.3}′ {}へ", self.ra_arcmin.abs(), self.ra_dir()),
             format!("    赤緯(Dec)方向 : {:.3}′ {}へ", self.dec_arcmin.abs(), self.dec_dir()),
         ]
@@ -620,7 +620,7 @@ mod tests {
         let t = title_north_up((61.891414, 41.964760), Some((61.91199157844, 41.98626242835)));
         assert_eq!(t, "北が上・東が左\n距離 1.58′ | RA 0.92′(東) Dec 1.29′(北)");
         let o = Offsets::new((61.891414, 41.964760), (61.91199157844, 41.98626242835));
-        assert_eq!(o.report_lines()[1], "    全角距離      : 1.583′  (95.0″)");
+        assert_eq!(o.report_lines()[1], "    角距離        : 1.583′  (95.0″)");
     }
 
     #[test]

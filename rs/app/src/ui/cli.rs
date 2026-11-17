@@ -263,7 +263,7 @@ pub fn bench(args: &[String]) -> i32 {
                     && let Some(img) = super::scene::rgba_image(l.display.width, l.display.height, &rgba)
                 {
                     let p = super::scene::Pyramid::build(img);
-                    notes.push(format!("pyramid {} 段 / {} 画素", p.levels.len(), p.texels()));
+                    notes.push(format!("pyramid {} 段階 / {} 画素", p.levels.len(), p.texels()));
                 }
                 items.push(("pyramid_s".into(), t.elapsed().as_secs_f64()));
             }

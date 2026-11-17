@@ -1,9 +1,9 @@
 # ノートブック版(Python)から Rust の解法を呼ぶ拡張モジュール zahyou_native。
-# exe の workspace(../Cargo.toml)には入れない(exe のビルド・試験・同梱物の表示に影響させないため)。
-# 建て方と配り方は README.md。
+# exe の workspace(../Cargo.toml)には入れない(exe のビルド・テスト・同梱物の表示に影響させないため)。
+# ビルドのしかたと配り方は README.md。
 [package]
 name = "zahyou-native"
-version = "8.0.0"
+version = "9.0.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"

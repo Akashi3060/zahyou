@@ -147,7 +147,7 @@ fn help_lines() -> Vec<(Tag, String)> {
     let mut v: Vec<(Tag, String)> = Vec::new();
     let mut add = |t: Tag, s: &str| v.push((t, s.to_string()));
     add(Head, "使い方");
-    add(Plain, "1. [解析] タブで「参照...」を押して、天体画像を選びます (窓へドラッグしても選べます)。");
+    add(Plain, "1. [解析] タブで「参照...」を押して、天体画像を選びます (ウィンドウへドラッグしても選べます)。");
     add(Plain, "   FITS / PNG / JPEG / TIFF が読めます。カラーでも動画キューブでも構いません。");
     add(Plain, "2. 目標を指定します。天体名 (UCAC4 660-021020 など) か、赤経・赤緯のどちらかです。");
     add(Plain, "3. 「解析を実行」を押します。");
@@ -161,17 +161,17 @@ fn help_lines() -> Vec<(Tag, String)> {
     add(Plain, "図はホイールで拡大・縮小、ドラッグで移動できます。「全体」で元に戻ります。");
     add(Plain, "");
     add(Head, "ネットが無いところで使う");
-    add(Plain, "オフラインで解くのに要るのは、星図データ (画角ごとに分かれた index ファイル) だけです。");
+    add(Plain, "オフラインで解くのに要るのは、インデックスファイル (画角ごとに分かれた index-*.fits) だけです。");
     add(Plain, "星の並びから向きを割り出す計算は zahyou の中で行うので、");
     add(Bold, "ほかのソフトを入れる必要はありません。");
-    add(Plain, "[準備] タブで「まとめて準備する」を押すと、足りない星図データを落として、");
+    add(Plain, "[準備] タブで「まとめて準備する」を押すと、足りないインデックスファイルをダウンロードして、");
     add(Plain, "1 本ずつ中身 (途中で切れていないか) を確かめます。");
-    add(Plain, "星図データは、望遠鏡の画角に合った段だけあれば足ります。");
-    add(Plain, "  ・機材の数値が分からない  → 「おすすめをまとめて落とす」");
+    add(Plain, "インデックスファイルは、望遠鏡の画角に合ったスケールだけあれば足ります。");
+    add(Plain, "  ・機材の数値が分からない  → 「おすすめをまとめてダウンロード」");
     add(Plain, "      画角 4' 以上をぜんぶ (約 9.5 GB)。たいていはこれで足ります。");
-    add(Plain, "  ・焦点距離が分かる        → 入れてから「必要な段を選ぶ」");
-    add(Plain, "      要る段だけに絞れるので、ずっと小さく済みます。");
-    add(Muted, "途中で止めても、次に押せば続きから落とし直します。");
+    add(Plain, "  ・焦点距離が分かる        → 入れてから「必要なスケールを選ぶ」");
+    add(Plain, "      要るスケールだけに絞れるので、ずっと小さく済みます。");
+    add(Muted, "途中で止めても、次に押せば続きからダウンロードを再開します。");
     add(Plain, "");
     add(Head, "ネットにつながっているとき (オンライン解析)");
     add(Plain, "[解析] の「方法」が「自動」なら、ネットがあれば先に nova.astrometry.net に問い合わせ、");
@@ -205,7 +205,7 @@ fn help_lines() -> Vec<(Tag, String)> {
     add(Head, "困ったとき");
     add(Plain, "・星が少ないと解けません。露出を伸ばすか、複数枚を重ねてください。");
     add(Plain, "・オフラインで解けないときは、[準備] タブの「解ける画角」を見て、");
-    add(Plain, "  その画角の段が入っているか確かめてください。");
+    add(Plain, "  その画角のスケールが入っているか確かめてください。");
     add(Plain, "・焦点距離を入れると、探す範囲が狭まって速く確実になります。");
     add(Plain, "・解析が長引いたら「中止」を押してください。数秒で止まります。");
     add(Plain, "");
@@ -219,20 +219,20 @@ fn help_lines() -> Vec<(Tag, String)> {
     add(Plain, "(AppData は隠しフォルダーなので、たどっても出てきません)");
     add(Plain, "消しても解析には影響しません。設定が初期状態に戻るだけです。");
     add(Plain, "");
-    add(Head, "新しい版に入れ替える / やめる");
+    add(Head, "新しいバージョンに入れ替える / やめる");
     add(Plain, "上の「更新を確認」→「更新する」で入れ替えられます。");
     add(Plain, "手で入れ替えるなら、新しい zahyou.exe を古いものに上書きするだけです。");
-    add(Plain, "設定も覚えた座標も引き継がれ、星図データはそのままで構いません。");
+    add(Plain, "設定も覚えた座標も引き継がれ、インデックスファイルはそのままで構いません。");
     add(Plain, "v6 から入れ替えたときに横に残る zahyou.exe.bak (v6 の exe、約 102 MB) は、");
-    add(Plain, "この版が動いたら消してかまいません。");
+    add(Plain, "このバージョンが動いたら消してかまいません。");
     add(Plain, "v6 までに WSL へ入れた astrometry.net は、もう使いません。");
     add(Plain, "要らなければマニュアル 9 章の手順で消せます。");
     add(Plain, "やめるときは、zahyou.exe と上の置き場所を消してください。");
-    add(Plain, "星図データ (C:\\AstrometryData) は、使わないならフォルダーごと消せます。");
+    add(Plain, "インデックスファイル (C:\\AstrometryData) は、使わないならフォルダーごと消せます。");
     // β版の間だけ(正式版に上げれば出なくなる)。v7 のβ版のときの文。次の大きな版のβ版を出すときは書き直す
     // (試験 beta_版の間だけ更新の扱いを説明する が大きな版の食い違いで落ちる。docs/release-v7.md 2 節)
     if zahyou_net::update::prerelease_label(APP_VER).is_some() {
-        add(Muted, "この版は v7 のβ版です。上の「更新を確認」は、GitHub の Releases から");
+        add(Muted, "このバージョンは v7 のβ版です。上の「更新を確認」は、GitHub の Releases から");
         add(Muted, "次のβ版と v7 の正式版を探します。β版は v6 の「更新を確認」には出てきません。");
         add(Muted, "v6 に戻すときは、v6 の zahyou.exe を上書きしてください (API キーの欄の値は v6 では使いません)。");
     }
@@ -243,8 +243,8 @@ fn help_lines() -> Vec<(Tag, String)> {
     add(Muted, "星の並びから向きを割り出す解き方は、Lang et al. (2010, AJ 139, 1782) の");
     add(Muted, "論文をもとに zahyou 用に自前で書き直したものです。");
     add(Muted, "astrometry.net のプログラム (コード) は含んでいません。");
-    add(Muted, "星図データ (index ファイル) は Tycho-2 と Gaia DR2 から作られたもので、");
-    add(Muted, "この exe には同梱していません ([準備] タブが配布元から落とします)。");
+    add(Muted, "インデックスファイルは Tycho-2 と Gaia DR2 から作られたもので、");
+    add(Muted, "この exe には同梱していません ([準備] タブが配布元からダウンロードします)。");
     add(Muted, "Gaia のデータは CC BY-NC 3.0 IGO です (商用利用には ESA の許可が要ります)。");
     add(Muted, "この exe には Rust のライブラリと、画面の既定の書体 (Hack・Ubuntu・Noto Emoji ほか) が");
     add(Muted, "入っています。どれも MIT・Apache-2.0・BSD・SIL OFL などの許容型で、GPL・LGPL・MPL のものは含みません。");
@@ -265,7 +265,7 @@ impl ZahyouApp {
         let (placed, grect) = widgets::group(ui, th, "更新", |ui| {
             let mut placed = Vec::new();
             ui.horizontal(|ui| {
-                widgets::head(ui, th, &format!("いまの版: {APP_NAME} {APP_VER}{}", crate::prerelease_suffix()));
+                widgets::head(ui, th, &format!("いまのバージョン: {APP_NAME} {APP_VER}{}", crate::prerelease_suffix()));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let b = ui.add_enabled(self.update_can_apply && !self.busy, egui::Button::new("更新する"));
                     if b.clicked() {
@@ -404,8 +404,8 @@ mod tests {
         let text: String = help_lines().into_iter().map(|(_, s)| s + "\n").collect();
         let beta = zahyou_net::update::prerelease_label(APP_VER).is_some();
         // 大きな版を版から組み立てて探す(β版を出すときに説明の「v7」を書き直し忘れると落ちる。docs/release-v7.md 2 節)
-        let intro = format!("この版は v{} のβ版です。", env!("CARGO_PKG_VERSION_MAJOR"));
-        assert_eq!(text.contains(&intro), beta, "β版の説明の有無が版名と合わない ({APP_VER})");
+        let intro = format!("このバージョンは v{} のβ版です。", env!("CARGO_PKG_VERSION_MAJOR"));
+        assert_eq!(text.contains(&intro), beta, "β版の説明の有無がバージョン名と合わない ({APP_VER})");
         assert_eq!(crate::prerelease_suffix().is_empty(), !beta);
         // 起動のログの 1 行目も同じ(β版なら「(β版・Rust 版)」)
         let line = crate::ui::app::startup_line("F");

@@ -468,7 +468,7 @@ mod tests {
                 }
             }
             // 値は 0〜1150 ほど。float32 の丸め(1e-4)程度まで同じ
-            assert!(worst <= 2e-4, "速い版と素直な版の差 {worst}");
+            assert!(worst <= 2e-4, "速い実装と素直な実装の差 {worst}");
         }
     }
 

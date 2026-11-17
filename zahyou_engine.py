@@ -1,7 +1,7 @@
 # ==============================================================================
 #  zahyou 解析エンジン
 #
-#  zahyou_v8.ipynb のセル A から読み込まれます。単体では実行しません。
+#  zahyou_v9.ipynb のセル A から読み込まれます。単体では実行しません。
 #  中身を読む必要はありません (直したいときだけ dev/ の元のファイルを触ってください)。
 #  オフライン解析は自前のエンジン (dev/solver_*.py) で行い、WSL は使いません。
 # ==============================================================================
@@ -201,7 +201,7 @@ def _sv_poly_lstsq(u, v, targets, order, min_deg=0, weights=None):
         t = t * sw[:, None]
     sol, _, rank, _ = np.linalg.lstsq(m, t, rcond=None)
     if rank < len(terms):
-        raise ValueError(f"多項式(次数 {order})を当てるには点が足りないか、並びが縮退している"
+        raise ValueError(f"多項式(次数 {order})をフィットするには点が足りないか、並びが縮退している"
                          f"(項 {len(terms)}、階数 {rank})")
     coef = np.zeros((t.shape[1], order + 1, order + 1))
     for i, (p, q) in enumerate(terms):
@@ -494,7 +494,7 @@ def sv_fit_sip_inverse(wcs, width=None, height=None, order=None, bounds=None):
     elif bounds is not None:
         x0, x1, y0, y1 = (float(t) for t in bounds)
     else:
-        raise ValueError("逆変換を当てる範囲(width, height か bounds)が要る")
+        raise ValueError("逆変換をフィットする範囲(width, height か bounds)が要る")
     n = 10 * (order + 1)
     gx, gy = np.meshgrid(np.linspace(x0, x1, n), np.linspace(y0, y1, n))
     u = gx.ravel() - out.crpix[0]
@@ -726,13 +726,13 @@ def _sv_index_layout(path, name=None):
     H0 = hdus[0]["header"]
     for key in ("INDEXID", "HEALPIX", "HPNSIDE", "DIMQUADS", "NQUADS", "NSTARS", "SCALE_L", "SCALE_U"):
         if key not in H0:
-            raise ValueError(f"索引のヘッダーに {key} がありません")
+            raise ValueError(f"インデックスファイルのヘッダーに {key} がありません")
     for h in hdus:
         e = h["header"].get("ENDIAN")
         if h is hdus[0] and e is None:
-            raise ValueError("索引のヘッダーに ENDIAN がありません")
+            raise ValueError("インデックスファイルのヘッダーに ENDIAN がありません")
         if e is not None and e != SV_INDEX_ENDIAN:
-            raise ValueError(f"ENDIAN = {e!r} の索引は読めません(読めるのは {SV_INDEX_ENDIAN!r} だけ)")
+            raise ValueError(f"ENDIAN = {e!r} のインデックスファイルは読めません(読めるのは {SV_INDEX_ENDIAN!r} だけ)")
 
     indexid = _sv_fits_int(H0, "INDEXID")
     healpix = _sv_fits_int(H0, "HEALPIX")
@@ -748,7 +748,7 @@ def _sv_index_layout(path, name=None):
         raise ValueError(f"名前と中身の系列が違います(名前 {m.group(1)}、INDEXID = {indexid})")
     if m.group(2) is None:
         if healpix != -1:
-            raise ValueError(f"全天の名前なのにタイルの索引です(HEALPIX = {healpix})")
+            raise ValueError(f"全天の名前なのにタイルのインデックスファイルです(HEALPIX = {healpix})")
     else:
         if healpix != int(m.group(2)):
             raise ValueError(f"名前と中身のタイル番号が違います(名前 {m.group(2)}、HEALPIX = {healpix})")
@@ -1101,9 +1101,9 @@ def _sv_check_lr(tree):
     """木の葉の範囲 lr が単調非減少で、最後が ndata − 1 か(壊れていると点の番号が範囲の外になる)。"""
     lr = tree.lr.astype(np.int64)
     if len(lr) == 0 or int(lr[-1]) != tree.ndata - 1:
-        return f"{tree.name} の木の葉の範囲(lr)の最後が点の数と合いません(中身が壊れています。落とし直してください)"
+        return f"{tree.name} の木の葉の範囲(lr)の最後が点の数と合いません(中身が壊れています。ダウンロードし直してください)"
     if len(lr) > 1 and bool(np.any(lr[1:] < lr[:-1])):
-        return f"{tree.name} の木の葉の範囲(lr)が増える順になっていません(中身が壊れています。落とし直してください)"
+        return f"{tree.name} の木の葉の範囲(lr)が増える順になっていません(中身が壊れています。ダウンロードし直してください)"
     return None
 
 
@@ -1243,7 +1243,7 @@ class SvIndexFile:
         out = self._quads[np.asarray(quad_ids, dtype=np.int64)].astype(np.int64)
         if out.size and (int(out.max()) >= self.nstars or int(out.min()) < 0):
             raise SvIndexCorrupt(self, f"quad の星番号が星の数 {self.nstars:,} の外です"
-                                       "(中身が壊れています。落とし直してください)")
+                                       "(中身が壊れています。ダウンロードし直してください)")
         return out
 
     def codes(self, quad_ids):
@@ -1383,7 +1383,7 @@ class SvIndexCatalog:
                 continue
             key = (f.indexid, f.healpix)
             if key in seen:
-                self.problems.append((p, f"同じ索引が 2 つあります({os.path.basename(seen[key])} と同じ中身)"))
+                self.problems.append((p, f"同じインデックスファイルが 2 つあります({os.path.basename(seen[key])} と同じ中身)"))
                 continue
             seen[key] = p
             self.files.append(f)
@@ -1397,7 +1397,7 @@ class SvIndexCatalog:
             best = max(set(sig), key=sig.count)
             bad = [f for f, s in zip(fs, sig) if s != best]
             for f in bad:
-                self.problems.append((f.path, "同じ系列のほかのファイルと段の値(DIMQUADS・SCALE・HPNSIDE)が違います"))
+                self.problems.append((f.path, "同じ系列のほかのファイルとヘッダーの値(DIMQUADS・SCALE・HPNSIDE)が違います"))
                 self.files.remove(f)
             self.series[iid] = [f for f, s in zip(fs, sig) if s == best]
 
@@ -2944,7 +2944,7 @@ def sv_solve(xy, flux, width, height, catalog, *, scale_lo=None, scale_hi=None, 
     except _SvTimeUp:
         status = "deadline"
         if log:
-            log(f"締め切り: quad {st['quads']:,} 個・仮説 {st['hyps']:,} 個を試して解けず"
+            log(f"タイムアウト: quad {st['quads']:,} 個・仮説 {st['hyps']:,} 個を試して解けず"
                 f"(対数オッズの最大 {st.get('logodds_max', -math.inf):.1f}、{time.monotonic() - t0:.1f} 秒)"
                 + sv_passed_note(st))
     except SvCancelled:
@@ -2981,7 +2981,7 @@ def _sv_search(xy, flux, width, height, catalog, scale_lo, scale_hi, hint, clock
     st["scale"] = (s_lo, s_hi)
     if not files:
         if log:
-            log("使える星図データ(索引)がありません")
+            log("使えるインデックスファイルがありません")
         return None
     # 索引ごとの AB の範囲と、系列の中の位置
     info = []
@@ -2999,7 +2999,7 @@ def _sv_search(xy, flux, width, height, catalog, scale_lo, scale_hi, hint, clock
     if log:
         series = sorted({f.indexid for f, _, _, _ in info})
         log(f"星 {field.n} 個(quad に {field.nq} 個)、スケール {s_lo:.3g}〜{s_hi:.3g}″/px、"
-            f"索引 {len(info)} 本(系列 {', '.join(map(str, series))})"
+            f"インデックス {len(info)} 本(系列 {', '.join(map(str, series))})"
             + ("" if hint is None else f"、ヒント ({hint[0]:.3f}, {hint[1]:+.3f}) 半径 {hint[2]:g}°"))
     L2, inside = sv_quad_geometry(field.P, p.codetol)
     pending = {dq: [] for dq in dqs}
@@ -3078,15 +3078,15 @@ def _sv_flush(field, catalog, info, pending, s_lo, s_hi, hint_t, clock, log, p, 
                 catalog.mark_broken(e.file, str(e))
                 st.setdefault("broken", []).append(str(e))
                 if log:
-                    log(f"星図データが壊れているので、この先は使いません: {e}")
+                    log(f"インデックスファイルが壊れているので、この先は使いません: {e}")
                 members = [(f, fid) for f, fid in members if f.broken is None]
                 continue
             except (ValueError, IndexError) as e:
                 bad_series.add(iid)
                 st.setdefault("broken", []).append(f"index-{iid}: {type(e).__name__}: {e}")
                 if log:
-                    log(f"星図データ index-{iid} を読めないので、この探索では使いません"
-                        f"(中身が壊れているかもしれません。落とし直してください): {type(e).__name__}: {e}")
+                    log(f"インデックスファイル index-{iid} を読めないので、この探索では使いません"
+                        f"(中身が壊れているかもしれません。ダウンロードし直してください): {type(e).__name__}: {e}")
                 sol = None
             break
         if sol is not None:
@@ -3183,7 +3183,7 @@ def _sv_verify_and_pick(field, catalog, f, hy, clock, log, p, st, fl):
                 # ここで None を返すと、解けている画像が「解けず」になる。解として返すかは、改良の後の判定(試した数で上げる値・
                 # tune-up の一致の増え)で決まるので、ログは「解が見つかった」と言い切らない
                 if log:
-                    log("締め切りを過ぎましたが、solve を超えた候補があるので改良を済ませます")
+                    log("タイムアウトしましたが、solve を超えた候補があるので改良を済ませます")
                 wcs, res1 = _sv_refine(field, catalog, f, hy1, p.tweak_order,
                                        clock=_SvClock(None, clock.cancel))
             lo = float(res1["best"][0])
@@ -4122,7 +4122,7 @@ def estimate_pixel_scale(header, focal_length_mm=None, shape=None):
         if s:
             return float(s), "前回この機材で解いたときの実測値"
 
-    return None, "手がかりなし (星図データが対応する画角を総当たりします)"
+    return None, "手がかりなし (インデックスファイルが対応する画角を総当たりします)"
 
 
 def implied_focal_length(header, scale_arcsec):
@@ -4199,7 +4199,7 @@ def missing_index_advice(fov_arcmin, index_names):
                 have.add(int(num[-2:]))
     need = [k for k, (lo, hi) in _INDEX_SCALES.items() if lo <= fov_arcmin < hi]
     if not need:
-        return False, [f"画角 {fov_arcmin:.1f}′ は星図データの範囲 (2′〜2000′) の外なので、"
+        return False, [f"画角 {fov_arcmin:.1f}′ はインデックスファイルの範囲 (2′〜2000′) の外なので、"
                        "この画角のままでは解けません。"]
     if need[0] in have:
         return True, []
@@ -4207,7 +4207,7 @@ def missing_index_advice(fov_arcmin, index_names):
     series = (5200 if need[0] <= 6 else 4100) + need[0]
     files = f"index-{series}-00〜47.fits" if need[0] <= 6 else f"index-{series}.fits"
     return False, [
-        f"画角 {fov_arcmin:.1f}′ に対応する星図データ ({lo:g}′〜{hi:g}′ 段) がありません。",
+        f"画角 {fov_arcmin:.1f}′ に対応するインデックスファイル ({lo:g}′〜{hi:g}′ のスケール) がありません。",
         f"必要なファイル: {files}",
         _index_get_advice(series),
     ]
@@ -4221,27 +4221,27 @@ def _in_gui():
 def _index_get_advice(series):
     """足りない段の取り方。GUI は［準備］タブ、ノートブックは配布ページの zip とセル C の INDEX_DIR。"""
     if _in_gui():
-        return (f"取得: ［準備］タブの段の一覧で index-{series} に印を付け、"
-                "「選んだ段を落とす」を押してください。")
+        return (f"取得: ［準備］タブのスケールの一覧で index-{series} にチェックを入れ、"
+                "「選んだスケールをダウンロード」を押してください。")
     if series in (5202, 5203, 5204):
         z = f"AstrometryData-index-{series}.zip"
     elif series >= 5205 or 4100 <= series < 5200:
         z = "AstrometryData.zip (基本セット)"
     else:
-        return (f"取得: この段は配布ページに zip がありません。原典 "
+        return (f"取得: このスケールは配布ページに zip がありません。原典 "
                 f"https://portal.nersc.gov/project/cosmo/temp/dstn/index-5200/LITE/ から "
-                f"index-{series}-00〜47.fits を落として、セル C の INDEX_DIR のフォルダーに"
+                f"index-{series}-00〜47.fits をダウンロードして、セル C の INDEX_DIR のフォルダーに"
                 "入れてください。")
-    return (f"取得: 配布ページ (README の 5 章) から {z} を落として展開し、"
+    return (f"取得: 配布ページ (README の 5 章) から {z} をダウンロードして展開し、"
             "セル C の INDEX_DIR のフォルダーに index-*.fits が並ぶようにしてください。")
 
 
 def _index_place_advice():
     """星図データの置き場所の直し方 (GUI とノートブックで違う)。"""
     if _in_gui():
-        return "［準備］タブで星図データを落とすか、置き場所を指定し直してください。"
+        return "［準備］タブでインデックスファイルをダウンロードするか、置き場所を指定し直してください。"
     return ("配布ページ (README の 5 章) の zip を展開するか、"
-            "セル C の INDEX_DIR を星図データのある場所に直してください。")
+            "セル C の INDEX_DIR をインデックスファイルのある場所に直してください。")
 
 
 # 星図データの目録 (SvIndexCatalog) を覚えておく。作るときにヘッダーを 1 本ずつ
@@ -4321,21 +4321,21 @@ def solver_diagnostics(index_dir=None):
     rep = {"ok": False, "messages": [], "indexes": [], "cfg": "", "paths": [index_dir]}
     if not os.path.isdir(index_dir):
         rep["messages"].append(
-            f"星図データの置き場所 {index_dir} がありません。" + _index_place_advice())
+            f"インデックスファイルの置き場所 {index_dir} がありません。" + _index_place_advice())
         return rep
     try:
         catalog = index_catalog(index_dir)
     except Exception as e:
         rep["messages"].append(
-            f"星図データを読めませんでした ({type(e).__name__}: {e})。")
+            f"インデックスファイルを読めませんでした ({type(e).__name__}: {e})。")
         return rep
 
     rep["indexes"] = _catalog_names(catalog)
     problems = list(getattr(catalog, "problems", None) or [])
     if problems:
         rep["messages"].append(
-            f"使えない星図データが {len(problems)} 個あるので読み飛ばします。"
-            + ("［準備］タブで落とし直してください。" if _in_gui() else
+            f"使えないインデックスファイルが {len(problems)} 個あるので読み飛ばします。"
+            + ("［準備］タブでダウンロードし直してください。" if _in_gui() else
                "配布ページの zip から入れ直してください。"))
         for p in problems[:5]:
             rep["messages"].append("  " + _problem_text(p))
@@ -4343,7 +4343,7 @@ def solver_diagnostics(index_dir=None):
             rep["messages"].append(f"  ほか {len(problems) - 5} 個")
     if not rep["indexes"]:
         rep["messages"].append(
-            f"使える星図データ (index-*.fits) が {index_dir} に 1 つもありません。"
+            f"使えるインデックスファイル (index-*.fits) が {index_dir} に 1 つもありません。"
             + _index_place_advice())
         return rep
 
@@ -4403,7 +4403,7 @@ def _solution_note(sol):
     parts = []
     name = getattr(sol, "index_name", None)
     if name:
-        parts.append(f"索引 {name}")
+        parts.append(f"インデックス {name}")
     for attr, fmt in (("nmatch", "一致 {:d} 個"), ("logodds", "対数オッズ {:.1f}"),
                       ("quads_tried", "quad {:,d} 個"), ("seconds", "{:.1f} 秒")):
         v = getattr(sol, attr, None)
@@ -4439,7 +4439,7 @@ def native_solver():
                 if getattr(mod, "API", None) == _NATIVE_API:
                     _NATIVE["mod"] = mod
                 else:
-                    _NATIVE["why"] = (f"zahyou-native {getattr(mod, '__version__', '?')} はこのノートブックと版が"
+                    _NATIVE["why"] = (f"zahyou-native {getattr(mod, '__version__', '?')} はこのノートブックとバージョンが"
                                       f"合いません (API {getattr(mod, 'API', '?')}、要るのは {_NATIVE_API})。"
                                       "セル A の 2 つ目の pip の行に --upgrade を付けて実行し、カーネルを再起動してください")
     return _NATIVE["mod"]
@@ -4528,19 +4528,19 @@ def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
     catalog = index_catalog(index_dir)
     installed = _catalog_names(catalog)
     if not installed:
-        _log("  ❌ 使える星図データがありません。" + _index_place_advice())
+        _log("  ❌ 使えるインデックスファイルがありません。" + _index_place_advice())
         return None
     lo, hi = index_coverage(installed)
     if lo is not None:
-        _log(f"  - 手持ちの星図データが対応する画角: {lo:g}′ 〜 {hi:g}′"
-             f" (index ファイル {len(installed)} 個)")
+        _log(f"  - 手持ちのインデックスファイルが対応する画角: {lo:g}′ 〜 {hi:g}′"
+             f" ({len(installed)} 個)")
         if scale:
             # 判定は短辺で行う (上のコメント参照)
             ok, msgs = missing_index_advice(fov_short, installed)
             for m in msgs:
                 _log(("  ⚠️ " if not ok else "  - ") + m)
             if not ok:
-                _log(f"     ※ 必要な段は横幅 {fov_w:.1f}′ ではなく"
+                _log(f"     ※ 必要なスケールは横幅 {fov_w:.1f}′ ではなく"
                      f"短辺 {fov_short:.1f}′ で決まります。")
 
     native = native_solver()
@@ -4574,16 +4574,16 @@ def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
             prep = preprocess(bundle.data)[:3]
         deep_stars, u = detect_sources_deep(*prep, info=dinfo)
     except Exception as e:
-        _log(f"\n  ⚠️ 深い検出に失敗したので、標準の検出の星だけで解きます: {type(e).__name__}: {e}")
+        _log(f"\n  ⚠️ ディープ検出に失敗したので、標準の検出の星だけで解きます: {type(e).__name__}: {e}")
     if deep_stars:
         s_psf = dinfo.get("s_psf")
         how = (f"星の幅 (FWHM {2.3548 * s_psf:.1f} px) に合わせてぼかし" if s_psf else
                f"星の幅を測れなかったので σ {dinfo.get('s', 1.5):.1f} px でぼかし")
-        _log(f"\n  - 深い検出 (解析エンジンに渡す星): {how}、星を {len(deep_stars)} 個検出"
+        _log(f"\n  - ディープ検出 (解析エンジンに渡す星): {how}、星を {len(deep_stars)} 個検出"
              f" (しきい値 {u:g}σ)")
     elif dinfo:
-        _log("\n  - 深い検出: 星が見つかりませんでした。")
-    star_sets = [(name, stars) for name, stars in (("深い検出", deep_stars), ("標準の検出", sources))
+        _log("\n  - ディープ検出: 星が見つかりませんでした。")
+    star_sets = [(name, stars) for name, stars in (("ディープ検出", deep_stars), ("標準の検出", sources))
                  if len(stars) >= 3]
     if not star_sets:
         n_max = max(len(sources), len(deep_stars))
@@ -4651,7 +4651,7 @@ def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
              "露出を伸ばすか、複数フレームを重ねてください。")
     lo_fov, hi_fov = index_coverage(installed)
     if lo_fov is not None:
-        _log(f"     ・手持ちの星図データは画角 {lo_fov:g}′〜{hi_fov:g}′ しか解けません。")
+        _log(f"     ・手持ちのインデックスファイルは画角 {lo_fov:g}′〜{hi_fov:g}′ しか解けません。")
         if fov_short:
             ok2, msgs2 = missing_index_advice(fov_short, installed)
             if not ok2:
@@ -4660,7 +4660,7 @@ def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
                 for m in msgs2:
                     _log("         " + m)
         else:
-            _log("       画角が分かれば、足りない段を名指しできます。"
+            _log("       画角が分かれば、足りないスケールを名指しできます。"
                  "FOCAL_LENGTH_MM を書いてもう一度試してください。")
     if not scale:
         _log("     ・FOCAL_LENGTH_MM に焦点距離を書くと画角が確定し、"
@@ -4981,7 +4981,7 @@ def report_offsets(center, target):
     ra_dir = "東" if ra_min > 0 else "西"
     dec_dir = "北" if dec_min > 0 else "南"
     _log("\n  画像中心から目標までのずれ")
-    _log(f"    全角距離      : {sep.arcmin:.3f}′  ({sep.arcsec:.1f}″)")
+    _log(f"    角距離        : {sep.arcmin:.3f}′  ({sep.arcsec:.1f}″)")
     _log(f"    赤経(RA) 方向 : {abs(ra_min):.3f}′ {ra_dir}へ")
     _log(f"    赤緯(Dec)方向 : {abs(dec_min):.3f}′ {dec_dir}へ")
     return sep, ra_min, dec_min, ra_dir, dec_dir
@@ -5310,7 +5310,7 @@ def _sanity_ok(wcs, shape):
 # ログの見出しの版。exe と同じ版名にする(rs/Cargo.toml の [workspace.package] version に "v" を付け、末尾の 0 の部分を
 # 省いたもの。8.0.0 → "v8"、β版は "v<大きな版>-beta.<番号>" の形。rs/app/build.rs の version_label と同じ決まり)。
 # 食い違うと rs/tools/make_release_assets.py の notebook の検査と、試験 version_in_docs_matches_cargo が止める。
-NB_VERSION = "v8"
+NB_VERSION = "v9"
 
 
 def run():
@@ -5405,12 +5405,12 @@ def run():
             if _cancel_requested():
                 return None
             index_dir = globals().get("INDEX_DIR") or DEFAULT_INDEX_DIR
-            _log("\n[オフライン] 星図データを確認しています...")
+            _log("\n[オフライン] インデックスファイルを確認しています...")
             diag = solver_diagnostics(index_dir)
             for m in diag["messages"]:
                 _log(f"⚠️ {m}")
             if diag["ok"]:
-                _log(f"  - 星図データ {len(diag['indexes'])} ファイル ({index_dir})")
+                _log(f"  - インデックスファイル {len(diag['indexes'])} 個 ({index_dir})")
                 wcs_header = solve_offline(
                     bundle, sources, work_dir, timeout=OFFLINE_TIMEOUT,
                     focal_length_mm=FOCAL_LENGTH_MM, hint_radec=hint,
@@ -5470,7 +5470,7 @@ def run():
                     _log(f"  検出した星と {d[i]:.1f} px "
                          f"({d[i] * summary['scale']:.1f}″) で一致しました。")
                 else:
-                    _log("  目標そのものは、この検出しきい値では拾えていません "
+                    _log("  目標そのものは、このしきい値では検出できていません "
                          "(暗い星なら正常です)。")
         else:
             _log("\n  目標は画面の外です。矢印の向きへ動かしてください。")

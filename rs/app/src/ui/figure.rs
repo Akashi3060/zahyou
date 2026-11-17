@@ -714,8 +714,8 @@ mod tests {
         assert_eq!(t.tiles[0].1, [0, 0, 300, 200]);
         // egui へ渡した画像は段そのもの(同じ Arc。以前の img.clone() のような写しが無い)
         let out = ctx.run(input(), |_| {});
-        let d = out.textures_delta.set.iter().find(|(id, _)| *id == t.tiles[0].0.id()).expect("段が上がっていない");
+        let d = out.textures_delta.set.iter().find(|(id, _)| *id == t.tiles[0].0.id()).expect("縮小の段階が GPU へ転送されていない");
         let egui::ImageData::Color(up) = &d.1.image;
-        assert!(Arc::ptr_eq(up, &img), "段を写して渡している");
+        assert!(Arc::ptr_eq(up, &img), "縮小の段階をコピーして渡している");
     }
 }

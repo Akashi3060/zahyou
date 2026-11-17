@@ -647,7 +647,7 @@ mod tests {
             }
         }
         // 印が立つ場合を通したこと
-        assert!(n_dead >= 5 && n_band >= 5, "死んだ縁 {n_dead} 件・焼き込み {n_band} 件");
+        assert!(n_dead >= 5 && n_band >= 5, "無効な縁 {n_dead} 件・焼き込み {n_band} 件");
         // 4 つの縁それぞれに帯を置き、前から・後ろから見る行の表引きと、左右の列の数え上げを全部、帯が立つ線で通す
         // (上の test_image の帯は上の行と右の列にしか無い)
         let mut hit = [0usize; 4];

@@ -343,7 +343,7 @@ fn beta_checks_prereleases_in_the_list() {
     assert_eq!(st.release.as_ref().unwrap().url, "https://x/v7.0.0-beta.2/zahyou.exe");
     assert_eq!(st.release.as_ref().unwrap().sha256, other);
     assert_eq!(st.here_sha256.as_deref(), Some(here.as_str()));
-    assert_eq!(st.message, "新しい版があります: v7.0.0-beta.2 (2026-11-01 版 / 14 MB)");
+    assert_eq!(st.message, "新しいバージョンがあります: v7.0.0-beta.2 (2026-11-01 版 / 14 MB)");
     assert_eq!(gh.paths(), vec![LIST_PATH.to_string()]);
 
     // 2. 正式版だけ: v7 の正式版はβ版より新しい → 新しい版あり
@@ -499,7 +499,7 @@ fn release_versions_use_latest_only() {
     gh.set(&[listed("v6.3", false, false, Some((2, &other)))]);
     let st = check("v7.0.0");
     assert_eq!(st.state, UpdateState::UpToDate, "{}", st.message);
-    assert_eq!(st.message, "最新版です (v7.0.0)。公開されている最新版 v6.3 より新しい版を使っています。");
+    assert_eq!(st.message, "最新版です (v7.0.0)。公開されている最新版 v6.3 より新しいバージョンを使っています。");
     assert_eq!(st.here_sha256, None);
     // v7 の次の正式版は出す
     gh.set(&[listed("v7.0.1", false, false, Some((3, &other)))]);

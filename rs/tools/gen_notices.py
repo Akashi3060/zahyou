@@ -9,9 +9,9 @@
 
 入れるもの:
 - zahyou 自身の LICENSE と、MIT が及ぶ範囲
-- 解き方の出典(astrometry.net の論文)と、星図データ(Tycho-2・Gaia DR2)の条件と定型の謝辞
-- exe に入る依存(ターゲット x86_64-pc-windows-gnu。ビルドだけ・試験だけのものは除く)の
-  クレート名・版・ライセンス式・著作権表示・ライセンス本文(同じ本文は 1 つにまとめる)。NOTICE は必ず入れる
+- 解き方の出典(astrometry.net の論文)と、インデックスファイル(Tycho-2・Gaia DR2)の条件と定型の謝辞
+- exe に入る依存(ターゲット x86_64-pc-windows-gnu。ビルドだけ・テストだけのものは除く)の
+  クレート名・バージョン・ライセンス式・著作権表示・ライセンス本文(同じ本文は 1 つにまとめる)。NOTICE は必ず入れる
 - egui の既定の書体(exe に埋め込まれる)と、そのライセンス(OFL-1.1・Ubuntu Font Licence 1.0 ほか)
 - C とアセンブリをビルドするクレート(ring)の説明
 - リンクのときに結合される実行時ライブラリ(Rust の標準ライブラリ・MinGW-w64・winpthreads・libgcc)
@@ -229,7 +229,7 @@ def _strip_copyrights(lines: list[str]) -> list[str]:
 
 
 def _tkey(lf: "LicFile") -> str:
-    """本文をまとめるときの鍵。Apache-2.0 は見出しの URL の書き方(http / https / LICENSE-2.0 の有無)の違いを無視する"""
+    """本文をまとめるときのキー。Apache-2.0 は見出しの URL の書き方(http / https / LICENSE-2.0 の有無)の違いを無視する"""
     k = _norm(lf.tbody or "")
     if lf.kinds == ["Apache-2.0"]:
         k = re.sub(r"https?://www\.apache\.org/licenses/(LICENSE-2\.0)?", "http://www.apache.org/licenses/", k)
@@ -400,7 +400,7 @@ def collect(deps: cd.Deps) -> Collected:
 # 書体と実行時ライブラリ
 
 def ttf_names(path: Path) -> dict[int, str]:
-    """TrueType の name 表から文字列を取る(0 = 著作権, 1 = 族, 5 = 版, 13 = ライセンス)。壊れていれば空。"""
+    """TrueType の name 表から文字列を取る(0 = 著作権, 1 = ファミリー, 5 = バージョン, 13 = ライセンス)。壊れていれば空。"""
     try:
         data = path.read_bytes()
         num = struct.unpack(">H", data[4:6])[0]
@@ -502,8 +502,8 @@ def fence(text: str) -> str:
 
 
 def notebook_name() -> str:
-    """配るノートブックの名前 zahyou_v<大きな版>.ipynb(rs/Cargo.toml の版から。dev/build_nb.py・make_release_assets.py と同じ)。
-    版を上げると表示の中身が変わるので、`--check` が作り直しを求める(作り直したら exe も建て直す)"""
+    """配るノートブックの名前 zahyou_v<メジャーバージョン>.ipynb(rs/Cargo.toml のバージョンから。dev/build_nb.py・make_release_assets.py と同じ)。
+    バージョンを上げると表示の中身が変わるので、`--check` が作り直しを求める(作り直したら exe もビルドし直す)"""
     import tomllib
     with open(cd.RS_DIR / "Cargo.toml", "rb") as f:
         version = tomllib.load(f)["workspace"]["package"]["version"]
@@ -530,8 +530,8 @@ HEAD = """\
     zahyou_engine.py / {notebook} / dev/ / docs/(Python 版)
 
 オフライン解析のエンジン(`zahyou-solver`・`zahyou-index`・`zahyou-wcs`)も zahyou 自身のコードです。
-`zahyou.exe` に入っている第三者のソフトウェア(この文書の後半)、星図データ
-(index ファイル)とその元になった星表は含みません。
+`zahyou.exe` に入っている第三者のソフトウェア(この文書の後半)、
+インデックスファイルとその元になった星表は含みません。
 
 {license}
 
@@ -542,11 +542,11 @@ HEAD = """\
 `dev/solver_core.py`)を Rust に移したもので、zahyou 自身のコードとして MIT ライセンスで配ります。
 WSL も astrometry.net の実行ファイルも使いません。
 
-解き方(星 4 つ(広い段は 3 つ)の並びの幾何ハッシュ → 照合 → ベイズの検証 → 改良)は、
+解き方(星 4 つ(広い画角のスケールは 3 つ)の並びの幾何ハッシュ → 照合 → ベイズの検証 → 改良)は、
 下の論文と、astrometry.net の公開文書と BSD-3 の部分のソースを読んでまとめた調べ物をもとに、
 Python 版で自分で書き直したものです。GPL の部分(FITS の入出力層 `qfits-an` など)は読んでいません。
 **astrometry.net のコードは含んでいません**(取り込みも移植もしていません)。
-FITS の読み込みは FITS 規格から書きました。索引ファイルの形式は、実物のファイルを読んで調べました
+FITS の読み込みは FITS 規格から書きました。インデックスファイルの形式は、実物のファイルを読んで調べました
 (`docs/index-format.md`)。
 
 {lang}
@@ -554,10 +554,10 @@ FITS の読み込みは FITS 規格から書きました。索引ファイルの
 
 ## 同梱していないもの
 
-### 星図データ(index ファイル)
+### インデックスファイル
 
 zahyou の実行ファイルには同梱していません。exe は［準備］タブが下記の原典から
-落とします。中身の星のデータには、元になった星表の条件がかかります。
+ダウンロードします。中身の星のデータには、元になった星表の条件がかかります。
 
 - 4100 シリーズ … Tycho-2 星表から作られたもの。<https://data.astrometry.net/4100/>
 - 5200 シリーズ … Gaia DR2 と Tycho-2 から作られたもの。
@@ -571,7 +571,7 @@ zahyou の実行ファイルには同梱していません。exe は［準備］
 {gaia_ack}
 
 **配布ページ(Nextcloud)に置いてある `AstrometryData*.zip` は、この
-index ファイルをそのまま詰め直したものです。** 中身は上記の原典と同一で、
+インデックスファイルをそのまま詰め直したものです。** 中身は上記の原典と同一で、
 回線の細い場所でまとめて取れるようにしてあるだけです。
 元データの権利は Gaia(ESA/Gaia/DPAC)および Tycho-2 の各制作者にあり、
 上の条件(Gaia は非商用・クレジット)はこの zip にもそのままかかります。
@@ -636,7 +636,7 @@ def render(col: Collected, tc: Toolchain) -> str:
     w("ライセンス式が `A OR B` のものは、そのどれか 1 つの条件で使っています"
       "(本文は、配布物にあるものをすべて載せています)。\n")
     w(f"- Rust のクレート: **{len(pkgs)} 個**(`cargo metadata`、ターゲット `{cd.TARGET}`。"
-      f"ビルドのときだけ使う {deps.build_only} 個と、試験のときだけ使う {deps.dev_only} 個は除く)")
+      f"ビルドのときだけ使う {deps.build_only} 個と、テストのときだけ使う {deps.dev_only} 個は除く)")
     w(f"  - うち {len(ct)} 個は proc-macro(コンパイルのときにコードを生成するもの)とその依存です。"
       "exe にコードは入りませんが、念のため載せています")
     w("- egui の既定の書体 4 つ(exe に埋め込まれる。下の「画面の既定の書体」)")
@@ -693,7 +693,7 @@ def render(col: Collected, tc: Toolchain) -> str:
         if p.name == "ring":
             w(f"`ring` {p.version}(TLS の暗号。`ureq` → `rustls` が HTTPS の通信で使う)は、ビルドのときに")
             w("**配布物に入っている C のソースを C コンパイラー(MSYS2 UCRT64 の gcc)で組み立て**、")
-            w("アセンブリの部分は**配布物に入っている組み立て済みの目的ファイル**(BoringSSL 由来の perlasm を")
+            w("アセンブリの部分は**配布物に入っている組み立て済みのオブジェクトファイル**(BoringSSL 由来の perlasm を")
             w("NASM 形式で組み立てたもの。`pregenerated/*-nasm.o`)を使って、静的ライブラリ "
               f"`{p.links or 'ring_core'}` にまとめ、exe に結合しています。")
             w("これは ring 自身のコード(BoringSSL・fiat-crypto 由来の部分を含む)を Rust から呼んでいるもので、")
@@ -718,7 +718,7 @@ def render(col: Collected, tc: Toolchain) -> str:
     w("  Rust の配布物の表示(実行時-1)のとおり、標準ライブラリは Apache-2.0 OR MIT です"
       "(本文は下の「ライセンス本文」の Apache-2.0・MIT と同じ)。")
     w("- `compiler_builtins` には LLVM の compiler-rt の C が入っています。LLVM の例外(実行時-2)により、")
-    w("  組み込まれた目的コードについては Apache-2.0 の表示の条件(4 条 (a)(b)(d))がかかりません。")
+    w("  組み込まれたオブジェクトコードについては Apache-2.0 の表示の条件(4 条 (a)(b)(d))がかかりません。")
     w("- libgcc と libgcc_eh は GPL-3.0-or-later に GCC 実行時ライブラリ例外 3.1 が付いたものです(実行時-5)。")
     w("  この例外のもとでは、これらを結合した exe を任意の条件で配れます(zahyou は MIT)。")
     w("- MinGW-w64 の表示(実行時-3)の最後の節にある Wine 由来のヘッダー(LGPL)は、C をコンパイルするときの")
@@ -728,7 +728,7 @@ def render(col: Collected, tc: Toolchain) -> str:
 
     # --- 実行時ライブラリの表示
     w("## 実行時ライブラリの表示\n")
-    w("MSYS2 UCRT64 のツールチェーンに入っている表示のファイルを、そのまま写しています"
+    w("MSYS2 UCRT64 のツールチェーンに入っている表示のファイルを、そのままコピーしています"
       "(HTML のものは文字だけにしています)。\n")
     for i, (name, lic, rel, t) in enumerate(tc.texts, 1):
         w(f"### 実行時-{i}: {name}\n")
@@ -755,13 +755,13 @@ zahyou-native は、ノートブック版(`{notebook}`)のオフライン解析�
 
 下の LICENSE —— MIT ライセンス —— が及ぶのは **zahyou 自身のソースコードだけ**です
 (`rs/py/` と、そこから使う `rs/crates/`)。wheel に入っている第三者のソフトウェア(この文書の後半)、
-星図データ(index ファイル)とその元になった星表は含みません。
+インデックスファイルとその元になった星表は含みません。
 
 {license}
 
 ## オフライン解析の解き方 — astrometry.net の方式
 
-解き方(星 4 つ(広い段は 3 つ)の並びの幾何ハッシュ → 照合 → ベイズの検証 → 改良)は、下の論文と、
+解き方(星 4 つ(広い画角のスケールは 3 つ)の並びの幾何ハッシュ → 照合 → ベイズの検証 → 改良)は、下の論文と、
 astrometry.net の公開文書と BSD-3 の部分のソースを読んでまとめた調べ物をもとに、自分で書き直したものです。
 **astrometry.net のコードは含んでいません**(取り込みも移植もしていません)。
 
@@ -770,7 +770,7 @@ astrometry.net の公開文書と BSD-3 の部分のソースを読んでまと�
 
 ## 同梱していないもの
 
-星図データ(index ファイル)は入っていません。条件(Gaia は CC BY-NC 3.0 IGO・商用は ESA の許可・
+インデックスファイルは入っていません。条件(Gaia は CC BY-NC 3.0 IGO・商用は ESA の許可・
 クレジットは ESA/Gaia/DPAC)と論文・謝辞は、exe の表示(`rs/THIRD-PARTY-NOTICES.md`)とノートブック版の
 説明にあります。
 
@@ -794,7 +794,7 @@ def render_wheel(col: Collected) -> str:
     by_id = {p.id: p for p in pkgs}
     ct = [p for p in pkgs if p.compile_time_only]
     w(f"- Rust のクレート: **{len(pkgs)} 個**(`cargo metadata`。Windows・Mac・Linux のどれかで使うものを全部。"
-      f"ビルドのときだけ使う {deps.build_only} 個と、試験のときだけ使う {deps.dev_only} 個は除く)")
+      f"ビルドのときだけ使う {deps.build_only} 個と、テストのときだけ使う {deps.dev_only} 個は除く)")
     w(f"  - うち {len(ct)} 個は proc-macro(コンパイルのときにコードを生成するもの)とその依存です。"
       "拡張モジュールにコードは入りませんが、念のため載せています")
     w("- Rust の標準ライブラリ(Apache-2.0 OR MIT。本文は下の Apache-2.0・MIT と同じ)が静的に結合されます。"
@@ -824,7 +824,7 @@ def render_crates(col: Collected, w, by_id: dict) -> None:
     # --- 一覧
     w("### クレートの一覧\n")
     w("「本文」の番号は、下の「ライセンス本文」の番号です。\n")
-    w("| クレート | 版 | ライセンス式 | 本文 | 備考 |")
+    w("| クレート | バージョン | ライセンス式 | 本文 | 備考 |")
     w("|---|---|---|---|---|")
     group_of: dict[int, Group] = {id(lf): g for g in col.groups for lf in g.files}
     for p in pkgs:
@@ -848,7 +848,7 @@ def render_crates(col: Collected, w, by_id: dict) -> None:
     # --- 本文
     w("## ライセンス本文\n")
     w("同じ本文は 1 回だけ載せ、その本文に当たるクレートと、それぞれの著作権表示を並べています。")
-    w("著作権表示は各クレートのライセンスファイルの中の行をそのまま写したものです"
+    w("著作権表示は各クレートのライセンスファイルの中の行をそのままコピーしたものです"
       "(ファイルに著作権の行が無いものは、代わりに Cargo.toml の作者を添えています)。")
     w("Apache-2.0 の本文の末尾にある付録(使い方の例)は、標準のものそのままのときは省いています。\n")
     nf = notice_files(col)
@@ -885,7 +885,7 @@ def render_crates(col: Collected, w, by_id: dict) -> None:
 
 def build(args) -> tuple[str, Collected]:
     if args.wheel:
-        # wheel は Windows・Mac・Linux 向けに建てるので、ターゲットで絞らずに全部を載せる
+        # wheel は Windows・Mac・Linux 向けにビルドするので、ターゲットで絞らずに全部を載せる
         meta = cd.load_metadata(args.metadata, args.cargo, manifest=WHEEL_DIR / "Cargo.toml", target=None)
         col = collect(cd.classify(meta, local_is_own=True))
         return render_wheel(col), col

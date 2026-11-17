@@ -1308,7 +1308,7 @@ mod tests {
                 }
             }
         }
-        eprintln!("最近傍と積み上げが変える前と一致: 一致 {nm}・取り合い {nconf}・打ち切り {nbail}");
+        eprintln!("最近傍と積み上げが変える前と一致: 一致 {nm}・競合 {nconf}・打ち切り {nbail}");
         assert!(nconf > 1000 && nbail > 100 && nm > 10_000);
     }
 }

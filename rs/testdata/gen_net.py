@@ -143,7 +143,8 @@ def gen_layout():
         "index-5206-15.fits": fake_index(5206, 15, naxis1=2880, naxis2=3),
         "index-5206-16.fits": fake_index(5206, 16)[:2000],
     }
-    same_prefix = ("索引ファイルの名前ではありません", "大きさが合いません", "エンディアンが違います",
+    same_prefix = ("インデックスファイルの名前ではありません", "索引ファイルの名前ではありません",  # 後者は gui/ の時代の文言
+                   "大きさが合いません", "エンディアンが違います",
                    "INDEXID が名前と違います", "HEALPIX がタイル番号と違います",
                    "ヘッダーの途中でファイルが終わっています")
     out = []
@@ -459,7 +460,9 @@ def gen_update():
 def main():
     out = {
         "_note": "gen_net.py が Python 版(gui/zahyou_env.py・gui/zahyou_update.py・dev/zahyou_core.py)と "
-                 "astroquery / astropy から作った照合用の値。手で書き換えない。",
+                 "astroquery / astropy から作った照合用の値。手で書き換えない(例外: 2026-11-17 に、用語の変更に合わせて "
+                 "「索引ファイルの名前ではありません」「新しい版があります」の 3 か所だけ手で置き換えた。gui/ が残る古い commit から"
+                 "作り直すと古い文言に戻るので、そのときは置き換え直す)。",
         "env": gen_env(),
         "layout": gen_layout(),
         "format": gen_format(),

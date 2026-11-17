@@ -36,7 +36,7 @@ pub(crate) fn describe(e: &ureq::Error) -> String {
     match e {
         ureq::Error::StatusCode(c) => format!("HTTP {c}"),
         ureq::Error::Timeout(t) => format!("時間切れ ({t})"),
-        ureq::Error::Io(io) => format!("通信の誤り ({io})"),
+        ureq::Error::Io(io) => format!("通信エラー ({io})"),
         ureq::Error::HostNotFound => "宛先が見つかりません".into(),
         other => other.to_string(),
     }
@@ -296,7 +296,7 @@ fn copy_body(
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(e) => {
                 let _ = file.flush();
-                return Err(NetError::Failed(format!("受信の誤り ({e})")));
+                return Err(NetError::Failed(format!("受信エラー ({e})")));
             }
         };
         file.write_all(&buf[..n])

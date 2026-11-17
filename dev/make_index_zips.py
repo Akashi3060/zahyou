@@ -1,10 +1,10 @@
 """
-C:\\AstrometryData の index ファイルを、画角の段ごとに zip へまとめる。
+C:\\AstrometryData のインデックスファイルを、画角のスケールごとに zip へまとめる。
 
   python make_index_zips.py 5202 5203 5204
   python make_index_zips.py --src C:\\AstrometryData --out D:\\dist 5204
 
-利用者が「自分の画角に必要な段だけ」落とせるように、scale ごとに分ける。
+利用者が「自分の画角に必要なスケールだけ」ダウンロードできるように、scale ごとに分ける。
 zip の中身は AstrometryData/index-....fits なので、
 C:\\ 直下に展開すればマニュアル 4.4 の配置になる(v4。v3 では 2.3)。
 """
@@ -24,8 +24,8 @@ SCALE_FOV = {
 TILES = 48
 
 README = """\
-astrometry.net 星図データ (index files)
-=======================================
+astrometry.net インデックスファイル (index files)
+=================================================
 
 このアーカイブは index-{scale}-00 〜 47 の 48 ファイルです。
 対応する画角: {lo}′ 〜 {hi}′
@@ -38,7 +38,7 @@ astrometry.net 星図データ (index files)
 ------------------------
 この zip を人に渡すときは、この README を外さずに一緒に渡してください。
 中身は、astrometry.net (https://astrometry.net/ 、Lang et al. 2010, AJ 139, 1782) が
-作って公開している上記の索引ファイルを、改変せずにそのまま詰め直したものです
+作って公開している上記のインデックスファイルを、改変せずにそのまま詰め直したものです
 (回線の細い場所でまとめて取れるようにしただけで、各ファイルは出典と同一)。
 星のデータは Gaia DR2 と Tycho-2 から作られており、元の星表の条件がそのままかかります。
 
@@ -76,8 +76,8 @@ v6 (WSL を使う版) で使う場合は、WSL 側の /etc/astrometry.cfg に
     cp -r /mnt/c/AstrometryData ~/AstrometryData
     sudo sed -i "s#/mnt/c/AstrometryData#$HOME/AstrometryData#" /etc/astrometry.cfg
 
-どの段が必要か
---------------
+どのスケールが必要か
+--------------------
     index-5200 :   2′ 〜 2.8′
     index-5201 : 2.8′ 〜 4′
     index-5202 :   4′ 〜 5.6′

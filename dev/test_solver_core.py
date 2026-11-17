@@ -873,7 +873,7 @@ def case_16_deadline_in_refine():
     finally:
         sc._sv_refine = orig
     ok = (base is not None and sol is not None and abs(sol.logodds - base.logodds) < 1e-9
-          and sol.index_name == base.index_name and any("締め切りを過ぎましたが" in m for m in logs))
+          and sol.index_name == base.index_name and any("タイムアウトしましたが" in m for m in logs))
     return ok, (f"締め切りなし {base!r}; 改良の途中で締め切り → {sol!r}" if not ok else
                 f"{sol.index_name}・対数オッズ {sol.logodds:.1f}(締め切りなしと同じ)、改良 {len(calls)} 回")
 

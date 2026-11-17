@@ -1,12 +1,12 @@
 """
-astrometry.net の index ファイル (5200 LITE シリーズ) を取ってくる。
+astrometry.net のインデックスファイル (5200 LITE シリーズ) を取ってくる。
 
   python fetch_index.py 5202 5203 5204            # C:\\AstrometryData へ
   python fetch_index.py --dest D:\\idx 5204        # 置き場所を変える
   python fetch_index.py --check 5202 5203 5204    # 検証だけ (ダウンロードしない)
 
 ・途中で止めても Range ヘッダで続きから再開する
-・落とし終えたら「サイズ一致」と「FITS として開けて INDEXID が一致」まで確かめる
+・ダウンロードし終えたら「サイズ一致」と「FITS として開けて INDEXID が一致」まで確かめる
 ・壊れていたファイルは消して次の実行で取り直す
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ DEFAULT_DEST = r"C:\AstrometryData" if os.name == "nt" else "/usr/share/astromet
 TILES = 48
 RETRIES = 6
 
-# 末尾 2 桁が画角の段 (arcmin)
+# 末尾 2 桁が画角のスケール (arcmin)
 SCALE_FOV = {
     5200: (2, 2.8), 5201: (2.8, 4), 5202: (4, 5.6), 5203: (5.6, 8),
     5204: (8, 11), 5205: (11, 16), 5206: (16, 22),

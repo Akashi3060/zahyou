@@ -115,7 +115,7 @@ impl Pyramid {
             if last[0].max(last[1]) <= 256 || last[0] < 2 || last[1] < 2 {
                 break;
             }
-            let next = half(levels.last().expect("段は 1 つ以上ある"));
+            let next = half(levels.last().expect("縮小の段階は 1 つ以上ある"));
             levels.push(Arc::new(next));
         }
         Pyramid { width: w, height: h, levels }

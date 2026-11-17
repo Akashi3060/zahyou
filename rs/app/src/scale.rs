@@ -254,7 +254,7 @@ pub fn estimate_pixel_scale(
         }
     }
 
-    (None, "手がかりなし (星図データが対応する画角を総当たりします)".to_string())
+    (None, "手がかりなし (インデックスファイルが対応する画角を総当たりします)".to_string())
 }
 
 /// 解けたスケールから焦点距離 [mm] を逆算する(ヘッダーに画素サイズがあるときだけ。Python の `implied_focal_length`)。
@@ -314,7 +314,7 @@ pub fn missing_index_advice<S: AsRef<str>>(fov_arcmin: f64, names: &[S]) -> (boo
         return (
             false,
             vec![format!(
-                "画角 {fov_arcmin:.1}′ は星図データの範囲 (2′〜2000′) の外なので、この画角のままでは解けません。"
+                "画角 {fov_arcmin:.1}′ はインデックスファイルの範囲 (2′〜2000′) の外なので、この画角のままでは解けません。"
             )],
         );
     };
@@ -327,9 +327,9 @@ pub fn missing_index_advice<S: AsRef<str>>(fov_arcmin: f64, names: &[S]) -> (boo
     (
         false,
         vec![
-            format!("画角 {fov_arcmin:.1}′ に対応する星図データ ({}′〜{}′ 段) がありません。", fmt_g(lo), fmt_g(hi)),
+            format!("画角 {fov_arcmin:.1}′ に対応するインデックスファイル ({}′〜{}′ のスケール) がありません。", fmt_g(lo), fmt_g(hi)),
             format!("必要なファイル: {files}"),
-            format!("取得: ［準備］タブの段の一覧で index-{series} に印を付け、「選んだ段を落とす」を押してください。"),
+            format!("取得: ［準備］タブのスケールの一覧で index-{series} にチェックを入れ、「選んだスケールをダウンロード」を押してください。"),
         ],
     )
 }
@@ -436,7 +436,7 @@ mod tests {
         assert_eq!(missing_index_advice(13.35, &names), (true, vec![]));
         let (ok, msgs) = missing_index_advice(9.0, &names);
         assert!(!ok);
-        assert_eq!(msgs[0], "画角 9.0′ に対応する星図データ (8′〜11′ 段) がありません。");
+        assert_eq!(msgs[0], "画角 9.0′ に対応するインデックスファイル (8′〜11′ のスケール) がありません。");
         assert_eq!(msgs[1], "必要なファイル: index-5204-00〜47.fits");
         let (ok, msgs) = missing_index_advice(3000.0, &names);
         assert!(!ok && msgs.len() == 1);

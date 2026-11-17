@@ -67,7 +67,7 @@ fn poly_lstsq(
         s = s.max(a).max(b);
     }
     if bad {
-        return Err("当てはめの点に有限でない値がある".to_string());
+        return Err("フィットに使う点に有限でない値がある".to_string());
     }
     let mut a = vec![0.0f64; n * k];
     let mut b = vec![0.0f64; n * 2];
@@ -82,7 +82,7 @@ fn poly_lstsq(
         b[n + i] = t[i][1] * sw;
     }
     let sol = lstsq_qr(&mut a, n, k, &mut b, 2).map_err(|rank| {
-        format!("多項式(次数 {order})を当てるには点が足りないか、並びが縮退している(項 {k}、階数 {rank})")
+        format!("多項式(次数 {order})をフィットするには点が足りないか、並びが縮退している(項 {k}、階数 {rank})")
     })?;
     let m = order + 1;
     let mut c0 = vec![0.0f64; m * m];

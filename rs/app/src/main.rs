@@ -42,7 +42,7 @@ pub const APP_VER: &str = env!("ZAHYOU_VERSION_LABEL");
 static START: OnceLock<Instant> = OnceLock::new();
 
 /// 版名の後ろに添える「 (β版)」(プレリリースの版のときだけ。正式版・"-dev" では空)。
-/// 窓の題・ログの見出し・［使い方］の「いまの版」で使う(正式版に上げれば自然に消える)
+/// ウィンドウのタイトル・ログの見出し・［使い方］の「いまのバージョン」で使う(正式版に上げれば自然に消える)
 pub fn prerelease_suffix() -> String {
     zahyou_net::update::prerelease_label(APP_VER).map(|l| format!(" ({l})")).unwrap_or_default()
 }

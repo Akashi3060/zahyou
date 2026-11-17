@@ -882,7 +882,7 @@ mod tests {
             let old: Vec<f32> = all.chunks_exact(ch).map(|p| (wt[0] * p[0] + wt[1] * p[1]) + wt[2] * p[2]).collect();
             for blk in [LUM_BLOCK, 12345] {
                 let new = luminance_interleaved(&mut a, h * w, ch, wt, blk).unwrap();
-                assert!(new.iter().zip(&old).all(|(x, y)| x.to_bits() == y.to_bits()), "BITPIX {bp} 区切り {blk}");
+                assert!(new.iter().zip(&old).all(|(x, y)| x.to_bits() == y.to_bits()), "BITPIX {bp} ブロック {blk}");
             }
             let (d, ny, nx, _) = reduce_to_2d(&mut a, 200).unwrap();
             assert_eq!((ny, nx), (h, w));

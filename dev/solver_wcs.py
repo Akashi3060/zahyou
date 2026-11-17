@@ -180,7 +180,7 @@ def _sv_poly_lstsq(u, v, targets, order, min_deg=0, weights=None):
         t = t * sw[:, None]
     sol, _, rank, _ = np.linalg.lstsq(m, t, rcond=None)
     if rank < len(terms):
-        raise ValueError(f"多項式(次数 {order})を当てるには点が足りないか、並びが縮退している"
+        raise ValueError(f"多項式(次数 {order})をフィットするには点が足りないか、並びが縮退している"
                          f"(項 {len(terms)}、階数 {rank})")
     coef = np.zeros((t.shape[1], order + 1, order + 1))
     for i, (p, q) in enumerate(terms):
@@ -473,7 +473,7 @@ def sv_fit_sip_inverse(wcs, width=None, height=None, order=None, bounds=None):
     elif bounds is not None:
         x0, x1, y0, y1 = (float(t) for t in bounds)
     else:
-        raise ValueError("逆変換を当てる範囲(width, height か bounds)が要る")
+        raise ValueError("逆変換をフィットする範囲(width, height か bounds)が要る")
     n = 10 * (order + 1)
     gx, gy = np.meshgrid(np.linspace(x0, x1, n), np.linspace(y0, y1, n))
     u = gx.ravel() - out.crpix[0]

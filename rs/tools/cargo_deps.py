@@ -86,7 +86,7 @@ def _no_window() -> dict:
 
 
 def classify(meta: dict, local_is_own: bool = False) -> Deps:
-    """exe に入る依存・ビルドだけ・試験だけに分ける。local_is_own なら、パスで参照した(source の無い)
+    """exe に入る依存・ビルドだけ・テストだけに分ける。local_is_own なら、パスで参照した(source の無い)
     クレートも zahyou 自身のものとして扱う(rs/py の拡張モジュールは workspace の外から rs/crates を使うため)。"""
     pkgs = {p["id"]: p for p in meta["packages"]}
     ws = set(meta["workspace_members"])

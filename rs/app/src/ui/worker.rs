@@ -43,7 +43,7 @@ pub enum Msg {
     QuitForUpdate,
     /// 図の保存の結果
     Saved(Result<String, String>),
-    /// 重い処理が終わった(状態バーに残す一言)
+    /// 重い処理が終わった(ステータスバーに残す一言)
     Done(String),
     /// 重い処理が失敗した(panic など)
     Failed { to: LogTo, msg: String, detail: Vec<String> },

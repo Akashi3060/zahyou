@@ -1,13 +1,13 @@
-# dev/ — zahyou_v8.ipynb の材料とテスト
+# dev/ — zahyou_v9.ipynb の材料とテスト
 
-`zahyou_v8.ipynb` はここのファイルから **生成** している。ノートブックを直接編集すると
+`zahyou_v9.ipynb` はここのファイルから **生成** している。ノートブックを直接編集すると
 次の生成で上書きされるので、直すときはこちらを直すこと。
-ノートブックの名前の数は exe のメジャーバージョンで、`build_nb.py` が `rs/Cargo.toml` のバージョンから決める（8.0.0 → `zahyou_v8.ipynb`。
+ノートブックの名前の数は exe のメジャーバージョンで、`build_nb.py` が `rs/Cargo.toml` のバージョンから決める（9.0.0 → `zahyou_v9.ipynb`。
 バージョンを上げたら直下のノートブックを `git mv` で改名する。[../docs/release-v7.md](../docs/release-v7.md) の 2 節）。
 
 `build_nb.py` は **2 つの成果物**を書き出す（引数なしで走らせると、リポジトリ直下の 2 つを書き換える）。
 
-* `zahyou_v8.ipynb` … markdown + 3 つの短いセル（合計 90 行ほど）。直下のものは**セルの中身だけを id ごとに
+* `zahyou_v9.ipynb` … markdown + 3 つの短いセル（合計 90 行ほど）。直下のものは**セルの中身だけを id ごとに
   差し替え**、出力の例は残す
 * `zahyou_engine.py` … 解析の中身（オフライン解析の自前のエンジンを含む）。セル A がこれを読み込む。
   `test_solver_real.py --engine` も直下のこれを使う（exe は Rust で書き直したもので、これを読まない）
@@ -21,11 +21,11 @@
 
 | ファイル | 中身 |
 |---|---|
-| `nb_loader.py` | セル A（pip 行 + エンジンの読み込み）。2 つ目の pip の行は Rust の解法の拡張モジュール zahyou-native（`../rs/py/README.md`）を、その版の Release から入れる（`{RELEASE_TAG}` を `build_nb.py` が版から入れる） |
+| `nb_loader.py` | セル A（pip 行 + エンジンの読み込み）。2 つ目の pip の行は Rust の解法の拡張モジュール zahyou-native（`../rs/py/README.md`）を、そのバージョンの Release から入れる（`{RELEASE_TAG}` を `build_nb.py` がバージョンから入れる） |
 | `nb_pick.py` | セル B（`pick_image()` の 1 行） |
 | `nb_settings.py` | セル C 冒頭のユーザー設定項目（インデックスファイルの置き場所 `INDEX_DIR` もここ） |
 | `solver_wcs.py` | 幾何: 単位ベクトル ↔ 赤経赤緯、TAN 投影、TAN/SIP のフィット、FITS ヘッダー |
-| `solver_index.py` | インデックスファイル: FITS の表を生のバイトで読む、kd-tree の探索、段とタイルの選び方、検査 |
+| `solver_index.py` | インデックスファイル: FITS の表を生のバイトで読む、kd-tree の探索、スケールとタイルの選び方、検査 |
 | `solver_core.py` | 解法: 星の並べ替え、quad 作り、コード、照合、検証（対数オッズ）、改良、探索の本体 `sv_solve` |
 | `solver_synth.py` | テスト用: インデックスの星から「正解つきの合成星野」を作る（エンジンには入れない） |
 | `zahyou_core.py` | 画像読み込み・前処理・星検出・スケール推定・オフライン解析の段取り（`solve_offline` → `_solve_stars` → zahyou-native があればそれ、無ければ `sv_solve`。環境変数 `ZAHYOU_SOLVER=python` で `sv_solve` に固定）・オンライン解析・目標の名前解決 |
@@ -64,10 +64,10 @@ exe と同じバージョン。バージョンを上げるときの直し方は 
 ## テスト
 
 ```
-python build_nb.py               # 直下の zahyou_engine.py・zahyou_v8.ipynb (セルの中身だけ) と、
-#                                    試験用の dev/zahyou.ipynb・dev/zahyou_engine.py を書く
-python test_solver_wcs.py        # solver_wcs:   TAN の往復・当てはめ・FITS ヘッダー
-python test_solver_index.py      # solver_index: 索引の読み込み・kd-tree の探索・ファイルの検査
+python build_nb.py               # 直下の zahyou_engine.py・zahyou_v9.ipynb (セルの中身だけ) と、
+#                                    テスト用の dev/zahyou.ipynb・dev/zahyou_engine.py を書く
+python test_solver_wcs.py        # solver_wcs:   TAN の往復・フィット・FITS ヘッダー
+python test_solver_index.py      # solver_index: インデックスの読み込み・kd-tree の探索・ファイルの検査
 python test_solver_core.py       # solver_core:  quad 作り・コード・照合・検証・改良・解の判定
 python test_solver_synth.py      # 合成星野をブラインドとヒントで解く
 python test_solver_real.py       # 実写を解いて、v6 で求めた正解と比べる
@@ -136,7 +136,7 @@ python fetch_index.py --check 5202 5203 5204  # 検証だけ
 - ダウンロードし終えたら「サイズ一致」と「FITS として開けて `INDEXID` / `HPNSIDE` /
   `NQUADS` が正しい」まで確かめる。壊れていれば消して次回取り直す
 
-段ごとの実サイズ:
+スケールごとの実サイズ:
 
 | スケール | 実サイズ | zip 後 |
 |---|---|---|
@@ -160,11 +160,11 @@ python fetch_index.py --check 5202 5203 5204  # 検証だけ
 python make_index_zips.py 5204 5203 5202 --out C:\AstrometryData\dist
 ```
 
-段ごとに `AstrometryData-index-<段>.zip` を作る。中身は `AstrometryData/index-....fits`
+スケールごとに `AstrometryData-index-<スケール>.zip` を作る。中身は `AstrometryData/index-....fits`
 なので、`C:\` 直下に展開すればマニュアル 4.4 の配置になる（v4。v3 では 2.3）。
-段ごとの README と `SHA256SUMS.txt` も一緒に出力する。
+スケールごとの README と `SHA256SUMS.txt` も一緒に出力する。
 中身の星のデータには元の星表（Tycho-2 / Gaia DR2）の条件がかかる
-（[../rs/THIRD-PARTY-NOTICES.md](../rs/THIRD-PARTY-NOTICES.md) の「星図データ」）。zip の中の README には、その条件
+（[../rs/THIRD-PARTY-NOTICES.md](../rs/THIRD-PARTY-NOTICES.md) の「インデックスファイル」）。zip の中の README には、その条件
 （Gaia は CC BY-NC 3.0 IGO・商用は ESA の許可）・クレジット ESA/Gaia/DPAC・Gaia の定型の謝辞・論文を入れてある。
 **README を直したら zip を作り直して、配布ページの zip も差し替える**（人の作業）。
 
@@ -174,7 +174,7 @@ python make_index_zips.py 5204 5203 5202 --out C:\AstrometryData\dist
 python make_manual.py                 # ../天体画像解析プログラム「zahyou」導入・運用マニュアルv4.pdf
 ```
 
-マニュアル v4 は、v7 から（デスクトップ版が Rust の exe になってから）の本文。v8 でもバージョンは v4 のままで、中身だけを直した
+マニュアル v4 は、v7 から（デスクトップ版が Rust の exe になってから）の本文。v8・v9 でもバージョンは v4 のままで、中身だけを直した
 （解析の時間・メモリの数字は v7 の開発中の exe で 2026-10-16 に測ったもの）。v6（WSL を使うバージョン）の v3 の PDF は
 7.0.0 の準備でリポジトリから消した（commit `0b73d36`(旧タグ v7.0.0-beta.2)の木に残っている。配布ページも v4 に差し替える。
 [../docs/release-v7.md](../docs/release-v7.md) の 8 節）。
@@ -211,4 +211,4 @@ v6 と試作版の Python の exe（PyInstaller）用の表示（リポジトリ
 
 ---
 
-必要なければ `dev/` ごと消してよい（`zahyou_v8.ipynb` と `zahyou_engine.py` だけで動く）。
+必要なければ `dev/` ごと消してよい（`zahyou_v9.ipynb` と `zahyou_engine.py` だけで動く）。

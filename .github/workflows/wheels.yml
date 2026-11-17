@@ -1,5 +1,5 @@
 # ノートブック版の拡張モジュール zahyou-native(rs/py)の wheel を Windows・Mac・Linux 向けに建てる。
-# 建てた wheel は「zahyou-native-wheels」という名前の成果物に入る。Release に添えるのは人の作業
+# ビルドした wheel は「zahyou-native-wheels」という名前の成果物に入る。Release に添えるのは人の作業
 # (docs/release-v7.md の 6 節: gh run download → make_release_assets.py --wheels)。このワークフローは Release に触れない。
 name: wheels
 
@@ -38,7 +38,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: wheel を建てる
+      - name: wheel をビルドする
         uses: PyO3/maturin-action@v1
         with:
           working-directory: rs/py
@@ -46,7 +46,7 @@ jobs:
           manylinux: ${{ matrix.manylinux }}
           args: --release --locked --out dist
           rust-toolchain: stable
-      - name: 入れて呼べるか確かめる(星図データは無いので「解なし」を返すことまで)
+      - name: 入れて呼べるか確かめる(インデックスファイルは無いので「解なし」を返すことまで)
         shell: bash
         env:
           PYTHONIOENCODING: utf-8   # Windows の画面は cp1252 で、ログの日本語を出すと落ちる
@@ -61,7 +61,7 @@ jobs:
               r = zn.solve([(10.0, 20.0), (30.0, 40.0), (50.0, 15.0), (70.0, 60.0)], [4.0, 3.0, 2.0, 1.0],
                            100, 80, d, timeout=5.0, cancel=lambda: False, log=logs.append)
           print(r, logs)
-          assert r is None and logs, "星図データの無いフォルダーで解なしにならない"
+          assert r is None and logs, "インデックスファイルの無いフォルダーで解なしにならない"
           PY
       - uses: actions/upload-artifact@v4
         with:

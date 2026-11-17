@@ -202,7 +202,7 @@ pub(crate) fn search(
     st.files = files.iter().map(|&i| store.file(i).name.clone()).collect();
     st.scale = Some((s_lo, s_hi));
     if files.is_empty() {
-        log("使える星図データ(索引)がありません");
+        log("使えるインデックスファイルがありません");
         return Ok(None);
     }
     // 索引ごとの AB の範囲と、系列の中の位置
@@ -231,7 +231,7 @@ pub(crate) fn search(
         let series: BTreeSet<u32> = info.iter().map(|(m, _, _)| store.file(m.file).indexid).collect();
         let names: Vec<String> = series.iter().map(|s| s.to_string()).collect();
         let mut line = format!(
-            "星 {} 個(quad に {} 個)、スケール {}〜{}″/px、索引 {} 本(系列 {})",
+            "星 {} 個(quad に {} 個)、スケール {}〜{}″/px、インデックス {} 本(系列 {})",
             field.n,
             field.nq,
             fmt_g(s_lo, 3),
@@ -390,7 +390,7 @@ fn flush(
                             break None;
                         }
                         store.mark_broken(file, &msg);
-                        log(&format!("星図データが壊れているので、この先は使いません: {msg}"));
+                        log(&format!("インデックスファイルが壊れているので、この先は使いません: {msg}"));
                         st.broken.push(msg);
                     }
                     // OS のエラーで開けない(ほかのプロセスが書き込み用に開いているなど)。中身が壊れているとは
@@ -401,7 +401,7 @@ fn flush(
                             break None;
                         }
                         store.mark_unavailable(file, &msg);
-                        log(&format!("星図データを今は開けないので、この探索では使いません: {msg}"));
+                        log(&format!("インデックスファイルを今は開けないので、この探索では使いません: {msg}"));
                     }
                     Err(e) => {
                         st.flushes[fl].t = round4(st.t0.elapsed().as_secs_f64());
@@ -568,7 +568,7 @@ fn match_file(
         let corrupt = || Abort::Corrupt {
             file,
             msg: format!(
-                "{}: quad の星番号が星の数 {} の外です(中身が壊れています。落とし直してください)",
+                "{}: quad の星番号が星の数 {} の外です(中身が壊れています。ダウンロードし直してください)",
                 f.name,
                 crate::pyfmt::fmt_int(f.nstars as u64)
             ),
@@ -751,7 +751,7 @@ fn verify_and_pick(
                     // solve を超えた仮説があるので、締め切りを過ぎても改良は最後まで済ませる(中止の合図はそのまま見る)。
                     // ここで止めると、解けている画像が「解けず」になる。解として返すかは、改良の後の判定(試した数で上げる値・
                     // tune-up の一致の増え)で決まるので、ログは「解が見つかった」と言い切らない
-                    log("締め切りを過ぎましたが、solve を超えた候補があるので改良を済ませます");
+                    log("タイムアウトしましたが、solve を超えた候補があるので改良を済ませます");
                     refine(field, sc, params, h, params.tweak_order, true, clock.without_deadline())?
                 }
                 other => other?,

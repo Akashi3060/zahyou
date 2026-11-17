@@ -503,7 +503,7 @@ def selfcheck_wellposed(fields, catalog):
     few = "、".join(f"{n} {g} 個(最初は {r['first'][0] + 1} 番目の星まで)" for g, n, r in rows[:4] if r["first"])
     late = max(((r["first"][0], n) for _, n, r in rows if r["first"]), default=None)
     msg = (f"空の星野 {len(rows)} 件とも、解法の並び(明るい順のあと画面に散らした順)の先頭 {QUAD_STARS} 個で"
-           f"組めてコードが許容({CODETOL}、三角形は {codetol_for(3):.4f})以内の索引の quad がある。"
+           f"組めてコードが許容({CODETOL}、三角形は {codetol_for(3):.4f})以内のインデックスの quad がある。"
            f"少ないもの: {few}"
            + (f"。最初の quad がいちばん遅く組めるもの: {late[1]}({late[0] + 1} 番目の星まで)" if late else ""))
     return (not bad), (msg if not bad else "; ".join(bad[:6]))

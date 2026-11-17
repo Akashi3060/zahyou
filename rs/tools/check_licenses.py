@@ -108,7 +108,7 @@ def main(argv=None) -> int:
     fails: list[str] = []
     notes: list[str] = []
 
-    print(f"exe に入るクレート: {len(deps.runtime)} 個(ビルドだけ {deps.build_only} 個・試験だけ {deps.dev_only} 個は対象外。"
+    print(f"exe に入るクレート: {len(deps.runtime)} 個(ビルドだけ {deps.build_only} 個・テストだけ {deps.dev_only} 個は対象外。"
           f"ターゲット {cd.TARGET})")
     counts: dict[str, int] = {}
     for p in deps.runtime:

@@ -625,7 +625,7 @@ def attempts_of(zc, bundle, deep, std, hint_radec, hint_radius_deg, installed):
         hint = (float(hint_radec[0]), float(hint_radec[1]), float(hint_radius_deg))
     narrow = (max(scale * 0.75, 0.01), scale * 1.25) if scale else None
     wide = zc.blind_scale_bounds(nx, installed)
-    star_sets = [(nm, st) for nm, st in (("深い検出", deep), ("標準の検出", std)) if len(st) >= 3]
+    star_sets = [(nm, st) for nm, st in (("ディープ検出", deep), ("標準の検出", std)) if len(st) >= 3]
     conds = []
     if hint and narrow:
         conds.append(("座標ヒント + スケール既知", hint, narrow, 0.25))
@@ -637,7 +637,7 @@ def attempts_of(zc, bundle, deep, std, hint_radec, hint_radius_deg, installed):
     out = []
     for cond, hint_i, rng, share in conds:
         for nm, st in star_sets:
-            out.append(dict(label=f"{nm}の星 {len(st)} 個 + {cond}", stars="deep" if nm == "深い検出" else "standard",
+            out.append(dict(label=f"{nm}の星 {len(st)} 個 + {cond}", stars="deep" if nm == "ディープ検出" else "standard",
                             hint=None if hint_i is None else list(hint_i), scale_lo=float(rng[0]),
                             scale_hi=float(rng[1]), share=share))
     return out, scale, how

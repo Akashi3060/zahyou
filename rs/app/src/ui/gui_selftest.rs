@@ -3,7 +3,7 @@
 //!   zahyou.exe --selftest <画像> [--online|--offline] [--out f]
 //!
 //! 画面を組み立て、解析を 2 回(目標あり・完全ブラインド)通し、API キーの欄(値は出さない)・3 つの数字・図・ログ・
-//! 状態バー・部品のはみ出し・下のバー・配色の切り替えを見る。利用者の設定(gui.json)には書かない。
+//! ステータスバー・部品のはみ出し・下のバー・配色の切り替えを見る。利用者の設定(gui.json)には書かない。
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -49,7 +49,7 @@ impl Rig {
 }
 
 /// 画面の自己診断(画面の項目だけ。解析そのものの項目は pipeline 係の selftest_rows)。
-/// 画面からも解析を 1 回通して、数字・図・状態バーが画面に届くことを見る。
+/// 画面からも解析を 1 回通して、数字・図・ステータスバーが画面に届くことを見る。
 pub fn run(image: &Path, target: &str, force: Option<Solve>, debug_wcs: Option<std::path::PathBuf>) -> Vec<Row> {
     let mut out: Vec<Row> = Vec::new();
     let mut check = |name: &str, ok: bool, msg: String| out.push((name.to_string(), ok, msg));
@@ -95,7 +95,7 @@ pub fn run(image: &Path, target: &str, force: Option<Solve>, debug_wcs: Option<s
         );
         let n = a.figs.iter().filter(|f| f.is_some()).count();
         check("図が 2 枚貼られる", n == 2, format!("{n} 枚"));
-        check("結果が状態バーに残る", a.status.contains("解析できました"), format!("{:?}", a.status));
+        check("結果がステータスバーに残る", a.status.contains("解析できました"), format!("{:?}", a.status));
         // 図を描けること(両方のタブを表示してみる。テクスチャの段づくり・タイル分け)
         let r = super::worker::guarded(|| {
             for t in [super::settings::ResultTab::Orig, super::settings::ResultTab::NorthUp] {
@@ -109,7 +109,7 @@ pub fn run(image: &Path, target: &str, force: Option<Solve>, debug_wcs: Option<s
         check("画像がある", false, image.display().to_string());
     }
 
-    // --- 部品が窓の中・枠の中にあること(いちばん小さい窓でも) ---
+    // --- 部品がウィンドウの中・枠の中にあること(いちばん小さいウィンドウでも) ---
     let mut outside = Vec::new();
     let mut over = Vec::new();
     for size in [vec2(1180.0, 780.0), vec2(1000.0, 660.0)] {
@@ -134,16 +134,16 @@ pub fn run(image: &Path, target: &str, force: Option<Solve>, debug_wcs: Option<s
     rig.app.scroll_left_end = false;
     outside.dedup();
     over.dedup();
-    check("部品が窓の中にある", outside.is_empty(), outside.join(" / ").chars().take(90).collect());
+    check("部品がウィンドウの中にある", outside.is_empty(), outside.join(" / ").chars().take(90).collect());
     check("枠からはみ出た部品が無い", over.is_empty(), over.join(" / ").chars().take(90).collect());
     rig.app.tab = TopTab::Run;
     rig.frame();
     let bar = rig.app.placed.iter().find(|p| p.name == "配色ボタン").map(|p| p.rect);
     let win = Rect::from_min_size(Pos2::ZERO, rig.size);
     check(
-        "下のバーが窓の中にある",
+        "下のバーがウィンドウの中にある",
         bar.is_some_and(|b| win.contains_rect(b)),
-        bar.map(|b| format!("ボタン下端 {:.0} / 窓 {:.0}", b.max.y, win.max.y)).unwrap_or_else(|| "置かれていない".into()),
+        bar.map(|b| format!("ボタン下端 {:.0} / ウィンドウ {:.0}", b.max.y, win.max.y)).unwrap_or_else(|| "置かれていない".into()),
     );
 
     // --- 明→暗→明 ---
@@ -222,7 +222,7 @@ mod tests {
     fn 中止の遅れを測る() {
         let img = test_image("Capture_00001 00_55_14.fits");
         if !img.exists() || !Path::new(crate::pipeline::DEFAULT_INDEX_DIR).is_dir() {
-            eprintln!("SKIP: {} か星図データが無い", img.display());
+            eprintln!("SKIP: {} かインデックスファイルが無い", img.display());
             return;
         }
         super::super::settings::override_path(std::env::temp_dir().join("zahyou-test-cancel-lag.json"));
@@ -249,7 +249,7 @@ mod tests {
             worst = worst.max(lag);
             rig.pump(0.1, |_| false);
             eprintln!(
-                "始めて {:.2} 秒で中止 → {lag:.3} 秒で止まった / 状態バー {:?}",
+                "始めて {:.2} 秒で中止 → {lag:.3} 秒で止まった / ステータスバー {:?}",
                 (t_cancel - t0).as_secs_f64(),
                 rig.app.status
             );
@@ -274,10 +274,10 @@ mod tests {
         app.s.name = "  ".into();
         app.start_analysis(None);
         assert!(app.dialogs.last().unwrap().starts_with("目標の天体名を入れてください。"));
-        // 準備タブ: 段を選ばずに「選んだ段を落とす」
+        // 準備タブ: スケールを選ばずに「選んだスケールをダウンロード」
         app.download_index(None);
-        assert_eq!(app.dialogs.last().map(String::as_str), Some("落とす段にチェックを入れてください。"));
-        // 焦点距離が空で「必要な段を選ぶ」
+        assert_eq!(app.dialogs.last().map(String::as_str), Some("ダウンロードするスケールにチェックを入れてください。"));
+        // 焦点距離が空で「必要なスケールを選ぶ」
         app.recommend(None);
         assert!(app.dialogs.last().unwrap().starts_with("焦点距離とセンサー横幅 [mm] を入れてください。"));
         // 更新を確認する前に「更新する」
@@ -324,22 +324,22 @@ mod tests {
         }
         let n = app.dialogs.len();
         app.prepare_all(None);
-        assert!(!app.busy, "確認なしで落とし始めた");
+        assert!(!app.busy, "確認なしでダウンロードし始めた");
         assert_eq!(app.dialogs.len(), n + 1);
-        assert!(app.dialogs.last().unwrap().starts_with("印を付けた段をそろえます。\n足りない 2 段"), "{:?}", app.dialogs.last());
-        // (b) 「おすすめをまとめて落とす」をキャンセルしたら印を元に戻す
+        assert!(app.dialogs.last().unwrap().starts_with("チェックを入れたスケールをそろえます。\n足りないスケール 2 個"), "{:?}", app.dialogs.last());
+        // (b) 「おすすめをまとめてダウンロード」をキャンセルしたらチェックを元に戻す
         let before = app.marks.clone();
         app.download_recommended(None);
         assert!(!app.busy);
         assert!(app.dialogs.last().unwrap().starts_with("画角 "), "{:?}", app.dialogs.last());
-        assert_eq!(app.marks, before, "キャンセルしたのに印が残った");
+        assert_eq!(app.marks, before, "キャンセルしたのにチェックが残った");
         for v in app.marks.values_mut() {
             *v = false;
         }
         // 印が無ければおすすめの段について聞く
         app.prepare_all(None);
         assert!(!app.busy);
-        assert!(app.dialogs.last().unwrap().starts_with("段が選ばれていないので、おすすめ"), "{:?}", app.dialogs.last());
+        assert!(app.dialogs.last().unwrap().starts_with("スケールが選ばれていないので、おすすめ"), "{:?}", app.dialogs.last());
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -355,14 +355,14 @@ mod tests {
         // 新しい(空の)置き場所で押す: 数え直すので「そろっています」とは言わず、容量を聞く
         app.download_recommended(None);
         assert!(!app.busy);
-        assert_ne!(app.status, "おすすめの段はすべてそろっています。");
+        assert_ne!(app.status, "おすすめのスケールはすべてそろっています。");
         assert!(app.dialogs.last().is_some_and(|d| d.starts_with("画角 ")), "{:?}", app.dialogs.last());
         for v in app.marks.values_mut() {
             *v = false;
         }
         let n = app.dialogs.len();
         app.prepare_all(None);
-        assert!(!app.busy, "確認なしで落とし始めた");
+        assert!(!app.busy, "確認なしでダウンロードし始めた");
         assert_eq!(app.dialogs.len(), n + 1);
         // 置き場所を変えたら表は「未確認」に戻り、前の置き場所の結果が(調べ終わって)届いても使わない
         app.forget_env();

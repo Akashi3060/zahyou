@@ -351,7 +351,7 @@ class AssembleTest(unittest.TestCase):
         v = mra.cargo_version()
         homes = [r"C:\Users\taro"]
         self.assertEqual(mra.check_wheels(self._wheels(self.dir / "ok", v), v, homes), [])
-        # 渡さない・足りない・版が違う・表示が違う・手元で建てた(ホームのパスが残る)
+        # 渡さない・足りない・バージョンが違う・表示が違う・手元でビルドした(ホームのパスが残る)
         self.assertTrue(mra.check_wheels(None, v, homes))
         p = mra.check_wheels(self._wheels(self.dir / "few", v, tags=("win_amd64",)), v, homes)
         self.assertTrue(any("Linux aarch64" in x for x in p), p)

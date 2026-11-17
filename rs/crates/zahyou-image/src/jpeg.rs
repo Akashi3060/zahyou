@@ -678,7 +678,7 @@ fn upsample(p: &Plane, fh: usize, fv: usize, w: usize, h: usize) -> Result<Vec<u
                 *v = p.at(x / fh, y / fv) as u8;
             }
         }),
-        _ => return Err("JPEG の色差の倍率に対応していません".into()),
+        _ => return Err("JPEG の色差のサンプリング係数に対応していません".into()),
     }
     Ok(out)
 }
@@ -782,7 +782,7 @@ pub(crate) fn decode(d: &[u8]) -> Result<Jpeg, String> {
                 let mcuy = h.div_ceil(8 * vmax);
                 for c in comps.iter_mut() {
                     if hmax % c.h != 0 || vmax % c.v != 0 {
-                        return Err("JPEG の色差の倍率が整数ではありません".into());
+                        return Err("JPEG の色差のサンプリング係数の比が整数ではありません".into());
                     }
                     c.bw = mcux * c.h;
                     c.bh = mcuy * c.v;
@@ -881,9 +881,8 @@ pub(crate) fn decode(d: &[u8]) -> Result<Jpeg, String> {
                         c.quant = Some(qt[c.tq].ok_or("JPEG の量子化表がありません")?);
                     }
                     let (s0, s1) = if fr.progressive { (ss, se) } else { (0, 63) };
-                    for k in s0..=s1.min(63) {
-                        c.coef_bits[k] = if fr.progressive { al as i32 } else { 0 };
-                    }
+                    // s0 <= s1 <= 63(プログレッシブは上で確かめた。ベースラインは 0..=63)
+                    c.coef_bits[s0..=s1.min(63)].fill(if fr.progressive { al as i32 } else { 0 });
                 }
                 pos = decode_scan(d, pos + len, fr, &sc, ss, se, ah, al, &dc, &ac, restart)?;
                 continue;
