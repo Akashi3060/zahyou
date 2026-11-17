@@ -69,7 +69,7 @@ DEV_DIR = REPO_DIR / "dev"
 MSYS_BIN = Path(r"C:\msys64\ucrt64\bin")
 
 CHECKS = ("version", "paths", "notices", "manual", "notebook", "wheels")
-# 配る wheel の行き先(名前の末尾のプラットフォームの印で見分ける)。.github/workflows/wheels.yml の matrix と同じ 4 つ
+# 配る wheel の行き先(名前の末尾のプラットフォームタグで見分ける)。.github/workflows/wheels.yml の matrix と同じ 4 つ
 WHEEL_PLATFORMS = (
     ("Windows x86_64", lambda tag: tag == "win_amd64"),
     ("Mac(universal2)", lambda tag: tag.startswith("macosx_") and tag.endswith("_universal2")),
@@ -80,7 +80,7 @@ VS_FF_PRERELEASE = 0x2
 VS_FIXEDFILEINFO_SIG = struct.pack("<I", 0xFEEF04BD)
 
 
-# ------------------------------------------------------------------ 名前と版 ---
+# ------------------------------------------------------------------ 名前とバージョン ---
 
 def cargo_version(cargo_toml: Path = RS_DIR / "Cargo.toml", table: str = "workspace") -> str:
     """rs/Cargo.toml の [workspace.package] version(table="package" なら [package] version。rs/py 用)"""
@@ -136,7 +136,7 @@ def manual_repo_path(version: str) -> Path:
     return REPO_DIR / f"天体画像解析プログラム「zahyou」導入・運用マニュアル{version}.pdf"
 
 
-# ------------------------------------------------------------ exe の版情報 ---
+# ------------------------------------------------------------ exe のバージョン情報 ---
 
 def _align4(n: int) -> int:
     return (n + 3) & ~3
@@ -227,7 +227,7 @@ def check_version(exe: Path, version: str) -> list[str]:
     return problems
 
 
-# ------------------------------------------------------ 建てた人のホームのパス ---
+# ------------------------------------------------------ ビルドした人のホームのパス ---
 
 NAME_CHARS = "0-9A-Za-z_.\\-"
 
@@ -264,7 +264,7 @@ def count_home_paths(data: bytes, home: str) -> dict[str, int]:
 
 
 def home_dirs() -> list[str]:
-    """ビルドした人のホームフォルダー(この道具は exe をビルドした PC で走らせる)。
+    """ビルドした人のホームフォルダー(このツールは exe をビルドした PC で走らせる)。
     区切りと大文字小文字だけが違うもの(MSYS2 の Python の Path.home() は C:/Users/…)は 1 つにまとめる"""
     out: list[str] = []
     seen: set[str] = set()
@@ -544,7 +544,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", type=Path, required=True, help="アセットを置くフォルダー(空か無い、リポジトリの外)")
     ap.add_argument("--wheels", type=Path, help="zahyou-native の wheel 4 つのフォルダー(GitHub Actions の成果物 zahyou-native-wheels)")
     ap.add_argument("--skip", action="append", default=[], choices=CHECKS, help="飛ばす検査(試しのとき用。何度でも)")
-    ap.add_argument("--allow-in-repo", action="store_true", help=argparse.SUPPRESS)  # 試験用
+    ap.add_argument("--allow-in-repo", action="store_true", help=argparse.SUPPRESS)  # テスト用
     a = ap.parse_args(argv)
 
     if not a.exe.is_file():

@@ -1,4 +1,4 @@
-//! WCS の当てはめ。Python 版 `dev/solver_wcs.py` の `sv_fit_similarity`・`sv_fit_wcs_lsq`・`sv_fit_sip_inverse`
+//! WCS のフィット。Python 版 `dev/solver_wcs.py` の `sv_fit_similarity`・`sv_fit_wcs_lsq`・`sv_fit_sip_inverse`
 //! (設計書 design-native-solver.md の 3.6・3.8 節)。
 //!
 //! 小さな行列の解法は自前(2×2 の極分解、QR の最小二乗。linalg.rs)。
@@ -10,7 +10,7 @@ use crate::linalg::{Mat2, det2, inv2, lstsq_qr, orthogonal_polar2, transpose2};
 use crate::sip::{MAX_SIP_ORDER, Sip, poly_terms};
 use crate::wcs::Wcs;
 
-/// 当てはめに失敗した理由(Python 版の ValueError の文)。
+/// フィットに失敗した理由(Python 版の ValueError の文)。
 #[derive(Clone, Debug, PartialEq)]
 pub enum FitError {
     /// 画像の点と星の数が合わない
@@ -27,7 +27,7 @@ pub enum FitError {
     StarBehindTangent,
     /// 画像の点か星がすべて同じ位置にある
     Coincident,
-    /// 多項式を当てるには点が足りないか、並びが縮退している
+    /// 多項式をフィットするには点が足りないか、並びが縮退している
     RankDeficient { order: usize, terms: usize, rank: usize },
     /// CD が特異(点が一直線に並んでいる)
     SingularCd,
@@ -66,14 +66,14 @@ impl std::error::Error for FitError {}
 
 // --------------------------------------------------------- 相似変換(4 点) ---
 
-/// 対応する画像の点と星から、回転+等方スケールの TAN を当てる(4 点からの仮の解)。失敗は None。
+/// 対応する画像の点と星から、回転+等方スケールの TAN をフィットする(4 点からの仮の解)。失敗は None。
 ///
 /// 中身は [`try_fit_similarity`]。
 pub fn fit_similarity(field: &[[f64; 2]], stars: &[Vec3]) -> Option<Wcs> {
     try_fit_similarity(field, stars).ok()
 }
 
-/// 対応する画像の点と星から、回転+等方スケールの TAN を当てる(設計書 3.6 節)。
+/// 対応する画像の点と星から、回転+等方スケールの TAN をフィットする(設計書 3.6 節)。
 ///
 /// 接点 r = 星の単位ベクトルの和の方向、CRPIX = 画像の点の重心。星を r で投影した (ξ, η) と画像の点から
 /// それぞれ重心を引き、C = Σ fᵢ pᵢᵀ = U S Vᵀ、R = V Uᵀ(行列式の符号は見ない = 鏡像も表せる)、
@@ -146,11 +146,11 @@ fn mean2(pts: &[[f64; 2]], n: f64) -> [f64; 2] {
     [m[0] / n, m[1] / n]
 }
 
-// ------------------------------------------------------------ 多項式の当てはめ ---
+// ------------------------------------------------------------ 多項式のフィット ---
 
-/// 2 本の目的値 (t0, t1) をそれぞれ Σ c[p][q] u^p v^q(min_deg ≤ p+q ≤ order)で重みつき最小二乗に当てる。
+/// 2 本の目的値 (t0, t1) をそれぞれ Σ c[p][q] u^p v^q(min_deg ≤ p+q ≤ order)に重みつき最小二乗でフィットする。
 ///
-/// 戻り値は 2 つの (order+1)×(order+1) の係数(行優先)。u, v は最大の絶対値で割ってから当てる
+/// 戻り値は 2 つの (order+1)×(order+1) の係数(行優先)。u, v は最大の絶対値で割ってからフィットする
 /// (高い次数で桁が開きすぎて解けなくなるのを防ぐ。Python 版の `_sv_poly_lstsq` と同じ)。
 fn poly_lstsq(
     u: &[f64],
@@ -211,16 +211,16 @@ fn linspace(start: f64, stop: f64, num: usize) -> Vec<f64> {
 
 // ------------------------------------------------------------ SIP の逆変換 ---
 
-/// SIP の逆変換 AP, BP を、画像全体(x = −0.5 … width−0.5、y = −0.5 … height−0.5)の格子で当てる(設計書 3.8 節)。
+/// SIP の逆変換 AP, BP を、画像全体(x = −0.5 … width−0.5、y = −0.5 … height−0.5)の格子でフィットする(設計書 3.8 節)。
 ///
 /// `order` の既定は順変換の次数 + 1。AP, BP を付けた複製を返す(SIP が無ければそのままの複製)。
 pub fn fit_sip_inverse(wcs: &Wcs, width: f64, height: f64, order: Option<usize>) -> Result<Wcs, FitError> {
     fit_sip_inverse_bounds(wcs, [-0.5, width - 0.5, -0.5, height - 0.5], order)
 }
 
-/// `fit_sip_inverse` の、範囲 (xmin, xmax, ymin, ymax)(0 始まりの画素)を直接渡す版。
+/// `fit_sip_inverse` の、範囲 (xmin, xmax, ymin, ymax)(0 始まりの画素)を直接渡すバージョン。
 ///
-/// 格子は 10 × (次数+1) 点四方。各点を順変換した (U, V) から元の (u, v) へ戻す多項式(0 ≤ p+q ≤ 次数)を当てる。
+/// 格子は 10 × (次数+1) 点四方。各点を順変換した (U, V) から元の (u, v) へ戻す多項式(0 ≤ p+q ≤ 次数)をフィットする。
 pub fn fit_sip_inverse_bounds(wcs: &Wcs, bounds: [f64; 4], order: Option<usize>) -> Result<Wcs, FitError> {
     let Some(sip) = wcs.sip.as_ref() else {
         return Ok(wcs.clone());
@@ -255,9 +255,9 @@ pub fn fit_sip_inverse_bounds(wcs: &Wcs, bounds: [f64; 4], order: Option<usize>)
     Ok(Wcs { sip: Some(sip), ..wcs.clone() })
 }
 
-// ---------------------------------------------------------- 最小二乗の当てはめ ---
+// ---------------------------------------------------------- 最小二乗のフィット ---
 
-/// 対応する画像の点と星から、TAN(+SIP)を重みつき最小二乗で当てる。失敗は None。中身は [`try_fit_wcs_lsq`]。
+/// 対応する画像の点と星から、TAN(+SIP)を重みつき最小二乗でフィットする。失敗は None。中身は [`try_fit_wcs_lsq`]。
 #[allow(clippy::too_many_arguments)]
 pub fn fit_wcs_lsq(
     field: &[[f64; 2]],
@@ -272,13 +272,13 @@ pub fn fit_wcs_lsq(
     try_fit_wcs_lsq(field, stars, weights, crpix, sip_order, crval, iterations, size).ok()
 }
 
-/// 対応する画像の点と星から、TAN(+SIP)を重みつき最小二乗で当てる(設計書 3.8 節。Python の `sv_fit_wcs_lsq`)。
+/// 対応する画像の点と星から、TAN(+SIP)を重みつき最小二乗でフィットする(設計書 3.8 節。Python の `sv_fit_wcs_lsq`)。
 ///
 /// CRPIX は固定(既定は画像の点の重みつき重心)。接点(既定は星の重みつきの和の方向)のまわりで星を
-/// 投影し、ξ と η をそれぞれ u, v(画素 − CRPIX)の多項式(0 ≤ p+q ≤ 次数、次数 = max(1, sip_order))で当てる。
-/// 定数項は接点のずれなので、接点をそのぶん動かして当て直す(`iterations` 回動かし、当てるのは iterations+1 回。
+/// 投影し、ξ と η をそれぞれ u, v(画素 − CRPIX)の多項式(0 ≤ p+q ≤ 次数、次数 = max(1, sip_order))でフィットする。
+/// 定数項は接点のずれなので、接点をそのぶん動かして再フィットする(`iterations` 回動かし、フィットするのは iterations+1 回。
 /// Python の既定は 3)。1 次の項が CD、2 次以上に CD⁻¹ を掛けたものが SIP の A, B。sip_order ≥ 2 なら
-/// 逆変換 AP, BP(次数 sip_order+1)も、画像全体(`size` = (幅, 高さ)。無ければ点の範囲)の格子で当てる。
+/// 逆変換 AP, BP(次数 sip_order+1)も、画像全体(`size` = (幅, 高さ)。無ければ点の範囲)の格子でフィットする。
 /// 重みが 0・負・有限でない点と、座標が有限でない点は使わない。
 #[allow(clippy::too_many_arguments)]
 pub fn try_fit_wcs_lsq(
@@ -378,7 +378,7 @@ pub fn try_fit_wcs_lsq(
         if k == iterations {
             break;
         }
-        // 定数項 = CRPIX が写る (ξ, η)。接点をそこへ動かして当て直す。最後の当てはめのあとには動かさない
+        // 定数項 = CRPIX が写る (ξ, η)。接点をそこへ動かして再フィットする。最後のフィットのあとには動かさない
         // (CD は接点の東・北に対する値で、極のそばでは接点をわずかに動かすだけで東・北の向きが大きく回るため)
         r = tan_deproject(coef[0][0].to_radians(), coef[1][0].to_radians(), r);
         k += 1;

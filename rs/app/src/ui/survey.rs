@@ -1,4 +1,4 @@
-//! 星図データの状態調べ(Python の gui/zahyou_env.py の index_state / survey / report / prepare_all)。
+//! インデックスファイルの状態調べ(Python の gui/zahyou_env.py の index_state / survey / report / prepare_all)。
 //!
 //! 画面のコードは書かない(log の関数だけ受け取る)。ダウンロードそのものは zahyou-net の fetch_index。
 //! 検査は zahyou-net の軽い検査(大きさ・ENDIAN・INDEXID・HEALPIX)のあとに zahyou-index の検査
@@ -17,11 +17,11 @@ pub struct IndexState {
     pub files: usize,
     /// 合計の大きさ [byte]
     pub bytes: u64,
-    /// ファイルが全部そろっている段(survey のあとは「検査にも通った段」)
+    /// ファイルが全部そろっているスケール(survey のあとは「検査にも通ったスケール」)
     pub scales: Vec<u32>,
-    /// 一部だけある段 {段: ある数}
+    /// 一部だけあるスケール {スケール: ある数}
     pub partial: BTreeMap<u32, usize>,
-    /// ファイルがある段の画角の範囲 [分角]
+    /// ファイルがあるスケールの画角の範囲 [分角]
     pub fov: Option<(f64, f64)>,
     pub ok: bool,
     pub names: Vec<String>,
@@ -40,7 +40,7 @@ pub struct CheckState {
 pub struct Survey {
     pub index: IndexState,
     pub check: CheckState,
-    /// オフライン解析できるか(検査に通った星図データが 1 本でもある)
+    /// オフライン解析できるか(検査に通ったインデックスファイルが 1 本でもある)
     pub ready: bool,
     pub notes: Vec<String>,
 }
@@ -85,7 +85,7 @@ pub fn check_file(path: &Path) -> Result<(), String> {
     zahyou_net::check_index_file_full(path)
 }
 
-/// 星図データを走査して、1 本ずつ検査する。
+/// インデックスファイルを走査して、1 本ずつ検査する。
 pub fn survey(index_dir: &Path) -> Survey {
     let mut idx = index_state(index_dir);
     // 253 本でも速い(ヘッダーだけ)が、並列にしておく
@@ -158,13 +158,13 @@ pub fn report(st: &Survey, log: &dyn Fn(&str)) {
     }
 }
 
-/// 段の一覧をログ用に「[5202, 5203]」の形で(Python の list の repr と同じ)
+/// スケールの一覧をログ用に「[5202, 5203]」の形で(Python の list の repr と同じ)
 pub fn list_repr(v: &[u32]) -> String {
     let inner: Vec<String> = v.iter().map(|s| s.to_string()).collect();
     format!("[{}]", inner.join(", "))
 }
 
-/// 「まとめて準備」でそろえる段のうち、まだ無いもの(scales が空ならおすすめの段。小さい順)。
+/// 「まとめて準備」でそろえるスケールのうち、まだ無いもの(scales が空ならおすすめのスケール。小さい順)。
 pub fn need_scales(scales: &[u32], have: &[u32]) -> Vec<u32> {
     let mut want: Vec<u32> = if scales.is_empty() { zahyou_net::recommended_scales() } else { scales.to_vec() };
     want.sort_unstable();
@@ -172,16 +172,16 @@ pub fn need_scales(scales: &[u32], have: &[u32]) -> Vec<u32> {
     want.into_iter().filter(|s| !have.contains(s)).collect()
 }
 
-/// 段 → 落とすファイル名
+/// スケール → ダウンロードするファイル名
 pub fn names_of(scales: &[u32]) -> Vec<String> {
     scales.iter().flat_map(|s| index_names(*s)).collect()
 }
 
-/// 「まとめて準備」。足りない段を落として、検査する(Python の prepare_all)。戻り値は survey。
+/// 「まとめて準備」。足りないスケールをダウンロードして、検査する(Python の prepare_all)。戻り値は survey。
 ///
-/// scales を渡せばその段を、空ならおすすめの段(画角 4′ 以上)をそろえる。そろって検査に通っている段は落とさない。
-/// allowed: 利用者に容量を見せて了承を得た段(画面が押したときに数え直したもの)。渡されていて、ここで数え直した
-/// 足りない段がそれより多ければ、落とさずに止める(了承していない量を落とさない)。
+/// scales を渡せばそのスケールを、空ならおすすめのスケール(画角 4′ 以上)をそろえる。そろって検査に通っているスケールはダウンロードしない。
+/// allowed: 利用者に容量を見せて了承を得たスケール(画面が押したときに数え直したもの)。渡されていて、ここで数え直した
+/// 足りないスケールがそれより多ければ、ダウンロードせずに止める(了承していない量をダウンロードしない)。
 pub fn prepare_all(
     index_dir: &Path,
     scales: &[u32],
@@ -252,7 +252,7 @@ mod tests {
         let log = |s: &str| lines.lock().unwrap().push(s.to_string());
         let fetched = std::sync::atomic::AtomicBool::new(false);
         let prog = |_: u64, _: u64| fetched.store(true, std::sync::atomic::Ordering::Relaxed);
-        // 止めの合図は最初から立てておく(万一ここを通り抜けても、ネットへは出ない)
+        // 止めのフラグは最初から立てておく(万一ここを通り抜けても、ネットへは出ない)
         let stop = || true;
         // 了承したのは 5203 だけなのに、5202 も足りない
         let st = prepare_all(&dir, &[5202, 5203], Some(&[5203]), &log, &prog, &stop);

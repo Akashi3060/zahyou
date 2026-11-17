@@ -58,10 +58,10 @@ def _existing_wcs_header(header, shape):
 
 def _cancel_requested(say=True):
     """
-    GUI の「中止」が押されたか。合図は CANCEL_EVENT (threading.Event) で届く。
+    GUI の「中止」が押されたか。フラグは CANCEL_EVENT (threading.Event) で届く。
 
     ノートブックにはこの設定が無い (None) ので、いつも False。
-    解析の段の間で確かめ、オフライン解析の中には同じ Event をそのまま渡す。
+    解析の段階の間で確かめ、オフライン解析の中には同じ Event をそのまま渡す。
     """
     ev = globals().get("CANCEL_EVENT")
     if ev is not None and ev.is_set():
@@ -82,9 +82,9 @@ def _sanity_ok(wcs, shape):
         return False
 
 
-# ログの見出しの版。exe と同じ版名にする(rs/Cargo.toml の [workspace.package] version に "v" を付け、末尾の 0 の部分を
-# 省いたもの。8.0.0 → "v8"、β版は "v<大きな版>-beta.<番号>" の形。rs/app/build.rs の version_label と同じ決まり)。
-# 食い違うと rs/tools/make_release_assets.py の notebook の検査と、試験 version_in_docs_matches_cargo が止める。
+# ログの見出しのバージョン。exe と同じバージョン名にする(rs/Cargo.toml の [workspace.package] version に "v" を付け、末尾の 0 の部分を
+# 省いたもの。8.0.0 → "v8"、β版は "v<メジャーバージョン>-beta.<番号>" の形。rs/app/build.rs の version_label と同じ決まり)。
+# 食い違うと rs/tools/make_release_assets.py の notebook の検査と、テスト version_in_docs_matches_cargo が止める。
 NB_VERSION = "v9"
 
 

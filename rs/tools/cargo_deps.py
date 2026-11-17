@@ -3,7 +3,7 @@
 
 - cargo metadata を読む(ターゲット x86_64-pc-windows-gnu に絞る)
 - exe に入る依存を選ぶ(ワークスペースのメンバーから「通常の依存」の辺だけでたどれるもの)。
-  ビルドだけ(build-dependencies の先)・試験だけ(dev-dependencies の先)は除く
+  ビルドだけ(build-dependencies の先)・テストだけ(dev-dependencies の先)は除く
 - そのうち、コンパイルのときだけ動くもの(proc-macro と、proc-macro からしかたどれないもの)を見分ける
 - SPDX のライセンス式を読む(AND・OR・WITH・括弧。古い書き方の「/」は OR とみなす)
 - exe に埋め込まれる書体と、リンクのときに結合される実行時ライブラリの「ライセンス式」(cargo の外のもの)
@@ -25,7 +25,7 @@ TOOLS_DIR = Path(__file__).resolve().parent
 RS_DIR = TOOLS_DIR.parent
 REPO_DIR = RS_DIR.parent
 
-# C やアセンブリをビルドする(cc などをビルド依存に持つ)と判定する目印
+# C やアセンブリをビルドする(cc などをビルド依存に持つ)と判定するためのビルド依存の名前
 NATIVE_BUILD_DEPS = ("cc", "cmake", "bindgen", "pkg-config", "vcpkg", "nasm-rs", "autotools")
 
 
@@ -51,9 +51,9 @@ class Package:
 class Deps:
     """依存の分類の結果"""
 
-    runtime: list[Package]  # exe に入るもの(名前・版の順)
+    runtime: list[Package]  # exe に入るもの(名前・バージョンの順)
     build_only: int  # ビルドのときだけのものの数
-    dev_only: int  # 試験のときだけのものの数
+    dev_only: int  # テストのときだけのものの数
     workspace: list[str] = field(default_factory=list)  # ワークスペースのメンバーの名前
 
 
@@ -79,7 +79,7 @@ def load_metadata(path: str | None = None, cargo: str = "cargo", manifest: Path 
 
 
 def _no_window() -> dict:
-    """Windows で子プロセスの窓(conhost)を出さない"""
+    """Windows で子プロセスのウィンドウ(conhost)を出さない"""
     if os.name == "nt":
         return {"creationflags": 0x08000000}  # CREATE_NO_WINDOW
     return {}

@@ -1,4 +1,4 @@
-//! 前処理(Python の zahyou_core.preprocess とその下請け)。
+//! 前処理(Python の zahyou_core.preprocess とその補助関数)。
 //!
 //! 背景を引き、ノイズ σ を測り、ホットピクセルを消し、縁と焼き込み文字をマスクする。
 //! 比較のしきい値は Python と同じく float32 に丸めてから比べる(numpy 2 では float32 の配列と
@@ -12,15 +12,15 @@ use crate::filters::{
 use crate::stats::{median_f32, sigma_clipped_std, std_f32, unmasked};
 use crate::{Image2D, Prep};
 
-/// 背景の粗い升目(`_background` の前半)。
+/// 背景の粗いグリッド(`_background` の前半)。
 enum Coarse {
-    /// 升が縦横 3 つ未満: 背景は全体の中央値 1 つ
+    /// ブロックが縦横 3 つ未満: 背景は全体の中央値 1 つ
     Flat(f32),
-    /// 升ごとの中央値を 3×3 の中央値でならしたもの(by×bx)
+    /// ブロックごとの中央値を 3×3 の中央値でならしたもの(by×bx)
     Grid { coarse: Vec<f32>, by: usize, bx: usize },
 }
 
-/// `_background(data, box=64)` の前半: 64 画素の升ごとの中央値を 3×3 の中央値フィルターでならす。
+/// `_background(data, box=64)` の前半: 64 画素のブロックごとの中央値を 3×3 の中央値フィルターでならす。
 fn background_coarse(img: &Image2D) -> Coarse {
     let (ny, nx) = (img.height, img.width);
     let data = &img.data;
@@ -57,7 +57,7 @@ fn background_coarse(img: &Image2D) -> Coarse {
     Coarse::Grid { coarse: median3(&coarse, by, bx), by, bx }
 }
 
-/// `_background` の後半: 升目を線形補間で ny×nx に伸ばす。
+/// `_background` の後半: グリッドを線形補間で ny×nx に伸ばす。
 fn background_from_grid(coarse: &[f32], by: usize, bx: usize, ny: usize, nx: usize) -> Vec<f32> {
     let oy = zoom_out_len(by, ny);
     let ox = zoom_out_len(bx, nx);
@@ -115,7 +115,7 @@ pub fn kill_hot_pixels(sub: &mut [f32], ny: usize, nx: usize, sigma: f64) -> usi
         return 0;
     }
     if ny == 0 || nx == 0 || ny.checked_mul(nx).is_none_or(|n| n > sub.len()) {
-        // 空(前の版も 3×3 の平均が空で何もしなかった)か、大きさと画素の数が合わない(呼ぶ側の誤り)。落ちずに何もしない
+        // 空(前のバージョンも 3×3 の平均が空で何もしなかった)か、大きさと画素の数が合わない(呼ぶ側の誤り)。落ちずに何もしない
         return 0;
     }
     // 3×3 の平均 u は行ごとに作って、その行の判定に使うだけ(全面の u の配列を作らない)。
@@ -182,10 +182,10 @@ fn dead_line(line: &[f32], med: f64) -> bool {
 pub fn mask_dead_edges(img: &Image2D, mask: &mut [bool], med: f64) {
     let (ny, nx) = (img.height, img.width);
     if ny == 0 || nx == 0 {
-        return; // 縁が無い(前の版は ny - 1 があふれた)
+        return; // 縁が無い(前のバージョンは ny - 1 があふれた)
     }
     let data = &img.data;
-    // 判定は行・列ごとに独立(data だけを読む)なので並列に求め、あとで印を立てる。印は立てるだけなので、
+    // 判定は行・列ごとに独立(data だけを読む)なので並列に求め、あとでマスクのフラグを立てる。フラグは立てるだけなので、
     // 前と後ろの範囲が重なる小さな画像で同じ線を 2 回判定しても結果は同じ
     let nyr = ((ny as f64 * 0.02) as usize).max(1);
     let rows: Vec<usize> = (0..nyr).flat_map(|y| [y, ny - 1 - y]).collect();
@@ -193,7 +193,7 @@ pub fn mask_dead_edges(img: &Image2D, mask: &mut [bool], med: f64) {
     for (&row, _) in rows.iter().zip(&dead_rows).filter(|(_, d)| **d) {
         mask[row * nx..row * nx + nx].iter_mut().for_each(|v| *v = true);
     }
-    // 縁の列(左 nxr 本と右 nxr 本 = 前の版の x と nx-1-x の全部)。列の値を上から順に並べた配列を作ってから判定する。
+    // 縁の列(左 nxr 本と右 nxr 本 = 前のバージョンの x と nx-1-x の全部)。列の値を上から順に並べた配列を作ってから判定する。
     // 列の値は G 列ずつ、行を上から読んで集める(1 行で G 個続けて読むので、nx 飛びの読みが G 分の 1 になる)
     let nxr = ((nx as f64 * 0.02) as usize).max(1);
     let cols: Vec<usize> = (0..nxr).chain(nx.saturating_sub(nxr)..nx).collect();
@@ -379,16 +379,16 @@ pub fn preprocess(img: &Image2D, mask_overlay: bool) -> Prep {
 
     let n_masked = mask.par_iter().filter(|&&m| m).count();
     let s2 = if n_masked == 0 || n_masked == n {
-        // σ は sub 全体で測る(全部マスクのときも前の版と同じく sub 全体)
+        // σ は sub 全体で測る(全部マスクのときも前のバージョンと同じく sub 全体)
         // kill_hot_pixels が 0 を返すのは何も書き換えなかったときだけ(書いたら書いた数を返す)なので、
         // n_hot == 0 なら sub は最初の σ を測ったときのまま = 同じ配列に同じ決定的な関数で、値も同じ
         if n_hot == 0 { s_first } else { sigma_clipped_std(&sub) as f64 }
     } else {
-        // sub[~mask](順序を保つ)。前の版はマスクの画素を NaN にしてから NaN でないものを集めていたので、
-        // マスクでない位置の NaN も落ちていたが、σ クリップは最初に非有限値を順序を保って除くので同じ値になる。
+        // sub[~mask](順序を保つ)。前のバージョンはマスクの画素を NaN にしてから NaN でないものを集めていたので、
+        // マスクでない位置の NaN も除かれていたが、σ クリップは最初に非有限値を順序を保って除くので同じ値になる。
         // 書き先はちょうどの長さで新しく作る。焼き込み判定で使い終えた shifted(容量 n)を書き先に回すと、容量 n の配列を
         // 持ったまま σ クリップが配列を作るので、σ クリップの残す配列が焼き込み判定のときより長いと私有メモリの最大が
-        // 増えうる。新しく作れば、ここで生きる配列は前の版の最後の σ と同じ(pairs が無いぶん、集める瞬間は小さい)
+        // 増えうる。新しく作れば、ここで生きる配列は前のバージョンの最後の σ と同じ(pairs が無いぶん、集める瞬間は小さい)
         let refv = unmasked(&sub, &mask);
         sigma_clipped_std(&refv) as f64
     };
@@ -599,7 +599,7 @@ mod tests {
 
     #[test]
     fn hot_pixels_match_reference() {
-        // 行ごとの 3×3 平均で判定しても、前の版と同じ画素を同じ値で置き換える(5% 超で何もしない場合・ホットピクセル無しも)
+        // 行ごとの 3×3 平均で判定しても、前のバージョンと同じ画素を同じ値で置き換える(5% 超で何もしない場合・ホットピクセル無しも)
         let mut n_fixed = 0;
         for (ny, nx) in SHAPES {
             for (hot, sigma) in [(0usize, 1.0f64), (7, 1.0), (40, 1.0), (7, 1e9), (7, 0.001)] {
@@ -625,7 +625,7 @@ mod tests {
 
     #[test]
     fn edge_masks_match_reference() {
-        // 縁の死んだ行・列と焼き込みの帯のマスクが、前の版(直列に 1 本ずつ)と同じ
+        // 縁の死んだ行・列と焼き込みの帯のマスクが、前のバージョン(直列に 1 本ずつ)と同じ
         let (mut n_dead, mut n_band) = (0, 0);
         for (ny, nx) in SHAPES {
             for (band, dead) in [(false, false), (true, false), (false, true), (true, true)] {
@@ -646,7 +646,7 @@ mod tests {
                 n_band += (ka > 0) as usize;
             }
         }
-        // 印が立つ場合を通したこと
+        // マスクのフラグが立つ場合を通したこと
         assert!(n_dead >= 5 && n_band >= 5, "無効な縁 {n_dead} 件・焼き込み {n_band} 件");
         // 4 つの縁それぞれに帯を置き、前から・後ろから見る行の表引きと、左右の列の数え上げを全部、帯が立つ線で通す
         // (上の test_image の帯は上の行と右の列にしか無い)
@@ -670,7 +670,7 @@ mod tests {
 
     #[test]
     fn background_sub_matches_background() {
-        // 背景を作ってから引くのと同じ(升が 3 つ未満の平らな背景も)
+        // 背景を作ってから引くのと同じ(ブロックが 3 つ未満の平らな背景も)
         for (ny, nx, seed) in [(100usize, 100usize, 1u64), (192, 192, 2), (300, 517, 3), (1000, 1500, 4), (64, 1300, 5)]
         {
             let img = test_image(ny, nx, seed, 9, true, false);

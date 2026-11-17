@@ -2,7 +2,7 @@
 //!
 //! Python 版 `dev/zahyou_core.py` の `load_image_any`・`preprocess`・`detect_sources`・`detect_sources_deep`・
 //! `looks_inverted` を移したもの。値は Python 版(numpy・scipy・astropy・Pillow)と同じになるように、
-//! 計算の順序と途中の型(float32 / float64)まで写してある(`rs/testdata/gen_image.py` の値で確かめる)。
+//! 計算の順序と途中の型(float32 / float64)までそろえてある(`rs/testdata/gen_image.py` の値で確かめる)。
 //!
 //! - fits.rs     FITS を自前で読む(2880 バイト単位のヘッダー・HDU の選び方・BZERO/BSCALE/BLANK・.gz)
 //! - tile.rs     タイル圧縮(ZIMAGE の BINTABLE。RICE_1・GZIP_1・GZIP_2・NOCOMPRESS と浮動小数の量子化)
@@ -14,7 +14,7 @@
 //! - filters.rs  scipy.ndimage と同じフィルター(中央値・一様・ガウス・二項・zoom)
 //! - prep.rs     前処理(背景・ホットピクセル・縁・焼き込み文字)
 //! - detect.rs   星の検出(4 連結のラベル・重心)
-//! - deep.rs     深い検出(星の幅に合わせてぼかし、局所の雑音の u 倍を超える極大を拾う。2026-10-16 版)
+//! - deep.rs     ディープ検出(星の幅に合わせてぼかし、局所の雑音の u 倍を超える極大を検出する。2026-10-16 版)
 //!
 //! 画素は 0 始まり(x = 列、y = 行)。`Image2D` の行 0 は Python 版の `bundle.data` の行 0 と同じ
 //! (FITS は先頭の行 = 画像の下、PNG/JPEG/TIFF は画面の上)。表示の上下は `Loaded::flip_y` で持つ。
@@ -78,8 +78,8 @@ impl Image2D {
 /// 読み込んだ画像(Python の `SolveInput`)。
 ///
 /// `data` と `display` は `Arc` で持つ。ベイヤー・非有限値の補完・明暗の反転のどれも無い画像では、2 つは
-/// 同じ配列を指す(写しを作らない。24 MP で 96 MB の確保と直列の memcpy が無くなる)。`Arc` 越しには `&mut` が
-/// 取れないので、片方を書き換えて他方まで変わる、ということは型で起きない(書き換えるなら `Arc::make_mut` で写す)。
+/// 同じ配列を指す(コピーを作らない。24 MP で 96 MB の確保と直列の memcpy が無くなる)。`Arc` 越しには `&mut` が
+/// 取れないので、片方を書き換えて他方まで変わる、ということは型で起きない(書き換えるなら `Arc::make_mut` でコピーする)。
 /// 呼ぶ側は `&loaded.data` を `&Image2D` として渡せる(参照外しの型強制)。
 #[derive(Clone, Debug)]
 pub struct Loaded {
@@ -109,23 +109,23 @@ pub struct Prep {
 }
 
 /// 検出した星 1 つ(Python の `_measure` の dict と `snr`)。
-/// 深い検出(`detect_deep`)の星は、Python の `detect_sources_deep` と同じく意味が少し違う(括弧の中)。
+/// ディープ検出(`detect_deep`)の星は、Python の `detect_sources_deep` と同じく意味が少し違う(括弧の中)。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Source {
-    /// 重心(画素、0 始まり)(深い検出: ぼかした像の 3×3 に対数の放物線を当てた頂の位置)
+    /// 重心(画素、0 始まり)(ディープ検出: ぼかした像の 3×3 に対数の放物線をフィットした頂の位置)
     pub x: f64,
     pub y: f64,
-    /// 領域内の背景差引の値の和(深い検出: ぼかした像の頂の値から出したガウスの全光量。並べ替えの目安)
+    /// 領域内の背景差引の値の和(ディープ検出: ぼかした像の頂の値から出したガウスの全光量。並べ替えの目安)
     pub flux: f64,
-    /// 領域内の最大値(深い検出: 頂の画素の前処理後の値)
+    /// 領域内の最大値(ディープ検出: 頂の画素の前処理後の値)
     pub peak: f64,
-    /// 領域の画素数(深い検出: FWHM の円の面積。目安)
+    /// 領域の画素数(ディープ検出: FWHM の円の面積。目安)
     pub area: usize,
-    /// 伸び(長軸 / 短軸)(深い検出: 1)
+    /// 伸び(長軸 / 短軸)(ディープ検出: 1)
     pub elong: f64,
-    /// 2.3548 × √((vx + vy) / 2)(深い検出: 2.3548 × 星像の σ。全部の星で同じ値)
+    /// 2.3548 × √((vx + vy) / 2)(ディープ検出: 2.3548 × 星像の σ。全部の星で同じ値)
     pub fwhm: f64,
-    /// 開口 SNR = flux / (σ √area)(深い検出: ぼかした像の頂の値 / その場所の雑音)
+    /// 開口 SNR = flux / (σ √area)(ディープ検出: ぼかした像の頂の値 / その場所の雑音)
     pub snr: f64,
 }
 
@@ -156,7 +156,7 @@ impl DetectOpts {
         DetectOpts { min_sources: n, ..Default::default() }
     }
 
-    /// 以前の深い検出(2×2 にまとめて min_sources = 60 で検出)の条件。今の `detect_sources_deep` が使うのは
+    /// 以前のディープ検出(2×2 にまとめて min_sources = 60 で検出)の条件。今の `detect_sources_deep` が使うのは
     /// `max_sources`(既定 400)だけなので、`detect_sources_deep(prep, &DetectOpts::deep())` は
     /// Python の `detect_sources_deep(sub, mask, sigma)` と同じ。新しく書くなら `detect_deep(prep, &DeepOpts::default())`。
     pub fn deep() -> DetectOpts {
@@ -164,7 +164,7 @@ impl DetectOpts {
     }
 }
 
-/// 深い検出の条件(Python の `detect_sources_deep` の引数)。既定値は Python と同じ。
+/// ディープ検出の条件(Python の `detect_sources_deep` の引数)。既定値は Python と同じ。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DeepOpts {
     /// 明るい順にこれだけ返す(既定 400)
@@ -181,7 +181,7 @@ impl Default for DeepOpts {
     }
 }
 
-/// 深い検出で捨てた候補の数(理由ごと。Python の info["rejected"])。
+/// ディープ検出で捨てた候補の数(理由ごと。Python の info["rejected"])。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct DeepRejected {
     /// もっと明るい星との間の谷が浅い(同じ星の肩・光条のこぶ)
@@ -190,11 +190,11 @@ pub struct DeepRejected {
     pub elong: usize,
     /// 鋭さが明るい星の典型の 2 倍を超える(ベイヤーで十字に広がったホットピクセル)
     pub sharp: usize,
-    /// まわりの輪の中央値より十分高くない(大きなかぶりの上の背景の当てはめの残り)
+    /// まわりの輪の中央値より十分高くない(大きなかぶりの上の背景のフィットの残り)
     pub ring: usize,
 }
 
-/// 深い検出で測った値(Python の `detect_sources_deep(..., info=dict)` が入れるもの)。
+/// ディープ検出で測った値(Python の `detect_sources_deep(..., info=dict)` が入れるもの)。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DeepInfo {
     /// 星像の σ [画素](明るい星から測れなければ None)

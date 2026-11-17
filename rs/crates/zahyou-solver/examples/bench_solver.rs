@@ -1,4 +1,4 @@
-//! 速さの物差し: Python 基準実装(dev/solver_core.py の sv_solve)と同じ星・同じ条件・同じ機械で解法の時間を比べる。
+//! 速さのベンチマーク: Python 基準実装(dev/solver_core.py の sv_solve)と同じ星・同じ条件・同じマシンで解法の時間を比べる。
 //!
 //! ```text
 //! cargo run --release -p zahyou-solver --example bench_solver [-- [--repeat 3] [--cases ra0,few20] [--out 結果.json]
@@ -7,17 +7,17 @@
 //! ```
 //!
 //! 測るもの(星と条件は rs/testdata の solver_real.json・solver_synth.json。gen_solver.py が Python で作ったもの)
-//! - 基準の実写 real_orig(968×548、深い検出の星)を ブラインド・ヒント(目標 5°)・スケール既知(正解 ×0.75〜1.25)で
+//! - 基準の実写 real_orig(968×548、ディープ検出の星)を ブラインド・ヒント(目標 5°)・スケール既知(正解 ×0.75〜1.25)で
 //! - 合成の難しい場合: ra0(赤経 0° をまたぐ、ブラインド)・tile_corner(タイルの角)・polein(視野に極)・few20(星 20 個)、
 //!   ほかに bb(全天ブラインド)・w25deg(横 25°)・many300(星 300 個)・rot090
 //! - 利用者の経路 solve_offline(画像が手元にあれば。zahyou-image の読み込み・前処理・検出は含めない)
-//! - 解けない星野(rand60、締め切り 5 秒)の締め切りの超過
+//! - 解けない星野(rand60、タイムアウト 5 秒)のタイムアウトの超過
 //!
 //! Python の秒は、--python を渡せば rs/testdata/bench_solver.py が書いた JSON(同じ名前の項目。repeat 回の最短)、
 //! 無ければ solver_*.json に入っている参考値(gen_solver.py が同じ PC で測ったもの。実写の 3 条件は 3 回の最短、
 //! 合成は trace つきの 1 回なので少し遅め)。
-//! Rust は --repeat 回(既定 3)の最短。Python と同じ答え(索引と対数オッズ)になったかも出す。
-//! 星図データは C:\AstrometryData(ZAHYOU_INDEX_DIR)、基準値は rs/testdata(ZAHYOU_TESTDATA)。
+//! Rust は --repeat 回(既定 3)の最短。Python と同じ答え(インデックスと対数オッズ)になったかも出す。
+//! インデックスファイルは C:\AstrometryData(ZAHYOU_INDEX_DIR)、基準値は rs/testdata(ZAHYOU_TESTDATA)。
 //! 画像は $ZAHYOU_TEST_IMAGES(既定はホームフォルダー)。
 
 use std::path::PathBuf;
@@ -27,8 +27,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-/// "$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を base からの相対で実際のパスに。`Downloads/…` がそこに無ければ、同じ並びの控え
-/// (作者の PC の `Documents/claude/zahyou/testdata/images/` の下。Downloads を整理するので写してある。2026-10-29)も見る
+/// "$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を base からの相対で実際のパスに。`Downloads/…` がそこに無ければ、同じ並びのコピー
+/// (作者の PC の `Documents/claude/zahyou/testdata/images/` の下。Downloads を整理するのでコピーしてある。2026-10-29)も見る
 /// (dev/test_solver_real.py の images_path と同じ決まり)。
 fn images_path(base: PathBuf, rest: &str) -> PathBuf {
     let p = rest.split('/').fold(base.clone(), |b, s| b.join(s));
@@ -92,7 +92,7 @@ fn restricted(ids: &[u32]) -> Catalog {
     c
 }
 
-/// 1 回解く(締め切り sec 秒)。戻り値 (解, 秒)。
+/// 1 回解く(タイムアウト sec 秒)。戻り値 (解, 秒)。
 fn solve_timed(req: &SolveRequest, cat: &Catalog, sec: f64) -> (Option<Solution>, f64, bool) {
     let cancel = AtomicBool::new(false);
     let log = |_: &str| {};
@@ -305,7 +305,7 @@ fn main() -> ExitCode {
             let what = format!("{w}×{h} 合成・{}", c["what"].as_str().unwrap_or(""));
             bench_req(&mut rows, name, &what, &req, cref, repeat, py["seconds"].as_f64(), py["solution"]["index"].as_str(), py["solution"]["logodds"].as_f64());
         }
-        // 解けない星野の締め切りの超過
+        // 解けない星野のタイムアウトの超過
         if let Some(c) = syn["cases"].as_array().unwrap().iter().find(|c| c["name"] == "rand60")
             && want("rand60")
         {
@@ -341,7 +341,7 @@ fn main() -> ExitCode {
     println!("{:<26} {:>10} {:>10} {:>8}  内容", "項目", "Rust [s]", "Python [s]", "倍率");
     let mut arr = Vec::new();
     for r in &rows {
-        // 締め切りまで探す項目は倍率を出さない(どちらも締め切りの秒になる)
+        // タイムアウトまで探す項目は倍率を出さない(どちらもタイムアウトの秒数になる)
         let ratio = r.python_s.filter(|_| !r.name.ends_with(":deadline")).map(|p| p / r.rust_s);
         println!(
             "{:<26} {:>10.4} {:>10} {:>8}  {}  {}{}",

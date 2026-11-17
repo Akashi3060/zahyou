@@ -1,9 +1,9 @@
-//! Python 版の試験(dev/test_solver_wcs.py)の 12〜14 と同じ性質を、乱数の WCS で確かめる。
+//! Python 版のテスト(dev/test_solver_wcs.py)の 12〜14 と同じ性質を、乱数の WCS で確かめる。
 //! あわせて、壊れた入力(NaN・巨大な値・壊れたヘッダー)でパニックしないことを確かめる。照合用の JSON は使わない。
 
 use zahyou_wcs::*;
 
-/// 試験用の決まった乱数(xorshift64*)。
+/// テスト用の決まった乱数(xorshift64*)。
 struct Rng(u64);
 impl Rng {
     fn next(&mut self) -> u64 {
@@ -199,7 +199,7 @@ fn lsq_noise_free_recovers_truth_everywhere() {
 
 #[test]
 fn lsq_zero_weights_are_ignored() {
-    // Python の 13: 重み 0 の外れ値は無視され、その点を消して当てたものと同じになる
+    // Python の 13: 重み 0 の外れ値は無視され、その点を消してフィットしたものと同じになる
     let mut rng = Rng(1301);
     let (truth, w, h) = random_config(&mut rng, 20, 2, Some(1.46));
     let n = 300;
@@ -295,7 +295,7 @@ fn broken_inputs_never_panic() {
     let f3 = [[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]];
     let s3 = [radec_to_xyz(0.0, 0.0), radec_to_xyz(0.01, 0.0), radec_to_xyz(0.0, 0.01)];
     assert!(fit_wcs_lsq(&f3, &s3, None, None, usize::MAX, None, usize::MAX, None).is_none());
-    // 当てはめ
+    // フィット
     for _ in 0..500 {
         let n = (rng.next() % 12) as usize;
         let f: Vec<[f64; 2]> = (0..n).map(|_| [pick(&mut rng), pick(&mut rng)]).collect();

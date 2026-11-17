@@ -16,8 +16,8 @@ bytemuck = "1"
 rayon = "1.10"
 
 [dev-dependencies]
-# 試験で Python の基準値(JSON)を読む。float_roundtrip で実数をビットまで同じに戻す
+# テストで Python の基準値(JSON)を読む。float_roundtrip で実数をビットまで同じに戻す
 serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = "0.10"
-# 速さの物差し(examples/bench_index.rs)でプライベートメモリを読む
+# 速さのベンチマーク(examples/bench_index.rs)でプライベートメモリを読む
 memory-stats = "1"

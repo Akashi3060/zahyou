@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-解法の速さの物差し(Python 側)。examples/bench_solver.rs と同じ星・同じ条件を Python 基準実装の sv_solve で測る。
+解法の速さのベンチマーク(Python 側)。examples/bench_solver.rs と同じ星・同じ条件を Python 基準実装の sv_solve で測る。
 
   python -B bench_solver.py [--repeat 3] [--cases real_orig:blind,ra0,...] [--out py.json] [--index-dir C:\\AstrometryData]
   cargo run --release -p zahyou-solver --example bench_solver -- --python py.json      (Rust 側。この JSON の秒と並べる)
 
 星と条件は rs/testdata の solver_real.json・solver_synth.json(gen_solver.py が作ったもの)から読むので、
 Rust と Python はビットまで同じ入力を解く。項目の名前は bench_solver.rs と同じ:
-  <tag>:blind / <tag>:hint / <tag>:scale   基準の実写(real_orig、深い検出の星)をブラインド・ヒント 5°・スケール既知(正解 ×0.75〜1.25)
-  <tag>:solve_offline                     利用者の経路(試行のはしご。画像が手元にあるときだけ。読み込み・前処理・検出は含めない)
+  <tag>:blind / <tag>:hint / <tag>:scale   基準の実写(real_orig、ディープ検出の星)をブラインド・ヒント 5°・スケール既知(正解 ×0.75〜1.25)
+  <tag>:solve_offline                     本番の経路(段階的な試行。画像が手元にあるときだけ。読み込み・前処理・検出は含めない)
   ra0・tile_corner・polein・few20・bb・w25deg・many300・rot090   合成の難しい場合(only の系列に絞った目録で)
-  rand60:deadline                         解けない星野(ブラインド、締め切り 5 秒)の超過
+  rand60:deadline                         解けない星野(ブラインド、タイムアウト 5 秒)の超過
 
 秒は repeat 回の最短(1 回で 20 秒を超えるものは繰り返さない)。trace は書かない(書くと遅くなる)。
 利用者のファイル(%LOCALAPPDATA%\\zahyou)は使わない(gen_solver.py を読み込むと一時フォルダーに向く)。
@@ -108,7 +108,7 @@ def main():
             hint = None if b["hint"] is None else tuple(b["hint"])
             t, sol = solve_best(sc, st[:, :2], st[:, 2], W, H, cat, b["scale_lo"], b["scale_hi"], hint, args.repeat)
             rows.append(row(name, f"{W}×{H} 実写・深い検出の星 {len(st)} 個・{b['label']}", t, sol))
-        # 利用者の経路(画像があれば。検出までは時間に入れない)
+        # 本番の経路(画像があれば。検出までは時間に入れない)
         name = f"{img['tag']}:solve_offline"
         path = gs.image_path(img, os.environ.get("ZAHYOU_PY_REPO", gs.DEFAULT_PY_REPO))
         if want(name) and os.path.isfile(path):

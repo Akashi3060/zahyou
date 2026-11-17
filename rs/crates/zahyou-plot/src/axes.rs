@@ -5,7 +5,7 @@
 //! 2. 目盛りの間隔(`AngleFormatterLocator.locator`): 範囲 / 5 に近い「きりのよい値」。
 //!    赤経は時分秒(1・2・3・4・5・6・10・12・15・20・30 と 1〜24 時)、赤緯は度分秒(1・2・3・5・10・15・20・30 と 1〜360°)。
 //! 3. 格子の線(`_update_grid_lines`): 目盛りの値ごとに、もう一方の座標を範囲いっぱいに 1000 点とって画素へ写す。
-//!    往復して戻らない点・飛び(前の歩みの 10 倍)で線を切る(`get_lon_lat_path`)。最後に枠で切り取る。
+//!    往復して戻らない点・飛び(前のステップの 10 倍)で線を切る(`get_lon_lat_path`)。最後に枠で切り取る。
 //! 4. 目盛り(`_update_ticks`): 枠の 4 辺を 1000 点ずつ天へ写し、目盛りの値をまたぐ所を線形補間で求める。
 //!    向きは座標の等値線の向き(外向きに 3.5 pt)。
 //! 5. 文字(`formatter`・`simplify_labels`): 間隔に合わせて項目数を決め(1° 以上なら度だけ、1′ 以上なら度分…)、
@@ -29,9 +29,9 @@ const FRAME_SAMPLES: usize = 1000;
 const GRID_SAMPLES: usize = 1000;
 /// 目盛りの数の目安(AngleFormatterLocator の number)
 const TICK_NUMBER: f64 = 5.0;
-/// 往復のずれの許し(標本の間隔に対する比。grid_paths.ROUND_TRIP_RTOL)
+/// 往復のずれの許容値(標本の間隔に対する比。grid_paths.ROUND_TRIP_RTOL)
 const ROUND_TRIP_RTOL: f64 = 1.0;
-/// 飛びとみなす歩みの比(grid_paths.DISCONT_FACTOR)
+/// 飛びとみなすステップの比(grid_paths.DISCONT_FACTOR)
 const DISCONT_FACTOR: f64 = 10.0;
 /// 目盛りが多すぎるとき(壊れた WCS)の打ち切り
 const MAX_TICKS: i64 = 1000;
@@ -63,7 +63,7 @@ impl Side {
     pub const ALL: [Side; 4] = [Side::Bottom, Side::Right, Side::Top, Side::Left];
 }
 
-/// 目盛り 1 本(枠の上の印)。
+/// 目盛り 1 本(枠の上のマーク)。
 #[derive(Clone, Debug, PartialEq)]
 pub struct Tick {
     /// 0 = 赤経、1 = 赤緯
@@ -84,7 +84,7 @@ pub struct TickLabel {
     pub side: Side,
     /// 目盛りの位置(画像の座標)。文字はここから辺の外側へ離して置く
     pub pos: [f64; 2],
-    /// 文字。赤経の時分秒の印は上付きの文字 `ʰ` `ᵐ` `ˢ` で持つ(描くときは [`TickLabel::spans`] で小さく上に)
+    /// 文字。赤経の時分秒の記号は上付きの文字 `ʰ` `ᵐ` `ˢ` で持つ(描くときは [`TickLabel::spans`] で小さく上に)
     pub text: String,
     /// 座標の値(度)
     pub world: f64,
@@ -98,7 +98,7 @@ pub struct TextSpan {
 }
 
 impl TickLabel {
-    /// 上付きの印 `ʰ` `ᵐ` `ˢ` を、上付きの `h` `m` `s` に分けた並び(WCSAxes の `$\mathregular{^h}$` に当たる)。
+    /// 上付きの記号 `ʰ` `ᵐ` `ˢ` を、上付きの `h` `m` `s` に分けた並び(WCSAxes の `$\mathregular{^h}$` に当たる)。
     pub fn spans(&self) -> Vec<TextSpan> {
         split_superscripts(&self.text)
     }
@@ -118,7 +118,7 @@ fn sup_to_plain(c: char) -> Option<char> {
     }
 }
 
-/// 上付きの印を分ける。
+/// 上付きの記号を分ける。
 pub fn split_superscripts(text: &str) -> Vec<TextSpan> {
     let mut out: Vec<TextSpan> = Vec::new();
     for c in text.chars() {
@@ -224,7 +224,7 @@ fn screen_scale(w: f64, h: f64) -> f64 {
     if k.is_finite() && k > 0.0 { k } else { 1.0 }
 }
 
-/// 画素 ↔ 天の写し(SIP は常にニュートン法で解く。astropy の all_world2pix と同じく近似を使わない)。
+/// 画素 ↔ 天の変換(SIP は常にニュートン法で解く。astropy の all_world2pix と同じく近似を使わない)。
 ///
 /// 点はまとめて写す(格子の線 1 本・枠の 1 辺・範囲の 51×51 点ごと)。zahyou-wcs の `*_batch` は接点の基底と
 /// CD⁻¹ を 1 回だけ計算し、点ごとには単発の `pix_to_xyz`・`xyz_to_pix(_exact)` と同じ関数を同じ値の基底で
@@ -1009,7 +1009,7 @@ pub fn grid_for_view(wcs: &Wcs, width: usize, height: usize, view: &View) -> Gri
     grid
 }
 
-/// 旧版(点ごとに写す)の格子の作り方と、新版と Grid がビット単位で同じかを確かめる試験(axes/reference.rs)
+/// 旧版(点ごとに写す)の格子の作り方と、新版と Grid がビット単位で同じかを確かめるテスト(axes/reference.rs)
 #[cfg(test)]
 mod reference;
 

@@ -6,7 +6,7 @@
     python rs/tools/check_licenses.py --list     # クレートごとの判定も全部出す
 
 見るもの:
-1. exe に入るクレート(cargo metadata、ターゲット x86_64-pc-windows-gnu。ビルドだけ・試験だけのものは除く)の
+1. exe に入るクレート(cargo metadata、ターゲット x86_64-pc-windows-gnu。ビルドだけ・テストだけのものは除く)の
    ライセンス式が、許可リストのライセンスだけで満たせるか。GPL・LGPL・AGPL・MPL などが要る式は失敗。
    式が無いもの・読めないものも失敗(中身を人が確かめて、ここの OVERRIDES に書くまで)
 2. C やアセンブリをビルドするクレート(cc などをビルド依存に持つもの)が、確かめ済みのもの(ring)だけか
@@ -48,7 +48,7 @@ COPYLEFT = re.compile(r"GPL|MPL|EUPL|CDDL|EPL|SSPL|OSL|CPAL|BUSL|Commons-Clause|
 # C やアセンブリをビルドしてよいクレート(中身を確かめたもの)。
 # ring: TLS の暗号。自分の C とアセンブリを cc で組み立てて静的に結合する(システムの C ライブラリへの FFI ではない)
 ALLOWED_NATIVE = {"ring"}
-# ライセンス式が無い・読めないクレートを、人が確かめて書き足すところ: {(名前, 版): 式}
+# ライセンス式が無い・読めないクレートを、人が確かめて書き足すところ: {(名前, バージョン): 式}
 OVERRIDES: dict[tuple[str, str], str] = {}
 
 

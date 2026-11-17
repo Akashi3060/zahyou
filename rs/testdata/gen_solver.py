@@ -13,19 +13,19 @@ dev/ のファイルは読むだけで書き換えない(trace は一時フォ�
                       (足した星ごとの quad の並び)、画像側のコードと正準化・鏡像の形(sv_code_variants)、
                       AB の範囲、検証の積み上げ(1 対 1 の付け替えを含む sv_verify_core)、一致の重み、F 分布の点、
                       HEALPix の 1 辺、解の判定(sv_accept_logodds・sv_tuneup_accepted)と見送った候補のまとめ(sv_passed_note)、
-                      4 点の当てはめ(束)、検証の対数オッズ(sv_verify_wcs。真の WCS・乱数の WCS・
-                      回転・鏡像、quad あり・なし。索引が要る)
+                      4 点のフィット(バッチ)、検証の対数オッズ(sv_verify_wcs。真の WCS・乱数の WCS・
+                      回転・鏡像、quad あり・なし。インデックスが要る)
   solver_synth.json   合成星野(dev/test_solver_synth.py の場合から代表。星は solver_synth.py が種で作る)と、
-                      Python の sv_solve の結果(解いた索引・quad の 4 点・対数オッズ・一致数・最終の WCS・試した quad の数・
-                      束ごとの経過・最初の nhyp 個の仮説の 4 点の WCS と対数オッズ)。乱数の星野(解けてはいけない)も入れる。
-                      選んだ索引の一覧は数と sha256(改行でつないだ名前)だけ(24 本以下なら名前も)
+                      Python の sv_solve の結果(解いたインデックス・quad の 4 点・対数オッズ・一致数・最終の WCS・試した quad の数・
+                      バッチごとの経過・最初の nhyp 個の仮説の 4 点の WCS と対数オッズ)。乱数の星野(解けてはいけない)も入れる。
+                      選んだインデックスの一覧は数と sha256(改行でつないだ名前)だけ(24 本以下なら名前も)
   solver_real.json    実写(dev/solver_truth.json の画像。手元にあるものだけ)の星のリスト(load_image_any → preprocess →
-                      detect_sources(min_sources=60) / detect_sources_deep)と、solve_offline と同じ試行のはしごを
+                      detect_sources(min_sources=60) / detect_sources_deep)と、solve_offline と同じ段階的な試行を
                       sv_solve で順に解いた結果(解けた試行は trace の要点つき)、solve_offline そのものの結果
 
 決まり:
-  - 締め切りは十分に長く(既定 600 秒)とり、Python が締め切りで止まらないようにする(止まると結果が時間しだいになる)。
-    締め切りに当たった試行は "status": "deadline" と書く(Rust の試験はその試行を突き合わせない)。
+  - タイムアウトは十分に長く(既定 600 秒)とり、Python がタイムアウトで止まらないようにする(止まると結果が時間しだいになる)。
+    タイムアウトになった試行は "status": "deadline" と書く(Rust のテストはその試行を突き合わせない)。
   - 仮説の対数オッズ・スケールは trace では丸めて書かれるので、solver_core の名前空間の round を差し替えて
     丸めずに書かせる(探索の中身には round を使っていない)。
   - JSON に NaN・無限大は書かない(null にする)。乱数の入力は小数 2〜3 桁に丸めてから Python に渡す
@@ -74,7 +74,7 @@ SYNTH_CASES = ["s5202", "s5205", "s5206", "s4107", "s4110", "t4111", "t4113", "t
                "w10deg", "w25deg", "rot090", "rot211", "mir000", "mir152", "tile_edge", "tile_corner", "ra0",
                "polein", "pole89_h", "south60_h", "ra0_h", "hs", "hb", "bs", "bb", "sip_pin", "sip_bar", "few20",
                "many300", "wide30_s12", "rand60", "rand300", "rand_hint"]
-NEG_DEADLINE = 15.0                     # 乱数の星野を Python で確かめる締め切り [秒](解なしの確認だけ)
+NEG_DEADLINE = 15.0                     # 乱数の星野を Python で確かめるタイムアウト [秒](解なしの確認だけ)
 
 
 # ------------------------------------------------------------------ 道具 ---
@@ -115,7 +115,7 @@ def sha256_file(path):
 
 
 def sha_stars(stars):
-    """星のリスト [(x, y, flux)] を '<f8' のバイト列にした sha256(Rust の試験で同じ値を作れる)。"""
+    """星のリスト [(x, y, flux)] を '<f8' のバイト列にした sha256(Rust のテストで同じ値を作れる)。"""
     a = np.asarray(stars, dtype="<f8").reshape(-1, 3)
     return hashlib.sha256(a.tobytes()).hexdigest()
 
@@ -137,7 +137,7 @@ def setup(dev):
 
 
 def restrict(catalog, ids):
-    """目録のうち系列 ids だけを見せる写し(ファイルは共有)。test_solver_synth.restrict と同じ。"""
+    """目録のうち系列 ids だけを見せるコピー(ファイルは共有)。test_solver_synth.restrict と同じ。"""
     import copy
     c = copy.copy(catalog)
     c.series = {i: catalog.series[i] for i in ids if i in catalog.series}
@@ -268,7 +268,7 @@ def gen_parts(sw, si, sc, ss, catalog):
                           variants=var))
     out["codes"] = codes
 
-    # (d) quad の AB の範囲(sv_quad_ab_range)。段の値は手元の索引のヘッダー(無ければ設計の値)
+    # (d) quad の AB の範囲(sv_quad_ab_range)。スケールの値(SCALE_L・SCALE_U)は手元のインデックスのヘッダー(無ければ設計の値)
     r = np.random.default_rng(104)
     ab = []
     for iid, lo_am, hi_am in ((5202, 4.0, 5.6), (5206, 16.0, 22.0), (4108, 30.0, 42.0), (4113, 170.0, 240.0)):
@@ -368,7 +368,7 @@ def gen_parts(sw, si, sc, ss, catalog):
     # (accept_hyps0 = 1e-300)解かせる。正しい候補も見送り、quad を試し尽くして最後の行にまとめが出る(時刻によらない)
     out["passed_solve"] = gen_passed_solve(sw, si, sc, ss, catalog) if catalog is not None else None
 
-    # (g) 4 点の当てはめを束で(sv_fit_similarity_many)
+    # (g) 4 点のフィットをバッチで(sv_fit_similarity_many)
     r = np.random.default_rng(106)
     F_, S_ = [], []
     for h in range(16):
@@ -388,13 +388,13 @@ def gen_parts(sw, si, sc, ss, catalog):
                              crpix=fit["crpix"].tolist(), cd=fit["cd"].tolist(), scale=fit["scale"].tolist(),
                              ok=[bool(v) for v in fit["ok"]])
 
-    # (h) 検証の対数オッズ(sv_verify_wcs。索引が要る)
+    # (h) 検証の対数オッズ(sv_verify_wcs。インデックスが要る)
     out["verify"] = gen_verify(sw, si, sc, ss, catalog) if catalog is not None else []
     return out
 
 
 def gen_passed_solve(sw, si, sc, ss, catalog):
-    """改良の後の判定で候補を見送らせて試し尽くした探索の、最後のログの行(秒の所は試験の側で伏せる)。"""
+    """改良の後の判定で候補を見送らせて試し尽くした探索の、最後のログの行(秒の所はテストの側で伏せる)。"""
     iid = 5205
     if iid not in catalog.series:
         return None
@@ -478,7 +478,7 @@ def summarize_trace(t, nhyp, sc, sw):
                                nfield=s["nfield"], nref=s["nref"], quad_field=s["quad_field"],
                                quad_index=s["quad_index"], wcs=s["wcs"],
                                matches=[[int(m[0]), float(m[2])] for m in s["matches"]])
-        # 解いた quad の仮説(4 点の当てはめ)が仮説の記録の何番目か
+        # 解いた quad の仮説(4 点のフィット)が仮説の記録の何番目か
         for k, h in enumerate(hl):
             if (h["quad_field"] == s["quad_field"] and h["quad_index"] == s["quad_index"]
                     and h["index"] == s["index"]):
@@ -566,8 +566,8 @@ def gen_synth(sw, si, sc, ss, catalog, dev, args):
 
 
 def gen_corrupt_field(sw, si, sc, ss, catalog, args):
-    """壊れた索引の試験の星野(test_solver_core の case_17 と同じ: 横 40°・2000×1300・赤経 150°・赤緯 20°・種 2)。
-    Rust の試験は index-4113〜4117 を一時フォルダーに写し、4116 の中身を壊して解く。壊さないときの Python の解も書く。"""
+    """壊れたインデックスのテストの星野(test_solver_core の case_17 と同じ: 横 40°・2000×1300・赤経 150°・赤緯 20°・種 2)。
+    Rust のテストは index-4113〜4117 を一時フォルダーにコピーし、4116 の中身を壊して解く。壊さないときの Python の解も書く。"""
     need = (4113, 4114, 4115, 4116, 4117)
     if any(i not in catalog.series for i in need):
         return None
@@ -589,13 +589,13 @@ def gen_corrupt_field(sw, si, sc, ss, catalog, args):
 
 # ------------------------------------------------------------------ 実写 ---
 
-# Downloads の試験画像の控え(作者の PC では Downloads を整理するので、試験が読む元の画像を同じ並びで写してある。2026-10-29)
+# Downloads のテスト画像のコピー(作者の PC では Downloads を整理するので、テストが読む元の画像を同じ並びでコピーしてある。2026-10-29)
 TEST_IMAGES_COPY = ("Documents", "claude", "zahyou", "testdata", "images")
 
 
 def images_path(rest):
     """"$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を実際のパスに。ZAHYOU_TEST_IMAGES(無ければホームフォルダー)からの相対で、
-    Downloads/… がそこに無ければ、同じ並びの控え(TEST_IMAGES_COPY の下)も見る。"""
+    Downloads/… がそこに無ければ、同じ並びのコピー(TEST_IMAGES_COPY の下)も見る。"""
     base = os.environ.get("ZAHYOU_TEST_IMAGES") or os.path.expanduser("~")
     parts = rest.split("/")
     p = os.path.join(base, *parts)
@@ -617,7 +617,7 @@ def image_path(e, py_repo):
 
 
 def attempts_of(zc, bundle, deep, std, hint_radec, hint_radius_deg, installed):
-    """solve_offline と同じ試行のはしご(ラベル, 星の組の名前, ヒント, (s_lo, s_hi), 残り時間の割合)。"""
+    """solve_offline と同じ段階的な試行(ラベル, 星の組の名前, ヒント, (s_lo, s_hi), 残り時間の割合)。"""
     ny, nx = bundle.shape
     scale, how = zc.estimate_pixel_scale(bundle.header, None, bundle.shape)
     hint = None
@@ -733,7 +733,7 @@ def gen_real(sw, si, sc, ss, catalog, dev, args):
                 continue
         rec["attempts"] = runs
         rec["solved_attempt"] = solved
-        # 速さの物差し(examples/bench_solver.rs)の条件: 基準の画像の深い検出の星で、ブラインド・ヒント・スケール既知。
+        # 速さのベンチマーク(examples/bench_solver.rs)の条件: 基準の画像のディープ検出の星で、ブラインド・ヒント・スケール既知。
         # 秒は参考値(この PC で sv_solve を 3 回回した最短。Rust 側は同じ星・同じ条件で測る)
         if base and e["tag"] == base["image"] and hint is None and e.get("truth"):
             s_true = float(e["truth"]["scale_arcsec"])
@@ -758,7 +758,7 @@ def gen_real(sw, si, sc, ss, catalog, dev, args):
                                   hypotheses=t["hypotheses"]))
                 print(f"  bench {label}: {best:.3f} s {t['status']}", flush=True)
             rec["bench"] = bench
-        # solve_offline そのもの(利用者の経路。ログの試行の行と、返したヘッダーの WCS)
+        # solve_offline そのもの(本番の経路。ログの試行の行と、返したヘッダーの WCS)
         logbuf = io.StringIO()
         t1 = time.monotonic()
         with contextlib.redirect_stdout(logbuf):

@@ -1,4 +1,4 @@
-//! 更新の確認・ダウンロード・入れ替えの試験(localhost のサーバーと、一時フォルダーの偽の exe)。
+//! 更新の確認・ダウンロード・入れ替えのテスト(localhost のサーバーと、一時フォルダーの偽の exe)。
 mod common;
 
 use common::*;
@@ -43,7 +43,7 @@ fn check_states_and_messages() {
     let api = format!("{}/repos/x/releases/latest", srv.url());
     let check = |ver: &str| check_update_at(&api, &exe, ver, Duration::from_secs(5), &|| false);
 
-    // 新しい版がある(Python の文言と同じ)
+    // 新しいバージョンがある(Python の文言と同じ)
     *body.lock().unwrap() = release_json("https://x/zahyou.exe", 107288075, Some("5F771F339432588395171ACD2FD8EC8C7C94080419A38B0D703594C5238E3605"));
     let st = check("v6");
     assert_eq!(st.state, UpdateState::Available);
@@ -72,7 +72,7 @@ fn check_states_and_messages() {
     if let Some(py) = &py {
         assert_eq!(st.message, py["update"]["messages"]["dev"].as_str().unwrap());
     }
-    // 資産が無い・つながらない → Error
+    // アセットが無い・つながらない → Error
     *body.lock().unwrap() = "{\"assets\": []}".into();
     let st = check("v6");
     assert_eq!(st.state, UpdateState::Error);
@@ -91,7 +91,7 @@ fn check_states_and_messages() {
 
 #[test]
 fn download_checks_size_and_sha() {
-    // 3.5 MiB の偽の exe(1 MiB ずつ書く・区切り 8 MiB の中で 1 回切れる)
+    // 3.5 MiB の偽の exe(1 MiB ずつ書く・セグメント 8 MiB の中で 1 回切れる)
     let data: Arc<Vec<u8>> = Arc::new((0..3_500_000u32).map(|i| (i.wrapping_mul(2654435761) >> 13) as u8).collect());
     let cuts = Counter::default();
     let (d, c) = (data.clone(), cuts.clone());
@@ -153,7 +153,7 @@ fn system_exe(name: &str) -> Option<PathBuf> {
     p.exists().then_some(p)
 }
 
-/// 動いている exe を改名して入れ替え、起動し直す。偽の exe は Windows の ping.exe と cmd.exe の写し。
+/// 動いている exe を改名して入れ替え、起動し直す。偽の exe は Windows の ping.exe と cmd.exe のコピー。
 #[test]
 fn apply_swaps_running_exe_and_relaunches() {
     let (Some(ping), Some(cmd)) = (system_exe("PING.EXE"), system_exe("cmd.exe")) else {
@@ -165,7 +165,7 @@ fn apply_swaps_running_exe_and_relaunches() {
     let new = dir.join("zahyou.exe.new");
     std::fs::copy(&ping, &exe).unwrap();
     std::fs::copy(&cmd, &new).unwrap();
-    // 「今の版」を動かしておく(約 3 秒)
+    // 「今のバージョン」を動かしておく(約 3 秒)
     let mut running = Command::new(&exe)
         .args(["-n", "4", "127.0.0.1"])
         .stdout(Stdio::null())
@@ -216,7 +216,7 @@ fn apply_without_relaunch_and_leftover_old() {
     let _ = Path::new("");
 }
 
-/// GitHub の資産の URL は別のホストへ 302 で飛ばす。飛んだ先にも Range と User-Agent が届き、続きから落とせること。
+/// GitHub のアセットの URL は別のホストへ 302 で飛ばす。飛んだ先にも Range と User-Agent が届き、続きからダウンロードできること。
 #[test]
 fn download_follows_redirect_with_range() {
     let data: Arc<Vec<u8>> = Arc::new((0..2_600_000u32).map(|i| (i.wrapping_mul(40503) >> 7) as u8).collect());
@@ -264,7 +264,7 @@ fn download_follows_redirect_with_range() {
 
 // ------------------------------------------------------------- β版の更新の確認 ---
 
-/// Releases の 1 件(一覧の項目)。`asset` が None なら資産 zahyou.exe が無い。
+/// Releases の 1 件(一覧の項目)。`asset` が None ならアセット zahyou.exe が無い。
 fn listed(tag: &str, prerelease: bool, draft: bool, asset: Option<(usize, &str)>) -> String {
     let assets = match asset {
         Some((size, digest)) => format!(
@@ -335,7 +335,7 @@ fn beta_checks_prereleases_in_the_list() {
     let check = |ver: &str| check_update_at(&api, &exe, ver, Duration::from_secs(5), &|| false);
     let beta1 = "v7.0.0-beta.1";
 
-    // 1. プレリリースだけ: 次のβ版がある → 新しい版あり(一覧だけを問い合わせ、latest は見ない)
+    // 1. プレリリースだけ: 次のβ版がある → 新しいバージョンあり(一覧だけを問い合わせ、latest は見ない)
     gh.set(&[listed("v7.0.0-beta.2", true, false, Some((14_000_000, &other))), listed(beta1, true, false, Some((13_900_000, &here)))]);
     let st = check(beta1);
     assert_eq!(st.state, UpdateState::Available, "{}", st.message);
@@ -346,13 +346,13 @@ fn beta_checks_prereleases_in_the_list() {
     assert_eq!(st.message, "新しいバージョンがあります: v7.0.0-beta.2 (2026-11-01 版 / 14 MB)");
     assert_eq!(gh.paths(), vec![LIST_PATH.to_string()]);
 
-    // 2. 正式版だけ: v7 の正式版はβ版より新しい → 新しい版あり
+    // 2. 正式版だけ: v7 の正式版はβ版より新しい → 新しいバージョンあり
     gh.set(&[listed("v7.0.0", false, false, Some((14_100_000, &other)))]);
     let st = check(beta1);
     assert_eq!(st.state, UpdateState::Available, "{}", st.message);
     assert_eq!(st.release.unwrap().tag, "v7.0.0");
 
-    // 3. 両方(新しい順に並ぶが、いちばん上が最も新しい版とは限らないので semver で選ぶ)
+    // 3. 両方(新しい順に並ぶが、いちばん上が最も新しいバージョンとは限らないので semver で選ぶ)
     gh.set(&[
         listed("v7.0.0-beta.3", true, false, Some((1, &other))),
         listed("v6.3", false, false, Some((107_000_000, &other))),
@@ -370,7 +370,7 @@ fn beta_checks_prereleases_in_the_list() {
     gh.set(&[listed("v7.1.0-beta.1", true, false, Some((1, &other))), listed("v7.0.0", false, false, Some((2, &other)))]);
     assert_eq!(check(beta1).release.unwrap().tag, "v7.1.0-beta.1");
 
-    // 4. v6 のタグだけ → 新しい版なし(exe のハッシュも計算しない)
+    // 4. v6 のタグだけ → 新しいバージョンなし(exe のハッシュも計算しない)
     gh.set(&[listed("v6.3", false, false, Some((107_000_000, &other))), listed("v6.2", false, false, Some((107_000_000, &other)))]);
     let st = check(beta1);
     assert_eq!(st.state, UpdateState::UpToDate, "{}", st.message);
@@ -382,7 +382,7 @@ fn beta_checks_prereleases_in_the_list() {
     gh.set(&[]);
     assert_eq!(check(beta1).state, UpdateState::UpToDate);
 
-    // 5. 今と同じ版だけ → 最新版(公開日つき)。古いβ版・α版も新しい版ではない
+    // 5. 今と同じバージョンだけ → 最新版(公開日つき)。古いβ版・α版も新しいバージョンではない
     gh.set(&[listed(beta1, true, false, Some((4, &here))), listed("v7.0.0-alpha.3", true, false, Some((5, &other)))]);
     let st = check(beta1);
     assert_eq!(st.state, UpdateState::UpToDate);
@@ -403,13 +403,13 @@ fn beta_checks_prereleases_in_the_list() {
     assert_eq!(st.state, UpdateState::UpToDate, "{}", st.message);
     assert_eq!(st.message, "最新版です (v7.0.0-beta.1)。");
 
-    // 7. 新しい版の資産が同じ中身 → 最新版
+    // 7. 新しいバージョンのアセットが同じ中身 → 最新版
     gh.set(&[listed("v7.0.0-beta.2", true, false, Some((13, &here)))]);
     let st = check(beta1);
     assert_eq!(st.state, UpdateState::UpToDate);
     assert_eq!(st.message, "最新版です (v7.0.0-beta.2 / 2026-11-01 版)。");
 
-    // 8. 資産がまだ無い新しい版 → 出さない(準備中と知らせる)。資産のある、それより古い新しい版があればそれを出す
+    // 8. アセットがまだ無い新しいバージョン → 出さない(準備中と知らせる)。アセットのある、それより古い新しいバージョンがあればそれを出す
     gh.set(&[listed("v7.0.0-beta.3", true, false, None), listed(beta1, true, false, Some((4, &here)))]);
     let st = check(beta1);
     assert_eq!(st.state, UpdateState::UpToDate);
@@ -449,7 +449,7 @@ fn beta_check_with_broken_responses() {
         assert_eq!(st.state, UpdateState::Error, "{bad:?}");
         assert!(st.message.contains(want), "{bad:?}: {}", st.message);
     }
-    // 壊れた項目だけなら、その項目を使わないだけ(誤りにしない)
+    // 壊れた項目だけなら、その項目を使わないだけ(エラーにしない)
     *body.lock().unwrap() = "[null, 3, {\"tag_name\": \"v7.0.0\", \"assets\": null}]".into();
     let st = check_update_at(&api, &exe, "v7.0.0-beta.1", Duration::from_secs(5), &|| false);
     assert_eq!(st.state, UpdateState::UpToDate, "{}", st.message);
@@ -471,7 +471,7 @@ fn dev_versions_never_ask() {
     assert!(gh.paths().is_empty(), "問い合わせてしまった: {:?}", gh.paths());
 }
 
-/// 正式版(プレリリースでない版名)は今までどおり latest だけを見る。latest が今より古い版なら戻さない
+/// 正式版(プレリリースでないバージョン名)は今までどおり latest だけを見る。latest が今より古いバージョンなら戻さない
 #[test]
 fn release_versions_use_latest_only() {
     let dir = temp_dir("upd-stable");
@@ -491,7 +491,7 @@ fn release_versions_use_latest_only() {
     assert_eq!(gh.paths(), vec![LATEST_PATH.to_string()]);
     gh.set(&[listed("v7.0.0-beta.2", true, false, Some((1, &other))), listed("v6.3", false, false, Some((2, &here)))]);
     assert_eq!(check("v6.3").state, UpdateState::UpToDate);
-    // β版しか無ければ(latest が 404)、正式版の利用者には確かめられないと出る(v6 の更新係も同じ)
+    // β版しか無ければ(latest が 404)、正式版の利用者には確かめられないと出る(v6 のアップデーターも同じ)
     gh.set(&[listed("v7.0.0-beta.2", true, false, Some((1, &other)))]);
     assert_eq!(check("v6.3").state, UpdateState::Error);
 
@@ -504,7 +504,7 @@ fn release_versions_use_latest_only() {
     // v7 の次の正式版は出す
     gh.set(&[listed("v7.0.1", false, false, Some((3, &other)))]);
     assert_eq!(check("v7.0.0").state, UpdateState::Available);
-    // 同じ版を建て直したもの(中身が違う)は今までどおり出す
+    // 同じバージョンをビルドし直したもの(中身が違う)は今までどおり出す
     gh.set(&[listed("v7.0.0", false, false, Some((3, &other)))]);
     assert_eq!(check("v7.0.0").state, UpdateState::Available);
     gh.set(&[listed("v7.0.0", false, false, Some((3, &here)))]);

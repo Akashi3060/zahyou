@@ -108,7 +108,7 @@ class HRule(Flowable):
 
 class TocMark(Flowable):
     """
-    目次に載せる項目の目印。高さ 0 なので紙面には何も出ない。
+    目次に載せる項目のマーカー。高さ 0 なので紙面には何も出ない。
     doc.afterFlowable がこれを見つけて、そのときのページ番号を目次へ渡す。
     """
 
@@ -144,8 +144,8 @@ def h2(text, st, num=None):
     return [TocMark(1, label), Paragraph(label, st.h2)]
 
 
-SPACE_DOT = colors.HexColor("#A9B6C2")     # 半角スペースの目印
-FULLWIDTH_BOX = colors.HexColor("#E0A33A")  # 全角スペース (打ち間違いのもと) の目印
+SPACE_DOT = colors.HexColor("#A9B6C2")     # 半角スペースのマーク
+FULLWIDTH_BOX = colors.HexColor("#E0A33A")  # 全角スペース (打ち間違いのもと) のマーク
 
 
 class CodeBox(Flowable):

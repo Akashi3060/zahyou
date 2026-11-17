@@ -1,4 +1,4 @@
-//! 星図データ(astrometry.net 形式の index-*.fits)の段・名前・URL と、落とす処理。
+//! インデックスファイル(astrometry.net 形式の index-*.fits)のスケール・名前・URL と、ダウンロードする処理。
 //!
 //! Python 版 gui/zahyou_env.py の SCALE_FOV / SCALE_MB / index_names / index_url / fov_arcmin /
 //! recommended_scales / recommend_scales / remote_sizes / fetch_index / check_index_file を移したもの。
@@ -16,7 +16,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-/// 画角の段(astrometry.net の付番規則。末尾 2 桁が画角 [分角])。(段, 下限′, 上限′)。並びは Python 版の辞書と同じ。
+/// スケールごとの画角(astrometry.net の付番規則。末尾 2 桁が画角 [分角])。(スケール, 下限′, 上限′)。並びは Python 版の辞書と同じ。
 pub const SCALE_FOV: &[(u32, f64, f64)] = &[
     (4107, 22.0, 30.0),
     (4108, 30.0, 42.0),
@@ -70,24 +70,24 @@ pub const LITE_BASE: &str = "https://portal.nersc.gov/project/cosmo/temp/dstn/in
 pub const G41_BASE: &str = "http://data.astrometry.net/4100";
 /// 5200 系は 48 分割(HEALPix nside=2)。
 pub const TILES: u32 = 48;
-/// 「おすすめ」= 画角の下限が 4′ 以上の段。
+/// 「おすすめ」= 画角の下限が 4′ 以上のスケール。
 pub const RECOMMENDED_MIN_FOV: f64 = 4.0;
 
 const BLOCK: usize = 2880;
-/// リトルエンディアン。ほかの値の索引は読めない
+/// リトルエンディアン。ほかの値のインデックスは読めない
 const ENDIAN: &str = "04:03:02:01";
 
-/// 段の画角 (下限′, 上限′)。
+/// スケールの画角 (下限′, 上限′)。
 pub fn scale_fov(scale: u32) -> Option<(f64, f64)> {
     SCALE_FOV.iter().find(|r| r.0 == scale).map(|r| (r.1, r.2))
 }
 
-/// 段のおおよその容量 [MiB]。
+/// スケールのおおよその容量 [MiB]。
 pub fn scale_mb(scale: u32) -> Option<u64> {
     SCALE_MB.iter().find(|r| r.0 == scale).map(|r| r.1)
 }
 
-/// その段ぜんぶで何 MiB になるか(表に無い段は 0)。
+/// それらのスケールぜんぶで何 MiB になるか(表に無いスケールは 0)。
 pub fn scales_mb(scales: &[u32]) -> u64 {
     scales.iter().map(|s| scale_mb(*s).unwrap_or(0)).sum()
 }
@@ -104,7 +104,7 @@ pub fn human(n: f64) -> String {
     format!("{n:.1} TB")
 }
 
-/// その段に含まれるファイル名の一覧。
+/// そのスケールに含まれるファイル名の一覧。
 pub fn index_names(scale: u32) -> Vec<String> {
     if scale >= 5200 {
         (0..TILES).map(|t| format!("index-{scale}-{t:02}.fits")).collect()
@@ -113,7 +113,7 @@ pub fn index_names(scale: u32) -> Vec<String> {
     }
 }
 
-/// 段とタイル番号から URL(Python の `index_url(scale, tile)`)。
+/// スケールとタイル番号から URL(Python の `index_url(scale, tile)`)。
 pub fn index_url_for(scale: u32, tile: Option<u32>) -> String {
     url_with(scale, tile, LITE_BASE, G41_BASE)
 }
@@ -126,7 +126,7 @@ fn url_with(scale: u32, tile: Option<u32>, lite: &str, g41: &str) -> String {
     }
 }
 
-/// ファイル名から URL。名前が索引ファイルの形でなければ、4100 系の置き場の下にそのまま付ける。
+/// ファイル名から URL。名前がインデックスファイルの形でなければ、4100 系の置き場の下にそのまま付ける。
 pub fn index_url(name: &str) -> String {
     match parse_index_name(name) {
         Some((s, t)) => index_url_for(s, t),
@@ -134,7 +134,7 @@ pub fn index_url(name: &str) -> String {
     }
 }
 
-/// `index-NNNN.fits` / `index-NNNN-TT.fits` を (段, タイル) に分ける(Python の `_INDEX_RE`)。
+/// `index-NNNN.fits` / `index-NNNN-TT.fits` を (スケール, タイル) に分ける(Python の `_INDEX_RE`)。
 pub fn parse_index_name(name: &str) -> Option<(u32, Option<u32>)> {
     let rest = name.strip_prefix("index-")?.strip_suffix(".fits")?;
     let digits = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_digit());
@@ -153,17 +153,17 @@ pub fn fov_arcmin(focal_mm: f64, sensor_mm: f64) -> Option<f64> {
     Some((2.0 * (sensor_mm / 2.0 / focal_mm).atan()).to_degrees() * 60.0)
 }
 
-/// おすすめの段(画角 4′ 以上)。焦点距離を聞かずに決められる。
+/// おすすめのスケール(画角 4′ 以上)。焦点距離を聞かずに決められる。
 pub fn recommended_scales() -> Vec<u32> {
     let mut v: Vec<u32> = SCALE_FOV.iter().filter(|r| r.1 >= RECOMMENDED_MIN_FOV).map(|r| r.0).collect();
     v.sort_unstable();
     v
 }
 
-/// その画角を解くのに要る段。導入誤差ぶん、前後 1 段ずつ足す(Python の `recommend_scales`)。
+/// その画角を解くのに要るスケール。導入誤差ぶん、前後 1 つずつ足す(Python の `recommend_scales`)。
 ///
-/// `fov_short` を渡すと短辺の画角から長辺の画角までをまとめて覆う。「前後 1 段」は画角の順で数える
-/// (4100 系と 5200 系は別のはしごなので、番号順では 4119 の隣が 5200 になってしまう)。
+/// `fov_short` を渡すと短辺の画角から長辺の画角までをまとめて覆う。「前後 1 つ」は画角の順で数える
+/// (4100 系と 5200 系は別の系列なので、番号順では 4119 の隣が 5200 になってしまう)。
 pub fn recommend_scales(fov: f64, fov_short: Option<f64>) -> Vec<u32> {
     if fov.is_nan() || fov <= 0.0 {
         return Vec::new();
@@ -179,7 +179,7 @@ pub fn recommend_scales(fov: f64, fov_short: Option<f64>) -> Vec<u32> {
     keys.sort_by(|a, b| (a.1, a.2).partial_cmp(&(b.1, b.2)).unwrap_or(std::cmp::Ordering::Equal));
     let mut hit: Vec<usize> = (0..keys.len()).filter(|&i| keys[i].2 >= lo_fov && keys[i].1 <= hi_fov).collect();
     if hit.is_empty() {
-        // 範囲外なら一番近い段(同じ距離なら先のもの)
+        // 範囲外なら一番近いスケール(同じ距離なら先のもの)
         let dist = |i: usize| (keys[i].1 - lo_fov).abs().min((keys[i].2 - hi_fov).abs());
         let mut best = 0;
         for i in 1..keys.len() {
@@ -202,7 +202,7 @@ pub fn recommend_scales(fov: f64, fov_short: Option<f64>) -> Vec<u32> {
     out
 }
 
-/// まだ落ちていないぶんの、おおよその容量 [byte](確認画面の目安用)。
+/// まだダウンロードしていないぶんの、おおよその容量 [byte](確認画面の目安用)。
 pub fn plan_size(scales: &[u32], dest: &Path) -> u64 {
     let mut need = 0.0f64;
     for &s in scales {
@@ -350,10 +350,10 @@ fn check_layout(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// 索引ファイルの追加の検査(Err は画面に出す理由)。
+/// インデックスファイルの追加の検査(Err は画面に出す理由)。
 pub type Validator<'a> = &'a dyn Fn(&Path) -> Result<(), String>;
 
-/// (正規化したパス, 大きさ, 更新時刻, 追加の検査の関数の番地。無ければ 0)
+/// (正規化したパス, 大きさ, 更新時刻, 追加の検査の関数のアドレス。無ければ 0)
 type CheckKey = (String, u64, u128, usize);
 
 fn checked() -> &'static Mutex<HashMap<CheckKey, Result<(), String>>> {
@@ -361,7 +361,7 @@ fn checked() -> &'static Mutex<HashMap<CheckKey, Result<(), String>>> {
     C.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// 索引ファイル 1 本を検査する(Python の `check_index_file`)。
+/// インデックスファイル 1 本を検査する(Python の `check_index_file`)。
 ///
 /// 見るのは、大きさがヘッダーから計算した長さと一致するか(途中で切れたダウンロードはここで分かる)、
 /// ENDIAN、INDEXID とファイル名の番号、5200 系の HEALPIX とタイル番号。中身(星や quad)までは読まない。
@@ -378,7 +378,7 @@ pub fn check_index_file(path: &Path, validate: Option<Validator>) -> Result<(), 
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     let abs = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-    // 関数の番地は鍵に使うだけ(読み書きはしない)
+    // 関数のアドレスはキーに使うだけ(読み書きはしない)
     let vkey = validate.map(|v| v as *const dyn Fn(&Path) -> Result<(), String> as *const () as usize).unwrap_or(0);
     let key = (abs.to_string_lossy().to_lowercase(), meta.len(), mtime, vkey);
     if let Some(hit) = checked().lock().ok().and_then(|m| m.get(&key).cloned()) {
@@ -407,15 +407,15 @@ pub fn check_index_file_full(path: &Path) -> Result<(), String> {
     check_index_file(path, Some(&validate_with_index))
 }
 
-// ================================================================ 落とす ===
+// ================================================================ ダウンロード ===
 
-/// 落とすときの設定。既定値は Python 版と同じ(取得元・HEAD 8 本並列・5 回まで再試行)。
+/// ダウンロードするときの設定。既定値は Python 版と同じ(取得元・HEAD 8 本並列・5 回まで再試行)。
 ///
 /// 検査だけは Python 版より強い: 既定で zahyou-index の検査([`validate_with_index`])も通す
 /// (Python 版の fetch_index は軽い検査だけ。解析のエンジンの検査は「状態を確認」のときだけだった)。
 #[derive(Clone)]
 pub struct FetchOptions<'a> {
-    /// 落としたファイルの追加の検査(既定は [`validate_with_index`]。None なら軽い検査だけ)
+    /// ダウンロードしたファイルの追加の検査(既定は [`validate_with_index`]。None なら軽い検査だけ)
     pub validate: Option<Validator<'a>>,
     pub lite_base: String,
     pub g41_base: String,
@@ -452,23 +452,23 @@ impl FetchOptions<'_> {
 /// [`fetch_index`] の結果。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FetchResult {
-    /// 落とすと決めたもの(既にあるものを除く)が全部そろった
+    /// ダウンロードすると決めたもの(既にあるものを除く)が全部そろった
     pub ok: bool,
     /// 中止した
     pub cancelled: bool,
-    /// これから落とすと決めたファイルの数
+    /// これからダウンロードすると決めたファイルの数
     pub planned: usize,
-    /// そのうち落とし終えた数
+    /// そのうちダウンロードし終えた数
     pub done: usize,
     /// 既にそろっていて飛ばした数
     pub already: usize,
-    /// 落とせなかったファイル名
+    /// ダウンロードできなかったファイル名
     pub failed: Vec<String>,
-    /// 落とす予定だった大きさ [byte]
+    /// ダウンロードする予定だった大きさ [byte]
     pub total_bytes: u64,
 }
 
-/// 落とす予定のファイルの実サイズを HEAD で調べる(8 本並列)。(名前, 大きさ or None) を入力の順で返す。
+/// ダウンロードする予定のファイルの実サイズを HEAD で調べる(8 本並列)。(名前, 大きさ or None) を入力の順で返す。
 ///
 /// 表に持っている目安(SCALE_MB)は 6% ほどずれていて、進み具合が 100% に届かなかったり超えたりする。
 /// 実物を聞いてから始める。`stop()` が真になったら、そこまでに分かったぶんだけ返す。
@@ -533,7 +533,7 @@ pub fn remote_sizes_urls(jobs: &[(String, String)], workers: usize, stop: &dyn F
         .collect()
 }
 
-/// 選んだ索引ファイルを `dest_dir` へ落とす(Python の `fetch_index`)。既定の取得元・軽い検査だけ。
+/// 選んだインデックスファイルを `dest_dir` へダウンロードする(Python の `fetch_index`)。既定の取得元・軽い検査だけ。
 ///
 /// `progress(done, total)` が呼ばれる(byte)。`stop()` が真を返したら止める。
 pub fn fetch_index(
@@ -546,10 +546,10 @@ pub fn fetch_index(
     fetch_index_with(names, dest_dir, &FetchOptions::default(), progress, stop, log)
 }
 
-/// [`fetch_index`] の設定つき版。
+/// [`fetch_index`] に設定を渡せるもの。
 ///
 /// 数え方をひとつに揃えてある ―― 見出しの「N ファイル」、途中の [i/N]、最後の「完了 M/N」は、
-/// すべて<b>これから落とすぶん</b>の数。書き込みは「名前.part」へ。最後まで落ちて大きさが合い、
+/// すべて<b>これからダウンロードするぶん</b>の数。書き込みは「名前.part」へ。最後までダウンロードできて大きさが合い、
 /// ヘッダーの検査に通ってから本来の名前へ付け替える。
 pub fn fetch_index_with(
     names: &[String],
@@ -593,7 +593,7 @@ pub fn fetch_index_with(
         let mut got = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         let done_file;
         if got == 0 && part.exists() {
-            got = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0); // 途中まで落ちているぶん
+            got = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0); // 途中までダウンロードしたぶん
             done_file = false;
         } else {
             done_file = got > 0;
@@ -614,7 +614,7 @@ pub fn fetch_index_with(
                 res.already += 1;
                 continue;
             }
-            got = 0; // 中身がおかしいので最初から落とし直す
+            got = 0; // 中身がおかしいので最初からダウンロードし直す
         }
         todo.push((name.clone(), url.clone(), Some(want)));
         total += if 0 < got && got < want { want - got } else { want };
@@ -683,7 +683,7 @@ fn part_path(path: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
-/// 1 ファイル落とす(Python の `_download`)。Ok(true) = 揃った、Ok(false) = 失敗、Err = 中止。
+/// 1 ファイルをダウンロードする(Python の `_download`)。Ok(true) = 揃った、Ok(false) = 失敗、Err = 中止。
 #[allow(clippy::too_many_arguments)]
 fn download_one(
     url: &str,
@@ -742,7 +742,7 @@ fn download_one(
     }
 }
 
-/// 落とし終えた .part を本来の名前へ付け替えて、ヘッダーを検査する。
+/// ダウンロードし終えた .part を本来の名前へ付け替えて、ヘッダーを検査する。
 fn finish(part: &Path, path: &Path, opts: &FetchOptions, log: &dyn Fn(&str)) -> bool {
     let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     if let Err(e) = std::fs::rename(part, path) {

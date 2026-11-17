@@ -1,10 +1,10 @@
 //! 実画像の通しの照合(rs/testdata/image_pipeline.json、gen_image.py の gen_pipeline)。
 //!
 //! dev/tcase の全画像と手元の実写について、読み込み・前処理(焼き込み文字のマスクあり/なし)・
-//! 検出(min_sources 12 / 60)・深い検出の結果を Python と比べる。画像が手元に無い(または中身が違う)ときは SKIP。
+//! 検出(min_sources 12 / 60)・ディープ検出の結果を Python と比べる。画像が手元に無い(または中身が違う)ときは SKIP。
 //! 画像の path は dev/solver_truth.json と同じ決まり(common::image_path)。
-//! 許す差: 星の位置 1e-4 px、σ 相対 1e-6、光量 相対 1e-9、伸び・FWHM・SNR 相対 1e-6(実際はほぼビット一致)。
-//! 深い検出は上位 50 個の全部の値に加えて、全部の星の位置(xy)と測った値(info)も比べる。
+//! 許容差: 星の位置 1e-4 px、σ 相対 1e-6、光量 相対 1e-9、伸び・FWHM・SNR 相対 1e-6(実際はほぼビット一致)。
+//! ディープ検出は上位 50 個の全部の値に加えて、全部の星の位置(xy)と測った値(info)も比べる。
 
 mod common;
 
@@ -52,7 +52,7 @@ fn star_issues(label: &str, py: &Value, got: &(Vec<Source>, Option<f64>), worst:
     out
 }
 
-/// 深い検出の全部の星の位置(xy)と測った値(info)を比べる。worst[0] に位置の差の最大を入れる。
+/// ディープ検出の全部の星の位置(xy)と測った値(info)を比べる。worst[0] に位置の差の最大を入れる。
 fn deep_issues(
     label: &str,
     py: &Value,

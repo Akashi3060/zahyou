@@ -385,7 +385,7 @@ mod tests {
         // 自分のキーも覚える
         s.api_key = ApiKey::new("my-own-key-0123");
         assert_eq!(Settings::from_json(&s.to_json()).api_key, ApiKey::new("my-own-key-0123"));
-        // Debug(試験の失敗の表示)にキーの値が出ない
+        // Debug(テストの失敗の表示)にキーの値が出ない
         let shown = format!("{:?}", Settings::default());
         assert!(!shown.contains(DEFAULT_API_KEY) && !shown.contains(&initial), "Settings の Debug に API キーの値が出た");
         assert!(shown.contains("api_key: ApiKey(<伏せ字 "), "伏せ字の表示が無い");

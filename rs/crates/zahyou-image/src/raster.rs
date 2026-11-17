@@ -4,7 +4,7 @@
 //! I;16 / I;16B / I;16L / I / F ならそのままの値、RGB / RGBA / P / YCbCr / CMYK / LA なら `convert("RGB")` して
 //! 輝度に合成、それ以外(L・1 など)は `convert("F")` にしている。
 //! ここでは画素の復号を image クレート(PNG)と tiff クレートに任せ(JPEG は下記)、Pillow のモードの
-//! 決め方と値の変換(16 bit のカラーは上位バイト、1 bit は 0/255、パレットは RGB に引く)を写す。
+//! 決め方と値の変換(16 bit のカラーは上位バイト、1 bit は 0/255、パレットは RGB に引く)を再現する。
 //! 説明の文も Python と同じ(`None (幅, 高さ) mode=…`。exif_transpose が複製を返すので形式名は None)。
 //!
 //! JPEG は jpeg.rs(libjpeg-turbo と同じ計算)で復号する。対応していない形式(算術符号・12 bit など)だけ
@@ -62,7 +62,7 @@ fn err<E: std::fmt::Display>(e: E) -> String {
 // ----------------------------------------------------------- 向き ---
 
 /// Pillow の `exif_transpose` の変換(EXIF の Orientation 2..8)。値の並びだけを入れ替える。
-/// 出力の行ごとに並列(以前は 1 画素ずつ直列に `extend_from_slice` していた。値を写すだけなので結果は同じ)。
+/// 出力の行ごとに並列(以前は 1 画素ずつ直列に `extend_from_slice` していた。値をコピーするだけなので結果は同じ)。
 /// 出力は全部の画素に 1 回ずつ書くので、最初の `T::default()` は残らない。
 fn transpose<T: Copy + Default + Send + Sync>(
     v: &[T],
@@ -100,8 +100,8 @@ fn transpose<T: Copy + Default + Send + Sync>(
     (out, nw, nh)
 }
 
-/// 8 bit の RGBA → RGB(A を捨てる)。並列に写すだけ(以前は直列の `flat_map` → `collect` で、伸ばし直しの
-/// 写しも入っていた。値は同じ)。4 の倍数でない端数は以前の `chunks_exact(4)` と同じく捨てる。
+/// 8 bit の RGBA → RGB(A を捨てる)。並列にコピーするだけ(以前は直列の `flat_map` → `collect` で、伸ばし直しの
+/// コピーも入っていた。値は同じ)。4 の倍数でない端数は以前の `chunks_exact(4)` と同じく捨てる。
 fn rgba8_to_rgb(v: &[u8]) -> Vec<u8> {
     let mut out = vec![0u8; v.len() / 4 * 3];
     out.par_chunks_exact_mut(3).zip(v.par_chunks_exact(4)).for_each(|(o, p)| o.copy_from_slice(&p[..3]));

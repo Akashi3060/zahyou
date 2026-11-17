@@ -1,13 +1,13 @@
-//! オフライン解析の試行のはしご(Python の dev/zahyou_core.py の `_solve_offline` の、試行の部分)。
+//! オフライン解析の段階的な試行(Python の dev/zahyou_core.py の `_solve_offline` の、試行の部分)。
 //!
-//! 星は深い検出(`detect_sources_deep`)の星を先に、標準の検出の星を予備に使う。条件は探す範囲の狭い(速い)
-//! ものから順に、条件ごとに 深い → 標準 の星で試す:
+//! 星はディープ検出(`detect_sources_deep`)の星を先に、標準の検出の星を予備に使う。条件は探す範囲の狭い(速い)
+//! ものから順に、条件ごとに ディープ → 標準 の星で試す:
 //!   座標ヒント + スケール既知(残り時間の 25 %)→ 座標ヒント + スケール全域(25 %)→ 全天 + スケール既知(25 %)
 //!   → 全天 + スケール全域(50 %。最後の試行は残り全部)
-//! 全体の締め切りは timeout_s 秒の壁時計で、試行ごとに残り時間の一部を割り当てる。残りが 2 秒を切ったらやめる。
+//! 全体のタイムアウトは timeout_s 秒の壁時計で、試行ごとに残り時間の一部を割り当てる。残りが 2 秒を切ったらやめる。
 //!
-//! 係の分担(app/src/pipeline.rs): 事前のログ(画素スケール・手持ちの段・足りない段・探索するスケール)と、
-//! 解けなかったときの案内と、「■ 中止しました。」は app が出す。ここが出すのは、深い検出・`[i/N] ラベル  (最大 t 秒)`・
+//! モジュールの分担(app/src/pipeline.rs): 事前のログ(画素スケール・手持ちのスケール・足りないスケール・探索するスケール)と、
+//! 解けなかったときの案内と、「■ 中止しました。」は app が出す。ここが出すのは、ディープ検出・`[i/N] ラベル  (最大 t 秒)`・
 //! 探索のログ(`    · ` を付けて)・解の要約・`✅ 解析成功 (ラベル)`・時間切れ・エンジンのエラー。
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -23,7 +23,7 @@ use crate::pyfmt::{fmt_g, fmt_int};
 use crate::verify::Store;
 use crate::{Control, FieldStar, OfflineOutcome, OfflineRequest, OfflineStop, Params, Solution, SolveError, SolveRequest};
 
-/// 索引がカバーする画角(分角)。astrometry.net の付番規則(番号の下 2 桁 → 段。Python の `_INDEX_SCALES`)。
+/// インデックスがカバーする画角(分角)。astrometry.net の付番規則(番号の下 2 桁 → スケール。Python の `_INDEX_SCALES`)。
 const INDEX_SCALES: [(f64, f64); 20] = [
     (2.0, 2.8),
     (2.8, 4.0),
@@ -68,7 +68,7 @@ pub fn index_coverage<S: AsRef<str>>(names: &[S]) -> Option<(f64, f64)> {
 }
 
 /// 画角が全く分からないときに探す画素スケールの範囲 [″/px](Python の zahyou_core の `blind_scale_bounds`)。
-/// 手持ちの索引が扱える画角から画像の幅で逆算する(下限 × 0.9、上限 × 1.1)。索引が無ければ 2′〜2000′ で。
+/// 手持ちのインデックスが扱える画角から画像の幅で逆算する(下限 × 0.9、上限 × 1.1)。インデックスが無ければ 2′〜2000′ で。
 pub fn blind_scale_bounds<S: AsRef<str>>(width_px: usize, names: &[S]) -> (f64, f64) {
     let (lo_fov, hi_fov) = index_coverage(names).unwrap_or((2.0, 2000.0));
     let low = lo_fov * 60.0 / width_px as f64 * 0.9;
@@ -76,7 +76,7 @@ pub fn blind_scale_bounds<S: AsRef<str>>(width_px: usize, names: &[S]) -> (f64, 
     (if 0.01 > low { 0.01 } else { low }, if 3600.0 < high { 3600.0 } else { high })
 }
 
-/// 目録に入っている(検査に通った)索引ファイルの名前(拡張子つき、名前の順。Python の `_catalog_names`)。
+/// 目録に入っている(検査に通った)インデックスファイルの名前(拡張子つき、名前の順。Python の `_catalog_names`)。
 fn catalog_names(cat: &Catalog) -> Vec<String> {
     let mut v: Vec<String> =
         cat.files.iter().filter_map(|f| f.path.file_name().map(|s| s.to_string_lossy().into_owned())).collect();
@@ -85,9 +85,9 @@ fn catalog_names(cat: &Catalog) -> Vec<String> {
     v
 }
 
-/// 深い検出のぼかし方の説明(Python の `星の幅 (FWHM … px) に合わせてぼかし` / `星の幅を測れなかったので σ … px でぼかし`)。
+/// ディープ検出のぼかし方の説明(Python の `星の幅 (FWHM … px) に合わせてぼかし` / `星の幅を測れなかったので σ … px でぼかし`)。
 ///
-/// 深い検出が測った値(DeepInfo の s_psf・s)から Python と同じ式で書く(Python の `if s_psf` と同じく 0 は「測れなかった」)。
+/// ディープ検出が測った値(DeepInfo の s_psf・s)から Python と同じ式で書く(Python の `if s_psf` と同じく 0 は「測れなかった」)。
 fn deep_how(info: Option<&DeepInfo>) -> String {
     match info.and_then(|i| i.s_psf).filter(|&s| s != 0.0) {
         Some(s_psf) => format!("星の幅 (FWHM {:.1} px) に合わせてぼかし", 2.3548 * s_psf),
@@ -147,7 +147,7 @@ struct Attempt<'s> {
     share: f64,
 }
 
-/// 試行のはしごの本体(Python の `_solve_offline` の試行の部分)。
+/// 段階的な試行の本体(Python の `_solve_offline` の試行の部分)。
 pub(crate) fn run(req: &OfflineRequest, catalog: &Catalog, params: &Params, ctl: &Control) -> Result<OfflineOutcome, SolveError> {
     let t_start = Instant::now();
     let t_end = t_start + secs(req.timeout_s);
@@ -155,7 +155,7 @@ pub(crate) fn run(req: &OfflineRequest, catalog: &Catalog, params: &Params, ctl:
     let nx = req.width;
     let installed = catalog_names(catalog);
     if installed.is_empty() {
-        // 「使える星図データがありません」は app が出す
+        // 「使えるインデックスファイルがありません」は app が出す
         return Ok(OfflineOutcome { stop: OfflineStop::NoIndex, ..Default::default() });
     }
     // Python の `if scale` と同じ(0 と None は不明、NaN はそのまま渡してエンジンのエラーになる)
@@ -166,7 +166,7 @@ pub(crate) fn run(req: &OfflineRequest, catalog: &Catalog, params: &Params, ctl:
     if ctl.cancelled() {
         return Err(SolveError::Cancelled);
     }
-    // 深い検出(解析エンジンのために暗い星まで拾い直した星)。失敗しても標準の検出の星で続ける。
+    // ディープ検出(解析エンジンのために暗い星まで検出し直した星)。失敗しても標準の検出の星で続ける。
     // Python の detect_sources_deep(*prep, info=dinfo) と同じ既定(400 個・偽の極大 2 個・u ≥ 4)
     let deep = catch_unwind(AssertUnwindSafe(|| zahyou_image::detect_deep(req.prep, &DeepOpts::default())));
     let (deep_src, u, dinfo) = match deep {
@@ -205,7 +205,7 @@ pub(crate) fn run(req: &OfflineRequest, catalog: &Catalog, params: &Params, ctl:
     }
     let tried = |solution: Option<Solution>| OfflineOutcome { solution, n_deep, stop: OfflineStop::Tried };
 
-    // 試行のはしご: (条件, ヒント, スケールの範囲, 残り時間の何割まで使うか)
+    // 段階的な試行: (条件, ヒント, スケールの範囲, 残り時間の何割まで使うか)
     let hint = req.hint;
     type Cond<'c> = (&'c str, Option<(f64, f64, f64)>, (f64, f64), f64);
     let mut conds: Vec<Cond> = Vec::new();

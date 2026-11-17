@@ -1,8 +1,8 @@
 # ==============================================================================
-#  solver_wcs.py — 自前ソルバーの幾何(単位ベクトル・TAN 投影・WCS の当てはめ)
+#  solver_wcs.py — 自前ソルバーの幾何(単位ベクトル・TAN 投影・WCS のフィット)
 #
 #  docs/design-native-solver.md の 1 節・3.6 節・3.8 節・3.9 節。
-#  numpy と標準ライブラリだけを使う(第 2 段で別の言語へ移しやすくするため)。
+#  numpy と標準ライブラリだけを使う(第 2 段階で別の言語へ移しやすくするため)。
 #  build_nb.py が zahyou_engine.py へつなぐので、最上位の名前は sv_ / Sv / _sv_ / SV_ で始める。
 #  冒頭に docstring を置かない(組み立て時に import だけを外す約束)。
 #
@@ -27,7 +27,7 @@ import numpy as np
 SV_ARCSEC_PER_RAD = 180.0 / math.pi * 3600.0
 SV_LSQ_MAX_SHIFTS = 40       # sv_fit_wcs_lsq で接点を動かす回数の上限(90° の視野で星が隅の 1/4 だけでも収まる)
 SV_LSQ_TOL_PX = 1e-8         # CRPIX に残る定数項(画素に直したもの)がこれ以下なら接点を動かすのをやめる
-SV_LSQ_FAIL_PX = 0.01        # 上限まで動かしてもこれを超えて残れば、当てはめは失敗(ValueError)
+SV_LSQ_FAIL_PX = 0.01        # 上限まで動かしてもこれを超えて残れば、フィットは失敗(ValueError)
 
 
 def sv_radec_to_xyz(ra_deg, dec_deg):
@@ -77,7 +77,7 @@ def sv_tan_basis(r):
     """接点 r(単位ベクトル 1 つ)での (東, 北) の単位ベクトル。
 
     東 = normalize(−r_y, r_x, 0)、北 = r × 東。極(r_x = r_y = 0)では東を +y 軸にとる
-    (どの向きを選んでも回転が変わるだけで、当てはめ・コードの結果には効かない)。
+    (どの向きを選んでも回転が変わるだけで、フィット・コードの結果には効かない)。
     """
     r = np.asarray(r, dtype=np.float64)
     h = math.hypot(r[0], r[1])
@@ -162,9 +162,9 @@ def _sv_poly_grad(coef, u, v):
 
 
 def _sv_poly_lstsq(u, v, targets, order, min_deg=0, weights=None):
-    """targets (N, k) の各列を Σ c[p, q] u^p v^q(min_deg ≤ p+q ≤ order)で重みつき最小二乗に当てる。
+    """targets (N, k) の各列に Σ c[p, q] u^p v^q(min_deg ≤ p+q ≤ order)を重みつき最小二乗でフィットする。
 
-    戻り値は (k, order+1, order+1) の係数。u, v は最大の絶対値で割ってから当てる(高い次数で桁が
+    戻り値は (k, order+1, order+1) の係数。u, v は最大の絶対値で割ってからフィットする(高い次数で桁が
     開きすぎて解けなくなるのを防ぐ)。点が足りないか並びが縮退していれば ValueError。
     """
     u = np.asarray(u, dtype=np.float64).ravel()
@@ -406,7 +406,7 @@ class SvWcs:
         return cards
 
     def to_dict(self):
-        """JSON に書ける形(trace と移植先の試験のため)。"""
+        """JSON に書ける形(trace と移植先のテストのため)。"""
         ra, dec = self.crval_radec()
         d = {"crval_radec": [ra, dec], "crval_xyz": self.crval_xyz.tolist(),
              "crpix": self.crpix.tolist(), "cd": self.cd.tolist()}
@@ -419,10 +419,10 @@ class SvWcs:
         return d
 
 
-# ------------------------------------------------------------------ 当てはめ ---
+# -------------------------------------------------------------------- フィット ---
 
 def sv_fit_similarity(field_xy, star_xyz):
-    """対応する画像の点と星から、回転+等方スケールの TAN を当てる(設計書 3.6 節。4 点からの仮の解)。
+    """対応する画像の点と星から、回転+等方スケールの TAN をフィットする(設計書 3.6 節。4 点からの仮の解)。
 
     接点 r = 星の単位ベクトルの和の方向、CRPIX = 画像の点の重心。星を r で投影した (ξ, η) と画像の点から
     それぞれ重心を引き、C = Σ fᵢ pᵢᵀ = U S Vᵀ、R = V Uᵀ(行列式の符号は見ない = 鏡像も表せる)、
@@ -455,11 +455,11 @@ def sv_fit_similarity(field_xy, star_xyz):
 
 
 def sv_fit_sip_inverse(wcs, width=None, height=None, order=None, bounds=None):
-    """SIP の逆変換 AP, BP を、画像全体の格子で最小二乗に当てる(設計書 3.8 節)。
+    """SIP の逆変換 AP, BP を、画像全体の格子に最小二乗でフィットする(設計書 3.8 節)。
 
     格子は x = −0.5 … width−0.5、y = −0.5 … height−0.5(width, height が無ければ
     bounds = (xmin, xmax, ymin, ymax))に 10 × (次数+1) 点四方。各点を順変換した (U, V) から
-    元の (u, v) へ戻す多項式を当てる。次数の既定は順変換の次数 + 1。AP, BP を付けた複製を返す
+    元の (u, v) へ戻す多項式をフィットする。次数の既定は順変換の次数 + 1。AP, BP を付けた複製を返す
     (SIP が無ければ逆変換も無い複製)。
     """
     out = wcs.copy()
@@ -486,18 +486,18 @@ def sv_fit_sip_inverse(wcs, width=None, height=None, order=None, bounds=None):
 
 def sv_fit_wcs_lsq(field_xy, star_xyz, weights=None, crpix=None, sip_order=0,
                    crval_xyz=None, iterations=SV_LSQ_MAX_SHIFTS, width=None, height=None):
-    """対応する画像の点と星から、TAN(+SIP)を重みつき最小二乗で当てる(設計書 3.8 節)。
+    """対応する画像の点と星から、TAN(+SIP)を重みつき最小二乗でフィットする(設計書 3.8 節)。
 
     CRPIX は固定(既定は画像の点の重みつき重心)。接点(既定は星の重みつきの和の方向)のまわりで星を
-    投影し、ξ と η をそれぞれ u, v(画素 − CRPIX)の多項式(0 ≤ p+q ≤ 次数、次数 = max(1, sip_order))で当てる。
-    定数項は接点のずれなので、接点をそのぶん動かして当て直す。定数項を CD⁻¹ で画素に直した大きさが
+    投影し、ξ と η をそれぞれ u, v(画素 − CRPIX)の多項式(0 ≤ p+q ≤ 次数、次数 = max(1, sip_order))でフィットする。
+    定数項は接点のずれなので、接点をそのぶん動かして再フィットする。定数項を CD⁻¹ で画素に直した大きさが
     SV_LSQ_TOL_PX 以下になるまで繰り返す(iterations は動かす回数の上限)。ずれの縮み方は星の配置しだいで、
     星が CRPIX のまわりに散っていれば 1 回ごとにおよそ「視野の広さ(ラジアン)の 2 乗」倍だが、CRPIX から離れて
     固まっていると遅い(60° の視野で星が隅の 1/4 だけだと、3 回動かしても中心で 5 px 残り、10 回で 0.000 px。
     90° の隅の 1/4 では 30 回近く要る)。上限まで動かしても SV_LSQ_FAIL_PX を超えるずれが残れば ValueError
     (その WCS は CRPIX の位置が定まっていない)。1 次の項が CD、2 次以上に CD⁻¹ を掛けたものが SIP の A, B。
     sip_order ≥ 2 なら逆変換 AP, BP(次数 sip_order+1)も、画像全体(width, height。無ければ点の範囲)の
-    格子で当てる。重み 0 の点は使わない。点が足りなければ ValueError。
+    格子でフィットする。重み 0 の点は使わない。点が足りなければ ValueError。
     """
     f = np.asarray(field_xy, dtype=np.float64).reshape(-1, 2)
     s = np.asarray(star_xyz, dtype=np.float64).reshape(-1, 3)
@@ -542,7 +542,7 @@ def sv_fit_wcs_lsq(field_xy, star_xyz, weights=None, crpix=None, sip_order=0,
         left = float(np.hypot(*np.linalg.solve(cd, coef[:, 0, 0])))
         if left <= SV_LSQ_TOL_PX or k == nshift:
             break
-        # 接点をそこへ動かして当て直す。最後の当てはめのあとには動かさない(CD は接点の東・北に対する値で、
+        # 接点をそこへ動かして再フィットする。最後のフィットのあとには動かさない(CD は接点の東・北に対する値で、
         # 極のそばでは接点をわずかに動かすだけで東・北の向きが大きく回るため。残る定数項は捨てる)
         r = sv_tan_deproject(np.radians(coef[0, 0, 0]), np.radians(coef[1, 0, 0]), r)
     if left > SV_LSQ_FAIL_PX:

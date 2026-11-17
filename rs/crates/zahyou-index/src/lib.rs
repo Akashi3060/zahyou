@@ -1,7 +1,7 @@
-//! zahyou の索引ファイル(astrometry.net の index-41xx / index-52xx-NN)を読む。
+//! zahyou のインデックスファイル(astrometry.net の index-41xx / index-52xx-NN)を読む。
 //!
 //! Python 版の基準実装は `dev/solver_index.py`(形式は docs/index-format.md、実物を読んで全件で確かめたもの)。
-//! 同じ入力に同じ結果を返す(試験 `tests/` が Python の出力 `rs/testdata/index_*.json` と突き合わせる)。
+//! 同じ入力に同じ結果を返す(テスト `tests/` が Python の出力 `rs/testdata/index_*.json` と突き合わせる)。
 //!
 //! 読み方の要点
 //! - FITS は 2880 バイトのブロックと 80 文字のカード。ヘッダーだけを自前で読み、表は TTYPE1 の名前で探す
@@ -42,7 +42,7 @@ pub use healpix::{
 pub use layout::{match_index_name, ALLSKY_HEALPIX, INDEX_ENDIAN};
 pub use zahyou_wcs::Vec3;
 
-/// 索引ファイル 1 本をヘッダーだけで検査する(Python 版 `sv_validate_index_file` の ok / ng)。
+/// インデックスファイル 1 本をヘッダーだけで検査する(Python 版 `sv_validate_index_file` の ok / ng)。
 ///
 /// 見ること: ファイル名の形、大きさ = ヘッダーから計算した長さ(途中で切れたダウンロード)、ENDIAN、
 /// INDEXID と名前の系列、HEALPIX と名前のタイル番号、必要な表がそろって大きさが合うこと。

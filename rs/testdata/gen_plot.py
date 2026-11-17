@@ -5,14 +5,14 @@ print_solution)と、その下の matplotlib 3.10・astropy 7.1(WCSAxes・SkyCoo
 
 使い方(numpy・astropy・matplotlib・reproject が要る):
     python gen_plot.py [norm text axes reproject layout]   (引数を省くと全部)
-同じフォルダーに次の 5 つを書く。Rust の試験 crates/zahyou-plot/tests/python_ref.rs がこれと比べる。
+同じフォルダーに次の 5 つを書く。Rust のテスト crates/zahyou-plot/tests/python_ref.rs がこれと比べる。
     plot_norm.json       _norm の vmin・vmax と、matplotlib の灰色の色表で 8 bit にした値(cmap(norm(x), bytes=True))
     plot_text.json       60 進の文字列(SkyCoord.to_string("hmsdms")・WCSAxes の目盛りの書式)、目盛りの間隔、
-                         題・ずれの文(report_offsets)・解析結果の文(print_solution)
+                         タイトル・ずれの文(report_offsets)・解析結果の文(print_solution)
     plot_axes.json       WCSAxes の座標の範囲・目盛りの値と間隔・各辺の目盛り・文字・文字を出す辺・格子の線(枠で切った区間)。
                          画像全体の表示 11 例と、拡大・移動した表示 3 例(ツールバーの拡大と同じく範囲だけを変える)
     plot_reproject.json  plot_north_up の出力の WCS・大きさ・reproject_interp の値・_norm、_draw_markers の位置(2 つの図)
-    plot_layout.json     plot_original・plot_north_up をそのまま呼んで描いた図の配置(軸の矩形・題・軸名の外接矩形、px)。
+    plot_layout.json     plot_original・plot_north_up をそのまま呼んで描いた図の配置(軸の矩形・タイトル・軸名の外接矩形、px)。
                          游ゴシック(GUI と同じ font.family)で描いた値なので、Rust も游ゴシックがあるときだけ比べる
 
 Python 版の dev フォルダーは環境変数 ZAHYOU_PY_DEV(既定は $ZAHYOU_PY_REPO、無ければ ~/Documents/GitHub/zahyou の下の dev)。
@@ -64,7 +64,7 @@ RA_SEPS = {r"$\mathregular{^h}$": "ʰ", r"$\mathregular{^m}$": "ᵐ", r"$\mathre
 
 
 def compact(label):
-    """WCSAxes の数式の上付き($\\mathregular{^h}$)を Rust と同じ 1 文字の印にする。"""
+    """WCSAxes の数式の上付き($\\mathregular{^h}$)を Rust と同じ 1 文字の記号にする。"""
     for k, v in RA_SEPS.items():
         label = label.replace(k, v)
     return label
@@ -275,7 +275,7 @@ def gen_text():
     out["steps"] = [{"dv": dv, "deg": float(select_step_degree(dv * u.deg).to_value(u.deg)),
                      "hour": float(select_step_hour(dv * u.deg).to_value(u.deg))} for dv in dvs]
 
-    # 題とずれ(report_offsets)・解析結果(print_solution)
+    # タイトルとずれ(report_offsets)・解析結果(print_solution)
     offs = []
     centers = [(61.891414, 41.964760), (83.82, -5.39), (0.001, 0.0), (359.999, 89.9), (180.0, -60.0)]
     for cra, cdec in centers:
@@ -595,7 +595,7 @@ def capture_figures():
 
 
 def boxes_px(fig, ax):
-    """描いた図の軸・題・軸名の外接矩形(px、左上が原点)。"""
+    """描いた図の軸・タイトル・軸名の外接矩形(px、左上が原点)。"""
     r = fig.canvas.get_renderer()
     H = fig.bbox.height
 
@@ -627,7 +627,7 @@ LAYOUT_CASES = [
 def gen_layout():
     """Python 版の plot_original・plot_north_up をそのまま呼び(GUI と同じフォント設定)、描いた後の配置を取る。
 
-    matplotlib の配置は描く順序で変わる(tight_layout の前に描くと題の位置が変わる)ので、Python 版と同じ手順
+    matplotlib の配置は描く順序で変わる(tight_layout の前に描くとタイトルの位置が変わる)ので、Python 版と同じ手順
     (図を作る → tight_layout 1 回 → savefig / 画面に描く)で測る。画像の中身は配置に関係しないので一様な値。
     """
     cases = []

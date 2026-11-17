@@ -1,4 +1,4 @@
-//! 索引ファイルのヘッダーの検査(Python 版 `_sv_index_layout` / `sv_validate_index_file`)。
+//! インデックスファイルのヘッダーの検査(Python 版 `_sv_index_layout` / `sv_validate_index_file`)。
 //!
 //! データは読まない(ヘッダーとファイルの大きさだけ)。問題があれば Python 版と同じ文面のエラー。
 //! Python 版に無い検査(Rust で安全に読むためのもの)は、Python 版の検査が全部通った後にだけ行う
@@ -11,7 +11,7 @@ use std::path::Path;
 use crate::fits::{read_hdus, BlockSource, FitsValue, Hdu, Header, ReadError};
 use crate::pyfmt::{commas, float_repr, str_repr};
 
-/// 全天の索引を表す HEALPIX の値。
+/// 全天のインデックスを表す HEALPIX の値。
 pub const ALLSKY_HEALPIX: i32 = -1;
 
 /// u32 の 0x01020304 が 04 03 02 01 と並ぶ = リトルエンディアン。読めるのはこの値だけ。

@@ -1,4 +1,4 @@
-//! 画面の自己診断(Python 版 selftest の画面の項目)。窓を出さずに egui を回して確かめる。
+//! 画面の自己診断(Python 版 selftest の画面の項目)。ウィンドウを出さずに egui を回して確かめる。
 //!
 //!   zahyou.exe --selftest <画像> [--online|--offline] [--out f]
 //!
@@ -48,7 +48,7 @@ impl Rig {
     }
 }
 
-/// 画面の自己診断(画面の項目だけ。解析そのものの項目は pipeline 係の selftest_rows)。
+/// 画面の自己診断(画面の項目だけ。解析そのものの項目は pipeline モジュールの selftest_rows)。
 /// 画面からも解析を 1 回通して、数字・図・ステータスバーが画面に届くことを見る。
 pub fn run(image: &Path, target: &str, force: Option<Solve>, debug_wcs: Option<std::path::PathBuf>) -> Vec<Row> {
     let mut out: Vec<Row> = Vec::new();
@@ -96,7 +96,7 @@ pub fn run(image: &Path, target: &str, force: Option<Solve>, debug_wcs: Option<s
         let n = a.figs.iter().filter(|f| f.is_some()).count();
         check("図が 2 枚貼られる", n == 2, format!("{n} 枚"));
         check("結果がステータスバーに残る", a.status.contains("解析できました"), format!("{:?}", a.status));
-        // 図を描けること(両方のタブを表示してみる。テクスチャの段づくり・タイル分け)
+        // 図を描けること(両方のタブを表示してみる。テクスチャの段階づくり・タイル分け)
         let r = super::worker::guarded(|| {
             for t in [super::settings::ResultTab::Orig, super::settings::ResultTab::NorthUp] {
                 rig.app.out_tab = t;
@@ -116,7 +116,7 @@ pub fn run(image: &Path, target: &str, force: Option<Solve>, debug_wcs: Option<s
         rig.size = size;
         for tab in [TopTab::Run, TopTab::Env, TopTab::Help] {
             rig.app.tab = tab;
-            // ［解析］の左の列はスクロールする。小さい窓で下に隠れる欄(API キー)も、いちばん下まで送れば窓に入るかを見る
+            // ［解析］の左の列はスクロールする。小さいウィンドウで下に隠れる欄(API キー)も、いちばん下まで送ればウィンドウに入るかを見る
             rig.app.scroll_left_end = tab == TopTab::Run;
             rig.frame();
             rig.frame();
@@ -169,7 +169,7 @@ pub fn run(image: &Path, target: &str, force: Option<Solve>, debug_wcs: Option<s
 mod tests {
     use super::*;
 
-    /// 試験の画像: `$ZAHYOU_TEST_IMAGES/Downloads/<name>`(ZAHYOU_TEST_IMAGES が無ければホームフォルダー。
+    /// テストの画像: `$ZAHYOU_TEST_IMAGES/Downloads/<name>`(ZAHYOU_TEST_IMAGES が無ければホームフォルダー。
     /// 作者のホームの絶対パスをソースに書かない)。
     fn test_image(name: &str) -> std::path::PathBuf {
         std::env::var_os("ZAHYOU_TEST_IMAGES")
@@ -285,7 +285,7 @@ mod tests {
         assert_eq!(app.dialogs.last().map(String::as_str), Some("先に「更新を確認」を押してください。"));
     }
 
-    /// 窓を出さない画面(確認はいつも「キャンセル」)。設定は一時ファイル、星図データの置き場所は空のフォルダー
+    /// ウィンドウを出さない画面(確認はいつも「キャンセル」)。設定は一時ファイル、インデックスファイルの置き場所は空のフォルダー
     fn headless_app(sub: &str) -> (ZahyouApp, std::path::PathBuf) {
         super::super::settings::override_path(std::env::temp_dir().join("zahyou-test-cancel.json"));
         let ctx = egui::Context::default();
@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn まとめて準備は落とす前に必ず聞く() {
         let (mut app, dir) = headless_app("prepare");
-        // (a) 印があっても聞く(確認は「キャンセル」なので落とさない)
+        // (a) チェックがあっても聞く(確認は「キャンセル」なのでダウンロードしない)
         for s in [5202u32, 5203] {
             app.marks.insert(s, true);
         }
@@ -336,7 +336,7 @@ mod tests {
         for v in app.marks.values_mut() {
             *v = false;
         }
-        // 印が無ければおすすめの段について聞く
+        // チェックが無ければおすすめのスケールについて聞く
         app.prepare_all(None);
         assert!(!app.busy);
         assert!(app.dialogs.last().unwrap().starts_with("スケールが選ばれていないので、おすすめ"), "{:?}", app.dialogs.last());
@@ -346,7 +346,7 @@ mod tests {
     #[test]
     fn 置き場所を変えたら前の結果で判断しない() {
         let (mut app, dir) = headless_app("stale");
-        // 前の置き場所でおすすめの段が全部そろっていた、という古い結果
+        // 前の置き場所でおすすめのスケールが全部そろっていた、という古い結果
         let mut old = super::super::survey::Survey::default();
         old.index.dir = std::path::PathBuf::from(r"C:\somewhere\else");
         old.index.scales = zahyou_net::recommended_scales();

@@ -1,19 +1,19 @@
-//! 締め切り・中止・壊れた入力・壊れた索引・並列(設計書 3.1・7 節、Python の test_solver_core case_08・09・17・18)。
+//! タイムアウト・中止・壊れた入力・壊れたインデックス・並列(設計書 3.1・7 節、Python の test_solver_core case_08・09・17・18)。
 //!
 //! - 中止: cancel が立ってから 0.2 秒以内に Err(Cancelled)(探索の途中のいろいろな時点で立てる。Python の case_09 と同じ基準)。
-//!   始める前に立っていれば即座に。solve_offline も 0.2 秒以内に止まり、解を返さない(索引の mmap を外す仕事が
+//!   始める前に立っていれば即座に。solve_offline も 0.2 秒以内に止まり、解を返さない(インデックスの mmap を外す仕事が
 //!   0.1〜0.4 秒かかるので、それを待たずに返すこと。遅れたときは中止のあとのログを時刻つきで出す)
-//! - 過ぎた締め切り: 0.5 秒以内に Ok(None)
+//! - タイムアウトの時刻をすでに過ぎている: 0.5 秒以内に Ok(None)
 //! - 壊れた入力(NaN・無限大の座標や明るさ、星 0〜2 個、幅 0、おかしいヒント・スケール、星 1 万個): panic しない、
-//!   解を返さない(解けない入力)、締め切りを 1 秒以上超えない
-//! - 中身の壊れた索引(大きさとヘッダーは正しい。index-4116 の星の木の葉の範囲を入れ替えたもの・quad の表の星番号を
-//!   化けさせたもの): panic せず、ほかの索引で解き(正解の基準を満たす)、壊れていることをログで知らせる
+//!   解を返さない(解けない入力)、タイムアウトを 1 秒以上超えない
+//! - 中身の壊れたインデックス(大きさとヘッダーは正しい。index-4116 の星の木の葉の範囲を入れ替えたもの・quad の表の星番号を
+//!   化けさせたもの): panic せず、ほかのインデックスで解き(正解の基準を満たす)、壊れていることをログで知らせる
 //! - 同じ目録を 4 本のスレッドから同時に使っても、1 本で解いたときと同じ答え
 //!
 //! ```text
 //! cargo test -p zahyou-solver --test control -- --nocapture
 //! ```
-//! 星図データ(index-5205-* と index-4113〜4117)が無ければ SKIP。
+//! インデックスファイル(index-5205-* と index-4113〜4117)が無ければ SKIP。
 
 mod common;
 
@@ -71,7 +71,7 @@ fn cancel_stops_within_0_2_s() {
     }
     let _g = heavy();
     let mut bad = Vec::new();
-    // 乱数の星 150 個のブラインド(解は無い。探索は締め切りまで続く)
+    // 乱数の星 150 個のブラインド(解は無い。探索はタイムアウトまで続く)
     let req = SolveRequest { stars: random_field(150, 968, 548, 9), width: 968, height: 548, ..Default::default() };
     for at in [0.05, 0.3, 1.0, 2.5] {
         let (r, lag) = cancel_after(&req, at);
@@ -81,7 +81,7 @@ fn cancel_stops_within_0_2_s() {
             bad.push(format!("{at} 秒後の中止: {:?}、遅れ {lag:.3} 秒", r.map(|o| o.map(|s| s.index_name))));
         }
     }
-    // ヒントあり・スケール既知(照合の束が大きくなる形。Python の case_19)
+    // ヒントあり・スケール既知(照合のバッチが大きくなる形。Python の case_19)
     let req = SolveRequest {
         stars: random_field(150, 1200, 800, 19),
         width: 1200,
@@ -127,7 +127,7 @@ fn past_deadline_returns_at_once() {
     assert!(matches!(r, Ok(None)) && dt < 0.5, "過ぎた締め切り: {:?}、{dt:.3} 秒", r.map(|o| o.is_some()));
 }
 
-/// 前処理の結果の代わり(何も写っていない画像。深い検出は星を見つけない)。
+/// 前処理の結果の代わり(何も写っていない画像。ディープ検出は星を見つけない)。
 fn blank_prep(w: usize, h: usize) -> Prep {
     Prep { sub: Image2D::new(w, h, vec![0.0; w * h]).unwrap(), mask: vec![false; w * h], sigma: 1.0, info: Vec::new() }
 }
@@ -153,7 +153,7 @@ fn solve_offline_cancel_and_timeout() {
     let req = OfflineRequest { prep: &prep, sources: &src, width: w, height: h, scale: None, hint: None, timeout_s: 60.0 };
     let cancel = AtomicBool::new(false);
     let set_at = std::sync::Mutex::new(None::<Instant>);
-    // ログは始めてからの時刻つきで残す(遅れたとき、どの段で止まらなかったかを出す)
+    // ログは始めてからの時刻つきで残す(遅れたとき、どの段階で止まらなかったかを出す)
     let t_start = Instant::now();
     let lines = std::sync::Mutex::new(Vec::<(f64, String)>::new());
     let log = |s: &str| {
@@ -189,7 +189,7 @@ fn solve_offline_cancel_and_timeout() {
     if !ok {
         bad.push(format!("solve_offline の中止: {:?}、遅れ {lag:.3} 秒", r.map(|o| o.is_some())));
     }
-    // 全体の締め切り(5 秒、ヒントとスケールありで試行 4 段)
+    // 全体のタイムアウト(5 秒、ヒントとスケールありで試行 4 段階)
     let req = OfflineRequest {
         prep: &prep,
         sources: &src,

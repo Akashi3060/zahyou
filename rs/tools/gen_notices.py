@@ -41,7 +41,7 @@ OUT_WHEEL = WHEEL_DIR / "THIRD-PARTY-NOTICES.md"
 
 # ライセンスファイルとみなす名前(大文字小文字は問わない)
 LICENSE_NAME = re.compile(r"^(licen[cs]e|copying|notice|copyright|unlicense)", re.I)
-# 下へ探しに行かないフォルダー(試験・例・文書。exe に入らない)
+# 下へ探しに行かないフォルダー(テスト・例・文書。exe に入らない)
 SKIP_DIRS = {"tests", "test", "testdata", "test-data", "examples", "example", "benches", "bench",
              "fuzz", ".github", "target", "docs", "doc"}
 # 名前の決まりに合わないが、ライセンスの本文であるもの(クレート名 → 相対パス)
@@ -153,7 +153,7 @@ def license_paths(pkg: cd.Package) -> list[tuple[str, Path]]:
 
 
 def detect_kinds(text: str) -> list[str]:
-    """本文の種類(SPDX の名前)。改行や空白の違いは無視して、目印の文が全部あるかで決める。"""
+    """本文の種類(SPDX の名前)。改行や空白の違いは無視して、判定に使う文(KIND_SIGNS)が全部あるかで決める。"""
     # 行頭の注釈の記号(// # * ;)は外して比べる(untrusted の LICENSE.txt は // で始まる)
     nt = _norm("\n".join(re.sub(r"^\s*(//+|#+|\*+|;+)\s?", "", ln) for ln in text.split("\n")))
     kinds = []
@@ -214,7 +214,7 @@ def _norm(s: str) -> str:
 
 def _strip_copyrights(lines: list[str]) -> list[str]:
     out = [ln for ln in lines if not _copyright_match(ln)]
-    # 先頭の「MIT License」などの題は本文から外す(本文の比較で揃えるため)
+    # 先頭の「MIT License」などのタイトルは本文から外す(本文の比較で揃えるため)
     while out and (not out[0].strip() or TITLE_LINE.match(out[0].strip())):
         out.pop(0)
     # 連続する空行は 1 つに
@@ -459,7 +459,7 @@ class Toolchain:
     texts: list[tuple[str, str, str, str]]  # (名前, 式, 元のファイル, 本文)
 
 
-# 標準ライブラリの rlib のうち、exe に結合されないもの(試験・proc-macro・別の panic 方式など)
+# 標準ライブラリの rlib のうち、exe に結合されないもの(テスト・proc-macro・別の panic 方式など)
 STD_NOT_LINKED = {"test", "getopts", "proc_macro", "profiler_builtins", "panic_abort", "rustc_literal_escaper",
                   "rustc_std_workspace_std", "sysroot"}
 
@@ -593,7 +593,7 @@ zahyou の実行ファイルには同梱していません。exe は［準備］
 
 # 解き方の出典・星表の論文・定型の謝辞。以前は Python の exe 用の表示(リポジトリ直下の THIRD-PARTY-NOTICES.md)と
 # --check で突き合わせていたが、そちらは 7.0.0 の準備で消した。同じ趣旨の文は README・マニュアル(dev/make_manual.py)・
-# 星図データの zip の README(dev/make_index_zips.py)にもあるので、直すときはそろえる
+# インデックスファイルの zip の README(dev/make_index_zips.py)にもあるので、直すときはそろえる
 LANG_REF = """\
 - Lang, D., Hogg, D. W., Mierle, K., Blanton, M., & Roweis, S. (2010),
   "Astrometry.net: Blind astrometric calibration of arbitrary astronomical

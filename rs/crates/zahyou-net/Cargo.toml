@@ -9,9 +9,9 @@ publish.workspace = true
 description = "zahyou のネットワーク: 更新の確認と入れ替え、星図データのダウンロード、天体名の解決、nova.astrometry.net"
 
 [dependencies]
-# 落とした索引ファイルの検査(表の大きさ・kd-tree の形まで。ヘッダーだけ読む)
+# ダウンロードしたインデックスファイルの検査(表の大きさ・kd-tree の形まで。ヘッダーだけ読む)
 zahyou-index = { workspace = true }
-# TLS は rustls(ring)。gzip は付けない(Range で続きから落とすときに Content-Length がずれるため)
+# TLS は rustls(ring)。gzip は付けない(Range で続きからダウンロードするときに Content-Length がずれるため)
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 # preserve_order: cache.json のキーの順を Python 版と同じに保つ。float_roundtrip: 実数を読み書きしても 1 ビットも変えない
 serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }

@@ -1,4 +1,4 @@
-"""solver_index.py(索引ファイルの読み込み・kd-tree の探索・タイルの選び方)を実物の索引で確かめるテスト。
+"""solver_index.py(インデックスファイルの読み込み・kd-tree の探索・タイルの選び方)を実物のインデックスで確かめるテスト。
 
 C:\\AstrometryData(環境変数 ZAHYOU_INDEX_DIR で変えられる)が無ければ全部 SKIP。
 """
@@ -57,7 +57,7 @@ def run_case(name, fn, *tags):
 
 
 def random_codes(r, n, D):
-    """C, D を AB を直径とする円の中に一様に置き、索引と同じ正準形にしたコード(画像側の問い合わせの代わり)。"""
+    """C, D を AB を直径とする円の中に一様に置き、インデックスと同じ正準形にしたコード(画像側の問い合わせの代わり)。"""
     k = D // 2
     ang = r.uniform(0, 2 * np.pi, (n, k))
     rad = np.sqrt(r.uniform(0, 1, (n, k)) * 0.5)
@@ -271,7 +271,7 @@ def case_05_code_ball_bruteforce():
         f = index(tag)
         t = f.codetree
         D = f.code_dim
-        C = t.to_real(t.data)                     # 総当たり用に全部を実数へ(写し)
+        C = t.to_real(t.data)                     # 総当たり用に全部を実数へ(コピー)
         order = np.argsort(C[:, 0], kind="stable")
         Cs = C[order]
         k = n // 4
@@ -521,7 +521,7 @@ def case_10_select():
     rows.append(f"ヒント 6 か所 × 半径 3 通りで必要なタイルを全部含む{'' if not worst else ' NG ' + '; '.join(worst[:3])}"
                 f"(タイルの中心・半径 1° なら 5205 は {n5} タイル)")
 
-    # 重なる段が無いときは最も近い段 1 つ
+    # 重なるスケールが無いときは最も近いスケール 1 つ
     tiny = series_of(cat.select(0.05, 0.05, 968, 548))
     huge = series_of(cat.select(5000.0, 5000.0, 968, 548))
     wide = series_of(cat.select(300.0, 300.0, 968, 548))
@@ -656,7 +656,7 @@ def _corrupt(path, mode, count=50):
 
 
 def case_13_corrupt_contents():
-    """大きさとヘッダーは正しいが中身が壊れた索引: ヘッダーの検査は通る(読まない)が、開くとき(木の葉の範囲)と
+    """大きさとヘッダーは正しいが中身が壊れたインデックス: ヘッダーの検査は通る(読まない)が、開くとき(木の葉の範囲)と
     quad の星番号を引くときに SvIndexCorrupt になり、mark_broken で目録から外れて problems に入る。"""
     bad = []
     rows = []
@@ -719,7 +719,7 @@ def main():
     t0 = time.perf_counter()
     for name, fn, tags in CASES:
         if fn is case_07_healpix_vs_astropy or fn is case_08_healpix_self:
-            # 索引が無くても走る(HEALPix の式だけ)
+            # インデックスが無くても走る(HEALPix の式だけ)
             t1 = time.perf_counter()
             try:
                 ok, msg = fn()

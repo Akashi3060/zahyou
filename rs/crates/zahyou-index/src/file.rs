@@ -1,4 +1,4 @@
-//! 索引ファイル 1 本(Python 版 `SvIndexFile`)。ヘッダーは開くときに読み、表は使うときに mmap する。
+//! インデックスファイル 1 本(Python 版 `SvIndexFile`)。ヘッダーは開くときに読み、表は使うときに mmap する。
 
 use std::fmt;
 use std::fs::{File, OpenOptions};
@@ -15,14 +15,14 @@ use crate::healpix::{healpix_xy_center, healpix_xy_radius};
 use crate::kdtree::{ball_query, cone_visit, star_unit, Ints, KdInt, Tree, TreeMeta};
 use crate::layout::{layout_from_source, name_for_check, read_layout, Layout, LayoutError};
 
-/// 索引のエラー。`Display` は画面に出す文(形式の問題は Python 版と同じ文面)。
+/// インデックスのエラー。`Display` は画面に出す文(形式の問題は Python 版と同じ文面)。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IndexError {
     /// OS のエラー(開けない・読めない)。表示は「読めません(…)」
     Io(String),
-    /// 索引の形式の問題
+    /// インデックスの形式の問題
     Format(String),
-    /// この機械では読めない(ビッグエンディアンの CPU・Windows 以外の OS)
+    /// このマシンでは読めない(ビッグエンディアンの CPU・Windows 以外の OS)
     Unsupported(String),
     /// 呼び出しの引数がおかしい(問い合わせの形など)
     Argument(String),
@@ -51,7 +51,7 @@ impl From<LayoutError> for IndexError {
 /// 一度にまとめて並列にする問い合わせの最小の数(これより少なければ 1 本のスレッドで探す)。
 const PAR_MIN_QUERIES: usize = 32;
 
-/// 索引ファイル 1 本。ヘッダーは `open` で読み、表は使うときに mmap する(`close` で放す)。
+/// インデックスファイル 1 本。ヘッダーは `open` で読み、表は使うときに mmap する(`close` で放す)。
 ///
 /// 公開している値は Python 版の属性と同じ意味(design-native-solver.md 2 節)。書き換えないこと。
 pub struct IndexFile {
@@ -73,7 +73,7 @@ pub struct IndexFile {
     pub jitter_arcsec: f64,
     /// 一様化の HEALPix の nside
     pub cutnside: Option<u32>,
-    /// タイルの中心と外接半径(全天の索引は None)
+    /// タイルの中心と外接半径(全天のインデックスは None)
     pub tile_center: Option<Vec3>,
     pub tile_radius_rad: Option<f64>,
     layout: Layout,
@@ -128,7 +128,7 @@ impl IndexFile {
         }
     }
 
-    /// 全天の索引か。
+    /// 全天のインデックスか。
     pub fn allsky(&self) -> bool {
         self.healpix < 0
     }
@@ -154,13 +154,13 @@ impl IndexFile {
     /// 表を mmap して、そのハンドルを返す(何度呼んでもよい。2 回目からは同じものを返す)。
     ///
     /// 探索を何度も繰り返すときは、これで得たハンドルを持って [`IndexData`] のメソッドを呼ぶと
-    /// 毎回の錠を省ける。ハンドルが 1 つでも残っている間はファイルが mmap されたまま。
+    /// 毎回のロックを省ける。ハンドルが 1 つでも残っている間はファイルが mmap されたまま。
     pub fn data(&self) -> Result<Arc<IndexData>, IndexError> {
         if let Some(d) = self.mapped.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             return Ok(Arc::clone(d));
         }
-        // 錠を持たずに開く。開くときの木の検査は rayon で並列に走り、rayon の作業スレッドは待つ間に別の仕事を
-        // 横取りする。錠を持ったままだと、横取りした仕事が同じ索引を開こうとして自分の持つ錠を待ち、止まる
+        // ロックを持たずに開く。開くときの木の検査は rayon で並列に走り、rayon の作業スレッドは待つ間に別の仕事を
+        // 横取りする。ロックを持ったままだと、横取りした仕事が同じインデックスを開こうとして自分の持つロックを待ち、止まる
         // (同じ目録を 2 つの探索が同時に使ったときに実際に止まった)。同時に開いたら先に入れたほうを使う
         let d = Arc::new(IndexData::map(self)?);
         let mut g = self.mapped.lock().unwrap_or_else(|e| e.into_inner());
@@ -186,7 +186,7 @@ impl IndexFile {
         self.try_code_ball(queries, radius).unwrap_or_default()
     }
 
-    /// [`IndexFile::code_ball`] の、エラーを返す版。
+    /// [`IndexFile::code_ball`] の、エラーを返すバージョン。
     pub fn try_code_ball(&self, queries: &[f64], radius: f64) -> Result<Vec<(u32, u32)>, IndexError> {
         self.data()?.code_ball(queries, radius)
     }
@@ -217,7 +217,7 @@ impl IndexFile {
     }
 }
 
-/// mmap した索引の表。[`IndexFile::data`] で得る。
+/// mmap したインデックスの表。[`IndexFile::data`] で得る。
 pub struct IndexData {
     mmap: Mmap,
     // 共有モードで書き込み・削除を拒否して開いたハンドル。mmap が生きている間は持ち続ける(SAFETY の前提)。
@@ -280,9 +280,9 @@ fn map_readonly(file: &File) -> io::Result<Mmap> {
     // - その open のハンドルは mmap より長く持つ。IndexData の _file は mmap より後ろのフィールドなので、mmap を放してから
     //   閉じる(フィールドは宣言の順に捨てられる)。memmap2 も DuplicateHandle で複製したハンドル(同じ open を指す)を
     //   Mmap の中に持ち、UnmapViewOfFile の後で閉じる。
-    // - このプロセスの中で索引のファイルを書いたり消したりするのは zahyou-net のダウンロード(落とし直しを含む)で、.part に
-    //   書いてから名前を変える。mmap 中の索引を消したり .part へ移したりしようとしても、上の共有モードで失敗する(削除と
-    //   書き込み用の open は試験 close_releases_file で確かめている。名前の変更も削除と同じアクセスで開くので拒否される)。
+    // - このプロセスの中でインデックスファイルを書いたり消したりするのは zahyou-net のダウンロード(再ダウンロードを含む)で、.part に
+    //   書いてから名前を変える。mmap 中のインデックスを消したり .part へ移したりしようとしても、上の共有モードで失敗する(削除と
+    //   書き込み用の open はテスト close_releases_file で確かめている。名前の変更も削除と同じアクセスで開くので拒否される)。
     //   この crate は読み取り専用の mmap しか作らない。
     // - 長さが変わっていないことは呼ぶ側が先に確かめ、表の位置はすべて mmap の長さの内か確かめてから読む。
     // 前提は Windows のローカルのディスク(内蔵・外付け)に置いたとき。ネットワーク上の置き場所では、サーバーの種類によっては
@@ -410,7 +410,7 @@ impl IndexData {
         self.code_ball_with(queries, radius, self.codes.prefilter_ok)
     }
 
-    /// [`IndexData::code_ball`] の本体(prefilter = 葉の前ふるいを使うか。試験で両方の答えを比べる)。
+    /// [`IndexData::code_ball`] の本体(prefilter = 葉の前ふるいを使うか。テストで両方の答えを比べる)。
     fn code_ball_with(&self, queries: &[f64], radius: f64, prefilter: bool) -> Result<Vec<(u32, u32)>, IndexError> {
         let d = self.codes.ndim;
         if !queries.len().is_multiple_of(d) {
@@ -516,7 +516,7 @@ impl IndexData {
         self.stars_in_cone_with(center, radius_rad, self.stars.prefilter_ok)
     }
 
-    /// [`IndexData::stars_in_cone`] の本体(prefilter = 葉の前ふるいを使うか。試験で両方の答えを比べる)。
+    /// [`IndexData::stars_in_cone`] の本体(prefilter = 葉の前ふるいを使うか。テストで両方の答えを比べる)。
     fn stars_in_cone_with(&self, center: Vec3, radius_rad: f64, prefilter: bool) -> Vec<u32> {
         match self.cone_start(center, radius_rad) {
             ConeStart::Empty => Vec::new(),
@@ -670,7 +670,7 @@ mod tests {
     use super::*;
     use crate::layout::KdType;
 
-    /// 試験用の乱数(xorshift)。
+    /// テスト用の乱数(xorshift)。
     struct Rng(u64);
 
     impl Rng {
@@ -696,7 +696,7 @@ mod tests {
         }
     }
 
-    /// 星図データの索引 1 本(ZAHYOU_INDEX_DIR か C:\AstrometryData。無ければ None で試験を飛ばす。表を開くのは Windows だけ)。
+    /// インデックスファイル 1 本(ZAHYOU_INDEX_DIR か C:\AstrometryData。無ければ None でテストを飛ばす。表を開くのは Windows だけ)。
     fn index(tag: &str) -> Option<IndexFile> {
         if !cfg!(windows) {
             return None;
@@ -752,7 +752,7 @@ mod tests {
         with.len()
     }
 
-    /// 本物の索引で、乱数の円錐(星のまわり・星がちょうど境目に来る中心・半径 0〜葉の大きさ・端の値)について、
+    /// 本物のインデックスで、乱数の円錐(星のまわり・星がちょうど境目に来る中心・半径 0〜葉の大きさ・端の値)について、
     /// 前ふるいあり・なしの答えが同じで、any_star_in_cone が stars_in_cone の any と同じ。
     #[test]
     fn cone_prefilter_and_any_match_on_real_indexes() {
@@ -760,7 +760,7 @@ mod tests {
         for tag in ["4119", "4115", "4111", "4107", "5206-00", "5202-00"] {
             let Some(f) = index(tag) else { continue };
             let d = f.data().unwrap();
-            // 本物の索引は前ふるいの範囲に入る(入らなければ速くならないだけだが、ここで気づけるように)
+            // 本物のインデックスは前ふるいの範囲に入る(入らなければ速くならないだけだが、ここで気づけるように)
             assert!(d.stars.prefilter_ok && d.codes.prefilter_ok, "{tag}: minval={:?} scale={}", d.stars.minval, d.stars.scale);
             let ns = d.nstars();
             let n = 25_000;
@@ -801,7 +801,7 @@ mod tests {
         eprintln!("円錐のプレフィルターあり・なし・any が一致: {}", rows.join("、"));
     }
 
-    /// 星の値を書き換えた(単位ベクトルでない)索引の写しでも、前ふるいあり・なしの答えが同じ。
+    /// 星の値を書き換えた(単位ベクトルでない)インデックスのコピーでも、前ふるいあり・なしの答えが同じ。
     /// 半分の長さにした星は木の単位では遠いが、正規化すると元の向きに戻るので元の向きの円錐に入る
     /// (ノルムの条件があるので前ふるいが捨てないことを確かめる)。ノルムの許容の境目の前後に伸び縮みした星も混ぜる。
     #[test]
@@ -944,7 +944,7 @@ mod tests {
         eprintln!("ball_visit が変える前の形と同じ葉を同じ順に知らせた: {}", rows.join("、"));
     }
 
-    /// 本物の索引 7 本で、半径 0.001〜0.05 と境目のまわりの乱数の問い合わせについて、前ふるいあり・なしの code_ball が全問一致。
+    /// 本物のインデックス 7 本で、半径 0.001〜0.05 と境目のまわりの乱数の問い合わせについて、前ふるいあり・なしの code_ball が全問一致。
     #[test]
     fn code_ball_prefilter_matches_on_real_indexes() {
         let mut rows = Vec::new();

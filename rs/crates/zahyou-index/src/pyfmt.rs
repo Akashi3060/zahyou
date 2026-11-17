@@ -1,7 +1,7 @@
 //! Python 版と同じ文面のメッセージを作るための書式(`repr`・`{:,}`・`str.strip`)。
 //!
 //! 検査のメッセージは画面にそのまま出るので、Python 版 `dev/solver_index.py` と同じ文字列にする
-//! (試験で Python の出力と突き合わせる)。
+//! (テストで Python の出力と突き合わせる)。
 
 /// Python の `str.strip()` が取り除く空白(ASCII の範囲。ヘッダーは ASCII + U+FFFD だけなので十分)。
 pub(crate) fn is_py_space(c: char) -> bool {

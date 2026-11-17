@@ -1,4 +1,4 @@
-//! 試験の共通部品: rs/testdata の JSON を読む、gen_image.py と同じハッシュ・擬似乱数・base64。
+//! テストの共通部品: rs/testdata の JSON を読む、gen_image.py と同じハッシュ・擬似乱数・base64。
 
 #![allow(dead_code)]
 
@@ -17,7 +17,7 @@ pub fn load_json(name: &str) -> Value {
     serde_json::from_str(&s).expect("JSON")
 }
 
-/// リポジトリの根(rs/crates/zahyou-image から 3 つ上)。
+/// リポジトリのルート(rs/crates/zahyou-image から 3 つ上)。
 pub fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("..")
 }
@@ -27,8 +27,8 @@ pub fn zahyou_dev() -> PathBuf {
     std::env::var_os("ZAHYOU_DEV").map(PathBuf::from).unwrap_or_else(|| repo_root().join("dev"))
 }
 
-/// "$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を base からの相対で実際のパスに。`Downloads/…` がそこに無ければ、同じ並びの控え
-/// (作者の PC の `Documents/claude/zahyou/testdata/images/` の下。Downloads を整理するので写してある。2026-10-29)も見る
+/// "$ZAHYOU_TEST_IMAGES/" の後ろ(rest)を base からの相対で実際のパスに。`Downloads/…` がそこに無ければ、同じフォルダー構成のコピー
+/// (作者の PC の `Documents/claude/zahyou/testdata/images/` の下。Downloads を整理するのでコピーしてある。2026-10-29)も見る
 /// (dev/test_solver_real.py の images_path と同じ決まり)。
 fn images_path(base: PathBuf, rest: &str) -> PathBuf {
     let p = rest.split('/').fold(base.clone(), |b, s| b.join(s));
@@ -66,7 +66,7 @@ pub fn image_path(p: &str) -> PathBuf {
     cands.into_iter().find(|c| c.exists()).unwrap_or(first)
 }
 
-/// 試験用の一時フォルダー(target の下)。
+/// テスト用の一時フォルダー(target の下)。
 pub fn tmpdir(sub: &str) -> PathBuf {
     let base = std::env::var_os("CARGO_TARGET_TMPDIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
     let d = base.join("zahyou-image-tests").join(sub);

@@ -1,4 +1,4 @@
-"""自前ソルバーの幾何(solver_wcs.py)の試験。投影の往復、astropy の WCS との一致、当てはめ。"""
+"""自前ソルバーの幾何(solver_wcs.py)のテスト。投影の往復、astropy の WCS との一致、フィット。"""
 import json
 import math
 import os
@@ -280,10 +280,10 @@ def case_07_scale_parity_copy():
     record("07 スケール・鏡像・copy・crval_radec", not bad, ("NG: " + ", ".join(bad)) if bad else repr(w))
 
 
-# -------------------------------------------------------------- 4 点の当てはめ ---
+# -------------------------------------------------------------- 4 点のフィット ---
 
 def quad_box_error(fit, truth, f, n=7):
-    """4 点を囲む箱の格子で、当てた WCS と真の WCS が指す空のずれの最大 [px]。"""
+    """4 点を囲む箱の格子で、フィットした WCS と真の WCS が指す空のずれの最大 [px]。"""
     lo, hi = f.min(axis=0), f.max(axis=0)
     gx, gy = np.meshgrid(np.linspace(lo[0], hi[0], n), np.linspace(lo[1], hi[1], n))
     d = sv_angle_between(fit.pix_to_xyz(gx, gy), truth.pix_to_xyz(gx, gy))
@@ -291,7 +291,7 @@ def quad_box_error(fit, truth, f, n=7):
 
 
 def pa_deg(wcs, x, y, ref):
-    """画素 (x, y) での画像の +y の向き(北から東回り、度)。東・北は ref の点で測る(2 つの WCS を同じ物差しで比べる)。"""
+    """画素 (x, y) での画像の +y の向き(北から東回り、度)。東・北は ref の点で測る(2 つの WCS を同じ基準で比べる)。"""
     s0 = wcs.pix_to_xyz(x, y)
     s1 = wcs.pix_to_xyz(x, y + 1.0)
     e, n = sv_tan_basis(ref)
@@ -343,7 +343,7 @@ def case_08_similarity_exact():
 
 
 def case_09_similarity_typical():
-    """普段の画像(0.3〜3″/px、CRPIX は画像の中心)で、画面のどこかの 4 点から当てる。
+    """普段の画像(0.3〜3″/px、CRPIX は画像の中心)で、画面のどこかの 4 点からフィットする。
 
     真の接点(画像の中心)と 4 点の接点が δ 離れ、4 点の広がりの半分が θ のとき、投影の違いで
     スケールと向きに δ² + δθ、位置に δθ × quad の大きさ くらいの差が出る(TAN は接点が違うと相似にならない)。
@@ -388,17 +388,17 @@ def case_09_similarity_typical():
            + "  (画像全体は外挿で、参考)")
 
 
-# ---------------------------------------------------------- 最小二乗の当てはめ ---
+# ---------------------------------------------------------- 最小二乗のフィット ---
 
 def grid_error(fit, truth, w, h, n=21):
-    """画像全体の格子で、当てた WCS と真の WCS が同じ空を指すかの最大のずれ [px]。"""
+    """画像全体の格子で、フィットした WCS と真の WCS が同じ空を指すかの最大のずれ [px]。"""
     gx, gy = np.meshgrid(np.linspace(-0.5, w - 0.5, n), np.linspace(-0.5, h - 0.5, n))
     d = sv_angle_between(fit.pix_to_xyz(gx, gy), truth.pix_to_xyz(gx, gy))
     return float(np.max(d)) * ARCSEC / truth.pixel_scale_arcsec()
 
 
 def lsq_cases(sip_order, seed, ncases):
-    """乱数の WCS(0.3〜300″/px、視野は 100° まで)から作った 400 点で当てる。戻り値は最大の誤差の辞書。"""
+    """乱数の WCS(0.3〜300″/px、視野は 100° まで)から作った 400 点でフィットする。戻り値は最大の誤差の辞書。"""
     rng = np.random.default_rng(seed)
     worst = {}
 
@@ -488,7 +488,7 @@ def case_12_lsq_default_crpix():
                 worst_tan = max(worst_tan, e)
             else:
                 worst_sip = max(worst_sip, e)
-                # 逆変換 AP, BP は点の範囲で当ててある。その中でニュートン法の答えと比べる
+                # 逆変換 AP, BP は点の範囲でフィットしてある。その中でニュートン法の答えと比べる
                 gx, gy = np.meshgrid(np.linspace(f[:, 0].min(), f[:, 0].max(), 15),
                                      np.linspace(f[:, 1].min(), f[:, 1].max(), 15))
                 s = fit.pix_to_xyz(gx, gy)
@@ -515,7 +515,7 @@ def case_13_lsq_weights():
     fit_u = sv_fit_wcs_lsq(f2, stars, sip_order=2, crpix=truth.crpix, width=w, height=h)
     ew = grid_error(fit_w, truth, w, h)
     eu = grid_error(fit_u, truth, w, h)
-    # 重み 0 の点を消して当てたものと同じになる
+    # 重み 0 の点を消してフィットしたものと同じになる
     fit_d = sv_fit_wcs_lsq(f2[~bad], stars[~bad], weights=wt[~bad], sip_order=2, crpix=truth.crpix,
                            width=w, height=h)
     ed = grid_error(fit_w, fit_d, w, h)
@@ -612,7 +612,7 @@ def case_16_errors():
 
 def case_17_lsq_converge():
     """接点の動かし直しは収束するまで: 星が CRPIX から離れて固まった広い視野(60°・90° の左 1/3 と隅 1/4、
-    2000×1300、雑音なし)を既定の上限で当てて、中心と隅が 1e-6 px 以内(上限 3 回の固定だった版は 60° の隅 1/4 で
+    2000×1300、雑音なし)を既定の上限でフィットして、中心と隅が 1e-6 px 以内(上限 3 回の固定だったバージョンは 60° の隅 1/4 で
     中心 5.7 px、90° の隅 1/4 で 37 px ずれた)。上限を 3 回にして収まらなければ ValueError。"""
     W, H = 2000, 1300
     cen = np.array([(W - 1) / 2.0, (H - 1) / 2.0])

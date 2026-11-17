@@ -1,7 +1,7 @@
 //! 目標の座標と機材ごとの画素スケールを覚えておくファイル(cache.json)。
 //!
 //! 置き場所は v6 と同じ `%LOCALAPPDATA%\zahyou\cache.json`(環境変数 ZAHYOU_CACHE で上書き)。
-//! 形も同じ: `{"targets": {正規化した名前: {"ra", "dec", "name"}}, "rigs": {機材の鍵: ″/px}}`。
+//! 形も同じ: `{"targets": {正規化した名前: {"ra", "dec", "name"}}, "rigs": {機材のキー: ″/px}}`。
 //! 書き方も Python の `json.dump(cache, f, ensure_ascii=False, indent=1)` とバイト単位で同じにする。
 //! 知らないキーは読んだまま残す。
 //!
@@ -22,7 +22,7 @@ static LOCK: Mutex<()> = Mutex::new(());
 static OVERRIDE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
 /// このプロセスの cache.json を別のファイルにする(起動直後に 1 回だけ。2 回目からは何もしない)。
-/// 環境変数 ZAHYOU_CACHE より優先する。自己診断が利用者の記憶を読み書きしないため(app の `--selftest`)。
+/// 環境変数 ZAHYOU_CACHE より優先する。自己診断が利用者の cache.json を読み書きしないため(app の `--selftest`)。
 pub fn override_path(p: PathBuf) {
     let _ = OVERRIDE.set(p);
 }
@@ -45,7 +45,7 @@ fn home_dir() -> Option<OsString> {
     std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))
 }
 
-/// [`cache_path`] の中身(環境変数を引数で受ける。試験用)。
+/// [`cache_path`] の中身(環境変数を引数で受ける。テスト用)。
 pub fn cache_path_from(
     override_path: Option<OsString>,
     local_appdata: Option<OsString>,
@@ -102,7 +102,7 @@ pub fn save_cache_at(path: &Path, cache: &Map<String, Value>) -> Result<(), Stri
     })
 }
 
-/// 天体名の鍵(Python の `" ".join(str(name).split()).upper()`)。
+/// 天体名のキー(Python の `" ".join(str(name).split()).upper()`)。
 pub fn target_key(name: &str) -> String {
     // Python の str.split() は Unicode の空白に加え \x1c〜\x1f でも区切る
     name.split(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
@@ -155,7 +155,7 @@ pub fn remember_target(name: &str, ra: f64, dec: f64) -> Result<(), String> {
     remember_target_at(&cache_path(), name, ra, dec)
 }
 
-/// 機材の鍵(Python の `rig_key`)。引数はヘッダーの値を Python の `str()` にしたもの
+/// 機材のキー(Python の `rig_key`)。引数はヘッダーの値を Python の `str()` にしたもの
 /// (cam は INSTRUME→CAMID→CAMERA→"?" の最初に空でないもの、bin は XBINNING→BINX→1、focal は FOCALLEN か "")。
 pub fn rig_key(cam: &str, tel: &str, nx: usize, ny: usize, bin: &str, focal: &str) -> String {
     format!("{}|{}|{nx}x{ny}|bin{bin}|f{focal}", cam.trim(), tel.trim())
@@ -190,7 +190,7 @@ pub fn remember_scale(rig: &str, scale_arcsec: f64) -> Result<(), String> {
 }
 
 /// `cache[key]` をオブジェクトとして取り出す(無い・オブジェクトでなければ作り直す。Python の setdefault に近い)。
-/// 直前でオブジェクトにするので None にはならない(panic の道を作らないために Option で返す)。
+/// 直前でオブジェクトにするので None にはならない(panic する経路を作らないために Option で返す)。
 fn section<'a>(cache: &'a mut Map<String, Value>, key: &str) -> Option<&'a mut Map<String, Value>> {
     let v = cache.entry(key.to_string()).or_insert_with(|| Value::Object(Map::new()));
     if !v.is_object() {

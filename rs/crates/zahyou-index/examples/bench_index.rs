@@ -1,12 +1,12 @@
-//! 速さの物差し: Python 版 `dev/solver_index.py` と同じ問い合わせ・同じ機械で比べる。
+//! 速さのベンチマーク: Python 版 `dev/solver_index.py` と同じ問い合わせ・同じマシンで比べる。
 //!
 //! ```text
 //! cargo run --release -p zahyou-index --example bench_index [-- 結果.json]
 //! ```
 //!
 //! 問い合わせは `rs/testdata/index_ball_<tag>.json`(gen_index.py が作ったもの。半径 0.01 の 1000 問と
-//! 速さの物差しの円錐 bench_cone)。答えの件数と sha256 も基準値と比べる(違えば終了コード 1)。
-//! 星図データは `C:\AstrometryData`(環境変数 ZAHYOU_INDEX_DIR)、基準値は `rs/testdata`(ZAHYOU_TESTDATA)。
+//! 速さのベンチマークの円錐 bench_cone)。答えの件数と sha256 も基準値と比べる(違えば終了コード 1)。
+//! インデックスファイルは `C:\AstrometryData`(環境変数 ZAHYOU_INDEX_DIR)、基準値は `rs/testdata`(ZAHYOU_TESTDATA)。
 //! Python 側は `rs/testdata/bench_index.py` が同じ項目を測る。
 //!
 //! 測るもの
@@ -149,7 +149,7 @@ fn main() -> ExitCode {
         ok &= r == first;
         let (t_one, r) = one.install(|| median_of(30, || d.code_ball(q, radius).unwrap_or_default()));
         ok &= r == first;
-        // 1 問ずつ(呼ぶたびに IndexFile を通す = 錠と Arc の分も込み)
+        // 1 問ずつ(呼ぶたびに IndexFile を通す = ロックと Arc の分も込み)
         let (t_each, n_each) = median_of(5, || {
             let mut n = 0;
             for qq in q.chunks_exact(dim) {

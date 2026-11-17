@@ -5,15 +5,15 @@
 //! - 等幅: HackGen Console / HackGen(C:\Windows\Fonts と %LOCALAPPDATA%\Microsoft\Windows\Fonts)→ Consolas
 //!
 //! どれも見つからなければ egui の既定のフォント(日本語は豆腐になる)のまま動く。
-//! 記号と絵文字(✅ ❌ ⚠️ 🌙 ☀ など)は egui 既定の Noto Emoji が拾う。
+//! 記号と絵文字(✅ ❌ ⚠️ 🌙 ☀ など)は egui 既定の Noto Emoji で描く。
 
 use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, FontData, FontDefinitions, FontFamily};
 
-/// 太字の族の名前(`RichText::family(FontFamily::Name(BOLD.into()))`)
+/// 太字のフォントファミリーの名前(`RichText::family(FontFamily::Name(BOLD.into()))`)
 pub const BOLD: &str = "bold";
-/// パスを書く欄の族の名前。游ゴシックなど日本語のフォントは「\」を「¥」の形で描くので、
+/// パスを書く欄のフォントファミリーの名前。游ゴシックなど日本語のフォントは「\」を「¥」の形で描くので、
 /// 英字は Segoe UI で描き、日本語だけ游ゴシック UI に回す
 pub const PATH: &str = "path";
 
@@ -45,7 +45,7 @@ fn user_fonts() -> Option<PathBuf> {
     std::env::var_os("LOCALAPPDATA").map(|p| PathBuf::from(p).join(r"Microsoft\Windows\Fonts"))
 }
 
-/// .ttc / .ttf の各面の「完全な名前」(name ID 4)。読めなければ空。
+/// .ttc / .ttf の各フェイスの「完全な名前」(name ID 4)。読めなければ空。
 fn face_names(data: &[u8]) -> Vec<(u32, String)> {
     let n = ttf_parser::fonts_in_collection(data).unwrap_or(1);
     (0..n)
@@ -62,7 +62,7 @@ fn face_names(data: &[u8]) -> Vec<(u32, String)> {
         .collect()
 }
 
-/// 候補 (ファイル, 面の名前 or 面の番号) を順に試し、最初に見つかったものを返す。
+/// 候補 (ファイル, フェイスの名前 or フェイスの番号) を順に試し、最初に見つかったものを返す。
 enum Pick<'a> {
     Name(&'a str),
     Index(u32),
@@ -98,7 +98,7 @@ fn find_hackgen() -> Option<PathBuf> {
             }
         }
     }
-    // 名前の付け方が違う版(HackGenConsoleNF など)
+    // 名前の付け方が違うもの(HackGenConsoleNF など)
     for d in &dirs {
         if let Ok(rd) = std::fs::read_dir(d) {
             let mut hits: Vec<PathBuf> = rd

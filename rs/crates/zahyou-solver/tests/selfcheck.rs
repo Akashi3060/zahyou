@@ -1,6 +1,6 @@
-//! 物差しの自己点検(Python の test_solver_synth の「偽のソルバー」と同じ考え方): 突き合わせの関数
+//! 比較に使う関数の自己点検(Python の test_solver_synth の「偽のソルバー」と同じ考え方): 突き合わせの関数
 //! (common の solution_diff・detail_diff・trace_diff・compare)が、Python の値そのものなら一致とし、
-//! 1 か所ずらすとそこだけを食い違いとして挙げるかを確かめる。解法は呼ばない(星図データも要らない)。
+//! 1 か所ずらすとそこだけを食い違いとして挙げるかを確かめる。解法は呼ばない(インデックスファイルも要らない)。
 //!
 //! ```text
 //! cargo test -p zahyou-solver --test selfcheck -- --nocapture
@@ -11,7 +11,7 @@ mod common;
 use common::*;
 use zahyou_solver::{SolveDetail, Solution, StarMatch};
 
-/// 場合 hs(ヒント+スケール既知。仮説 1 個で解け、使う索引は 7 本で名前も JSON にある)。
+/// 場合 hs(ヒント+スケール既知。仮説 1 個で解け、使うインデックスは 7 本で名前も JSON にある)。
 fn case_hs() -> Option<Value> {
     let doc = load_testdata("solver_synth.json")?;
     doc["cases"].as_array()?.iter().find(|c| c["name"] == "hs" && c.get("skipped").is_none()).cloned()

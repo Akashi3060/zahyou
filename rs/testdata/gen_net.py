@@ -4,10 +4,10 @@ zahyou-net の照合用の値を Python 版(基準実装)から作る。
     python gen_net.py            # → net_python.json(この隣)
 
 使うもの(読むだけ。どれも書き換えない):
-  gui/zahyou_env.py     星図データの段・名前・URL・画角・おすすめ・ヘッダーの検査・human
+  gui/zahyou_env.py     インデックスファイルのスケール・名前・URL・画角・おすすめ・ヘッダーの検査・human
   gui/zahyou_update.py  Releases の応答の読み方と確認の文言
   dev/zahyou_core.py    solve_online(nova に送る設定。公開しない指定 publicly_visible='n' も)・
-                        resolve_target_name のキャッシュの鍵と書き方
+                        resolve_target_name のキャッシュのキーと書き方
   astroquery / astropy  nova・VizieR・Sesame へ送る要求そのもの(通信は差し替えて、外へは出さない)
 
 Python 版のリポジトリは環境変数 ZAHYOU_PY_REPO で変えられる(既定 ~/Documents/GitHub/zahyou)。
@@ -51,7 +51,7 @@ def bits(x):
     return struct.unpack("<Q", struct.pack("<d", x))[0]
 
 
-# ------------------------------------------------------------------ 星図データ ---
+# -------------------------------------------------------- インデックスファイル ---
 def gen_env():
     out = {
         "scale_fov": [[s, lo, hi] for s, (lo, hi) in env.SCALE_FOV.items()],
@@ -96,7 +96,7 @@ def card(key, value=None, comment=None):
             v = f"'{value:<8}'"
             v = f"{v:<20}"
         elif isinstance(value, str):
-            v = f"{value[1:]:>20}"          # 生のまま(壊れた値の試験用)
+            v = f"{value[1:]:>20}"          # 生のまま(壊れた値のテスト用)
         else:
             v = f"{value:>20}"
         s = f"{key:<8}= {v}"

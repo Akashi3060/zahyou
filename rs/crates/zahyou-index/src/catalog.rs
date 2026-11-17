@@ -1,4 +1,4 @@
-//! 星図データのフォルダー全体(Python 版 `SvIndexCatalog`)。
+//! インデックスファイルのフォルダー全体(Python 版 `SvIndexCatalog`)。
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -14,11 +14,11 @@ use crate::pyfmt::float_repr;
 /// quad の AB の最小 = 0.1 × 画像の短辺(select の下限)。
 pub const QUAD_MIN_FRAC: f64 = 0.1;
 
-/// 星図データのフォルダー。index-*.fits を走査してヘッダーを検査する(データは使うときに mmap)。
+/// インデックスファイルのフォルダー。index-*.fits を走査してヘッダーを検査する(データは使うときに mmap)。
 #[derive(Debug)]
 pub struct Catalog {
     pub index_dir: PathBuf,
-    /// 使える索引(INDEXID・HEALPIX の順)
+    /// 使えるインデックス(INDEXID・HEALPIX の順)
     pub files: Vec<IndexFile>,
     /// 使えないファイル [(パス, 理由)]
     pub problems: Vec<(PathBuf, String)>,
@@ -79,7 +79,7 @@ impl Catalog {
         }
         files.sort_by_key(|f| (f.indexid, f.healpix));
 
-        // 同じ系列の中で段の値がそろっていないファイルは外す(いちばん多い形に合わせる。
+        // 同じ系列の中でヘッダーの値(DIMQUADS・SCALE・HPNSIDE)がそろっていないファイルは外す(いちばん多い形に合わせる。
         // 同数のときは先に出てくる形。Python 版は set の順で決まる)
         type Sig = (usize, u64, u64, i64);
         let sig = |f: &IndexFile| -> Sig { (f.dimquads, f.scale_lo_rad.to_bits(), f.scale_hi_rad.to_bits(), f.hpnside) };
@@ -115,33 +115,33 @@ impl Catalog {
         cat
     }
 
-    /// 開いている索引の mmap を全部放す。
+    /// 開いているインデックスの mmap を全部放す。
     pub fn close(&self) {
         for f in &self.files {
             f.close();
         }
     }
 
-    /// 手持ちの段の quad の大きさの範囲 (lo, hi)(分角)。索引が無ければ None。
+    /// 手持ちのスケールの quad の大きさの範囲 (lo, hi)(分角)。インデックスが無ければ None。
     pub fn coverage_arcmin(&self) -> Option<(f64, f64)> {
         let lo = self.files.iter().map(|f| f.scale_lo_rad).reduce(f64::min)?;
         let hi = self.files.iter().map(|f| f.scale_hi_rad).reduce(f64::max)?;
         Some((lo.to_degrees() * 60.0, hi.to_degrees() * 60.0))
     }
 
-    /// 画像に使う索引を選んで、試す順に並べる(files の番号)。入力がおかしければ空。
+    /// 画像に使うインデックスを選んで、試す順に並べる(files の番号)。入力がおかしければ空。
     ///
     /// 理由が要るときは [`Catalog::try_select`]。
     pub fn select(&self, scale_lo: f64, scale_hi: f64, width: f64, height: f64, hint: Option<(Vec3, f64)>) -> Vec<usize> {
         self.try_select(scale_lo, scale_hi, width, height, hint).unwrap_or_default()
     }
 
-    /// 画像に使う索引を選んで、試す順に並べる(files の番号)。
+    /// 画像に使うインデックスを選んで、試す順に並べる(files の番号)。
     ///
     /// scale_lo, scale_hi: 画素スケールの範囲(″/px)。width, height: 画像の大きさ(px)。
-    /// quad の大きさ(px)が [0.1 × 短辺, 対角] に入りうる段 = [0.1·min(W,H)·scale_lo, hypot(W,H)·scale_hi](″)と
-    /// [SCALE_L, SCALE_U] が重なる段を選ぶ。重なる段が無ければ最も近い段 1 つ。
-    /// 順は「quad の大きさが画像の短辺の半分くらい(0.5·min(W,H)·√(scale_lo·scale_hi))になる段」から。
+    /// quad の大きさ(px)が [0.1 × 短辺, 対角] に入りうる角度の範囲 [0.1·min(W,H)·scale_lo, hypot(W,H)·scale_hi](″)と
+    /// [SCALE_L, SCALE_U] が重なるスケールを選ぶ。重なるスケールが無ければ最も近いスケール 1 つ。
+    /// 順は「quad の大きさが画像の短辺の半分くらい(0.5·min(W,H)·√(scale_lo·scale_hi))になるスケール」から。
     /// ヒント(中心の単位ベクトルと半径 rad)があれば、タイルの系列はヒントの円(半径 + 画像の対角の半分)と
     /// 重なるタイルだけを、ヒントに近い順に。無ければ番号の順。
     pub fn try_select(

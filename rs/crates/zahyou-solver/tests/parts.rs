@@ -8,11 +8,11 @@
 //! - quad の AB の範囲(sv_quad_ab_range)・一致の重み・F 分布の点・HEALPix の 1 辺
 //! - 解の判定(sv_accept_logodds・sv_tuneup_accepted)と、既定の値で 2026-10-24 の誤った解 2 件が解にならないこと
 //! - 判定で見送った候補のまとめ(sv_passed_add・sv_passed_note。探索の終わりの行の末尾に足す文)と、受け入れの値を
-//!   極端に上げて候補を見送らせ、quad を試し尽くした探索のログの行(秒を除く)が Python と同じこと(索引が要る)
-//! - 4 点の当てはめ(sv_fit_similarity_many の 1 組ずつ)
+//!   極端に上げて候補を見送らせ、quad を試し尽くした探索のログの行(秒を除く)が Python と同じこと(インデックスが要る)
+//! - 4 点のフィット(sv_fit_similarity_many の 1 組ずつ)
 //! - 検証の積み上げ(sv_verify_core。1 対 1 の付け替え・偽物・打ち切りを含む 60 仮説)
 //! - 検証の対数オッズ(sv_verify_wcs → zahyou_solver::verify_wcs。合成星野で真の WCS・乱数・回転・鏡像・ずらしたもの。
-//!   さらに Python の解の quad と WCS を渡すと Python の解の対数オッズになること。索引が要る)
+//!   さらに Python の解の quad と WCS を渡すと Python の解の対数オッズになること。インデックスが要る)
 //!
 //! ```text
 //! cargo test -p zahyou-solver --test parts -- --nocapture
@@ -332,7 +332,7 @@ fn passed_note_matches_python() {
 }
 
 /// 改良の後の判定で候補を見送らせ(受け入れの値を極端に上げる)、quad を試し尽くした探索のログが、秒の所を除いて
-/// Python と同じ行になる(最後の「解けませんでした」の行の、見送った候補のまとめを含む)。索引が要る。
+/// Python と同じ行になる(最後の「解けませんでした」の行の、見送った候補のまとめを含む)。インデックスが要る。
 #[test]
 fn passed_solve_log_matches_python() {
     let Some(d) = parts() else { return };
@@ -477,7 +477,7 @@ fn accumulate_matches_python() {
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 
-/// 索引の名前("index-5202-20" / "index-4107")から系列の番号。
+/// インデックスの名前("index-5202-20" / "index-4107")から系列の番号。
 fn series_of(name: &str) -> Option<u32> {
     name.strip_prefix("index-")?.split('-').next()?.parse().ok()
 }
@@ -541,7 +541,7 @@ fn verify_wcs_matches_python() {
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 
-/// Python の解(quad の 4 点・索引・最終の WCS)をそのまま verify_wcs に渡すと、Python の解の対数オッズになる
+/// Python の解(quad の 4 点・インデックス・最終の WCS)をそのまま verify_wcs に渡すと、Python の解の対数オッズになる
 /// (Python の sv_verify_wcs の約束)。合成星野の Python の解で確かめる(探索を通さない検証の突き合わせ)。
 #[test]
 fn verify_wcs_with_quad_gives_python_solution_logodds() {

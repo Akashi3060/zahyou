@@ -107,7 +107,7 @@ fn notices_view(ui: &mut egui::Ui, th: &Theme) {
         let area = egui::ScrollArea::vertical().id_salt("third_party_notices_text").max_height(360.0).auto_shrink([false, true]);
         egui::Frame::new().fill(th.entry).stroke(egui::Stroke::new(1.0_f32, th.border)).inner_margin(egui::Margin::same(4)).show(ui, |ui| {
             ui.scope(|ui| {
-                // つまみの色は widgets::scroll と同じにする(既定の色はチェックの箱の地と同じで見えにくい)
+                // つまみの色は widgets::scroll と同じにする(既定の色はチェックボックスの地と同じで見えにくい)
                 {
                     let w = &mut ui.visuals_mut().widgets;
                     w.inactive.bg_fill = th.border;
@@ -229,8 +229,8 @@ fn help_lines() -> Vec<(Tag, String)> {
     add(Plain, "要らなければマニュアル 9 章の手順で消せます。");
     add(Plain, "やめるときは、zahyou.exe と上の置き場所を消してください。");
     add(Plain, "インデックスファイル (C:\\AstrometryData) は、使わないならフォルダーごと消せます。");
-    // β版の間だけ(正式版に上げれば出なくなる)。v7 のβ版のときの文。次の大きな版のβ版を出すときは書き直す
-    // (試験 beta_版の間だけ更新の扱いを説明する が大きな版の食い違いで落ちる。docs/release-v7.md 2 節)
+    // β版の間だけ(正式版に上げれば出なくなる)。v7 のβ版のときの文。次のメジャーバージョンのβ版を出すときは書き直す
+    // (テスト beta_版の間だけ更新の扱いを説明する がメジャーバージョンの食い違いで失敗する。docs/release-v7.md 2 節)
     if zahyou_net::update::prerelease_label(APP_VER).is_some() {
         add(Muted, "このバージョンは v7 のβ版です。上の「更新を確認」は、GitHub の Releases から");
         add(Muted, "次のβ版と v7 の正式版を探します。β版は v6 の「更新を確認」には出てきません。");
@@ -403,7 +403,7 @@ mod tests {
     fn beta_版の間だけ更新の扱いを説明する() {
         let text: String = help_lines().into_iter().map(|(_, s)| s + "\n").collect();
         let beta = zahyou_net::update::prerelease_label(APP_VER).is_some();
-        // 大きな版を版から組み立てて探す(β版を出すときに説明の「v7」を書き直し忘れると落ちる。docs/release-v7.md 2 節)
+        // メジャーバージョンをバージョン番号から組み立てて探す(β版を出すときに説明の「v7」を書き直し忘れると失敗する。docs/release-v7.md 2 節)
         let intro = format!("このバージョンは v{} のβ版です。", env!("CARGO_PKG_VERSION_MAJOR"));
         assert_eq!(text.contains(&intro), beta, "β版の説明の有無がバージョン名と合わない ({APP_VER})");
         assert_eq!(crate::prerelease_suffix().is_empty(), !beta);

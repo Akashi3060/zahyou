@@ -1,4 +1,4 @@
-//! HTTP の共通部分: エージェントの作り方、本文の読み取り、続きから落とす処理。
+//! HTTP の共通部分: エージェントの作り方、本文の読み取り、続きからダウンロードする処理。
 
 use crate::NetError;
 use std::fs::{File, OpenOptions};
@@ -19,8 +19,8 @@ pub(crate) fn agent(timeout: Duration, status_err: bool) -> Agent {
         .into()
 }
 
-/// ダウンロード用のエージェント。全体の上限は付けず、つなぐ・応答を待つ・本文を受ける の段ごとに上限を置く。
-/// 本文の上限は 1 回の要求ぶん(区切りの大きさ)にかかる。
+/// ダウンロード用のエージェント。全体の上限は付けず、つなぐ・応答を待つ・本文を受ける の段階ごとに上限を置く。
+/// 本文の上限は 1 回の要求ぶん(セグメントの大きさ)にかかる。
 pub(crate) fn download_agent(recv_body: Duration) -> Agent {
     Agent::config_builder()
         .timeout_connect(Some(Duration::from_secs(30)))
@@ -31,7 +31,7 @@ pub(crate) fn download_agent(recv_body: Duration) -> Agent {
         .into()
 }
 
-/// ureq の誤りを 1 行の説明にする(Python 版の `type(e).__name__` の代わり)。
+/// ureq のエラーを 1 行の説明にする(Python 版の `type(e).__name__` の代わり)。
 pub(crate) fn describe(e: &ureq::Error) -> String {
     match e {
         ureq::Error::StatusCode(c) => format!("HTTP {c}"),
@@ -68,7 +68,7 @@ pub(crate) fn head_size(agent: &Agent, url: &str) -> Result<u64, String> {
         .ok_or_else(|| "Content-Length がありません".to_string())
 }
 
-/// 中止を見ながら眠る。
+/// 中止を見ながら待つ(sleep)。
 pub(crate) fn sleep_with_stop(d: Duration, stop: &dyn Fn() -> bool) -> bool {
     let end = Instant::now() + d;
     while Instant::now() < end {
@@ -80,7 +80,7 @@ pub(crate) fn sleep_with_stop(d: Duration, stop: &dyn Fn() -> bool) -> bool {
     !stop()
 }
 
-/// 続きから落とす処理の設定。
+/// 続きからダウンロードする処理の設定。
 #[derive(Clone, Debug)]
 pub(crate) struct ResumeOpts {
     /// 1 回の要求で頼む大きさ(Range の幅)
@@ -89,7 +89,7 @@ pub(crate) struct ResumeOpts {
     pub retries: u32,
     /// 待ち時間の単位。n 回目の失敗のあと min(2^n, 20) × これ だけ待つ
     pub retry_unit: Duration,
-    /// 1 区切りの本文を受け取る上限
+    /// 1 セグメントの本文を受け取る上限
     pub segment_timeout: Duration,
     /// 追加のヘッダー
     pub headers: Vec<(String, String)>,
@@ -115,7 +115,7 @@ enum Step {
     NoRange,
 }
 
-/// `url` を `part` へ落とす。`part` に途中まであれば Range で続きから。
+/// `url` を `part` へダウンロードする。`part` に途中まであれば Range で続きから。
 ///
 /// `total` が分かっていれば(Some)、`part` がその大きさになったら終わり。分からなければ(None)
 /// 全体を 1 回で頼み、終わりまで読む。`account(+n / -n)` で進み具合(バイト)を伝える。
@@ -187,7 +187,7 @@ pub(crate) fn resume_download(
     }
 }
 
-/// Range で `have` から 1 区切りぶんを頼む。
+/// Range で `have` から 1 セグメントぶんを頼む。
 #[allow(clippy::too_many_arguments)]
 fn request_segment(
     agent: &Agent,
@@ -199,7 +199,7 @@ fn request_segment(
     account: &mut dyn FnMut(i64),
     stop: &dyn Fn() -> bool,
 ) -> Result<Step, NetError> {
-    // 呼ぶ側は have < total を保証している。区切りが 0 でも 1 バイトずつは進む
+    // 呼ぶ側は have < total を保証している。セグメントの大きさが 0 でも 1 バイトずつは進む
     let end = have.saturating_add(opts.segment.max(1)).min(total) - 1;
     let mut req = agent
         .get(url)
@@ -276,7 +276,7 @@ fn request_whole(
     Ok(Step::Progress)
 }
 
-/// 本文をファイルへ写す。1 MiB ずつ読み、そのたびに中止を見る。
+/// 本文をファイルへコピーする。1 MiB ずつ読み、そのたびに中止を見る。
 fn copy_body(
     mut reader: impl Read,
     mut file: File,

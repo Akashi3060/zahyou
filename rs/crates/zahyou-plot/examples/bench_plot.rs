@@ -5,7 +5,7 @@
 //! ZAHYOU_BENCH_OUT=<フォルダー> を付けると 2 枚の PNG(明るい配色と暗い配色)を書き出す。
 //! ZAHYOU_BENCH_DUMP=<フォルダー> を付けると、Python 版と比べるための入力(画像と WCS のカード)と、
 //! 北が上の描き直しの結果(bench_northup.f32 と .json)を書き出す。
-//! ZAHYOU_BENCH_CHECK=1 を付けると、灰色への速い写しが画素ごとの式と全画素で同じかを数える。
+//! ZAHYOU_BENCH_CHECK=1 を付けると、灰色への速い変換が画素ごとの式と全画素で同じかを数える。
 
 use std::time::Instant;
 
@@ -148,7 +148,7 @@ fn main() {
     let (t, g) = best(reps, || grid_for_view(&wcs, w, h, &zoom));
     println!("拡大した格子と目盛り(SIP)   {:8.3} 秒  線 {} 本・目盛り {} 本", t, g.lines.len(), g.ticks.len());
     if std::env::var_os("ZAHYOU_BENCH_CHECK").is_some() {
-        // 灰色への速い写し(gray_rgba)が、画素ごとの式(Norm::gray8)と全画素で同じか
+        // 灰色への速い変換(gray_rgba)が、画素ごとの式(Norm::gray8)と全画素で同じか
         let nu = reproject_north_up(&img, &wcs).unwrap();
         let n2 = compute_norm_f64(&nu.image.data);
         for (name, im, n) in [("図 1", &img, norm), ("図 2", &nu.image, n2)] {

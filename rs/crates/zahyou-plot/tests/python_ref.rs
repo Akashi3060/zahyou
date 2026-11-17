@@ -360,7 +360,7 @@ fn north_up_and_markers() {
             worst_norm = worst_norm.max(d);
             assert!(d < 1e-6, "{note}: 北が上の図の伸張 {n:?} / {a} {b}");
         }
-        // 2 つの図の印(中心・矢印・目標の円・TARGET)と題
+        // 2 つの図のマーカー(中心・矢印・目標の円・TARGET)とタイトル
         let center = v2(&c["center"]);
         for m in c["markers"].as_array().unwrap() {
             let target = m["target"].as_array().map(|t| (num(&t[0]), num(&t[1])));
@@ -383,7 +383,7 @@ fn north_up_and_markers() {
     );
 }
 
-/// 図の表示リストの印を、Python の _draw_markers が置いたものと比べる。戻り値は位置の差の最大(px)。
+/// 図の表示リストのマーカーを、Python の _draw_markers が置いたものと比べる。戻り値は位置の差の最大(px)。
 fn check_markers(fig: &Figure, pm: &Value, what: &str) -> f64 {
     let mut worst = 0.0f64;
     // SIP の図では astropy の all_world2pix が 1e-4 px で反復を止めるので、その分だけ許す
@@ -490,8 +490,8 @@ fn layout_matches_matplotlib() {
             );
             let (bw, bh) = l.axes.size();
             let ab = [l.axes.x0, l.axes.y0, l.axes.x0 + bw, l.axes.y0 + bh];
-            // 上の辺に目盛りの文字があると(極のそば)、Python 版は題を上の文字・軸名に重ねて読めなくしてしまう。
-            // Rust は題をその上へ逃がして上の余白を足すので、軸の矩形は同じにならない。重ならないことと、
+            // 上の辺に目盛りの文字があると(極のそば)、Python 版はタイトルを上の文字・軸名に重ねて読めなくしてしまう。
+            // Rust はタイトルをその上へ逃がして上の余白を足すので、軸の矩形は同じにならない。重ならないことと、
             // 軸が Python より大きく縮んでいないことだけを確かめる
             let top_labels = fig.tick_labels.iter().any(|t| t.side == Side::Top);
             if top_labels {
@@ -516,7 +516,7 @@ fn layout_matches_matplotlib() {
             let d = box_diff(ab, &p["axes"]);
             println!("配置 {what}: 軸の矩形の差 {d:.2} px");
             worst_axes = worst_axes.max(d);
-            // 実測 0.7 px 以下。題は matplotlib がヒンティングした字の高さ("lp" が 17 px、丸めなければ 17.95 px)の分だけずれる
+            // 実測 0.7 px 以下。タイトルは matplotlib がヒンティングした字の高さ("lp" が 17 px、丸めなければ 17.95 px)の分だけずれる
             assert!(d < 1.0, "{what}: 軸の矩形 Rust {ab:?} / Python {}", p["axes"]);
             {
                 let t = l.title.expect("題");

@@ -7,8 +7,8 @@ app の pipeline.rs / scale.rs の照合用の値を Python 版(基準実装)で
   --zahyou   $ZAHYOU_PY_REPO、無ければ ~/Documents/GitHub/zahyou
   --oracle   $ZAHYOU_ORACLE、無ければ $ZAHYOU_TEST_IMAGES(無ければ ~)/Documents/claude/zahyou/testdata/oracle
              (WSL 版 astrometry.net の正解。リポジトリには入れない作者のデータ。docs/rust-port.md 11 節)
-  試験画像   $ZAHYOU_TEST_IMAGES(無ければ ~)/Downloads/Capture_00001 00_10_33.fits(試験の画像と同じ決まり)
-pipeline_run.json の画像のパスも同じ決まりの形で書く(Rust の試験 pipeline.rs の resolve_image がこの PC のパスにする):
+  テスト画像 $ZAHYOU_TEST_IMAGES(無ければ ~)/Downloads/Capture_00001 00_10_33.fits(テストの画像と同じ決まり)
+pipeline_run.json の画像のパスも同じ決まりの形で書く(Rust のテスト pipeline.rs の resolve_image がこの PC のパスにする):
   image は "$ZAHYOU_TEST_IMAGES/Downloads/…"、dev/realcase の画像(runs の image_path)はリポジトリからの相対
   "dev/realcase/…"(zahyou-rs に無ければ $ZAHYOU_PY_REPO の同じ相対パス)。
 
@@ -17,11 +17,11 @@ pipeline_run.json の画像のパスも同じ決まりの形で書く(Rust の�
   pipeline_scale.json    estimate_pixel_scale・rig_key・implied_focal_length・index_coverage・blind_scale_bounds・
                          missing_index_advice・_existing_wcs_header
   pipeline_summary.json  wcs_summary・print_solution・_sanity_ok・report_offsets・目標の画素(world_to_pixel)
-  pipeline_run.json      run() のログ(手元の試験画像があるときだけ。無ければ "skipped")
+  pipeline_run.json      run() のログ(手元のテスト画像があるときだけ。無ければ "skipped")
 
 Python 版は dev/ の solver_wcs.py・solver_index.py・zahyou_core.py・zahyou_plot.py・nb_main.py を
 dev/build_nb.py と同じ手順でメモリ上に組み立てて使う(ファイルは書かない)。solver_core.py は使わない
-(別の係が書き換え中。オフライン解析の本体 sv_solve は「解なし」を返す関数に差し替える)。
+(別の作業で書き換え中。オフライン解析の本体 sv_solve は「解なし」を返す関数に差し替える)。
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ DEFAULT_ORACLE = (os.environ.get("ZAHYOU_ORACLE")
                   or os.path.join(IMAGES, "Documents", "claude", "zahyou", "testdata", "oracle"))
 TEST_IMAGE_REL = "$ZAHYOU_TEST_IMAGES/Downloads/Capture_00001 00_10_33.fits"   # JSON に書く形
 TEST_IMAGE = os.path.join(IMAGES, *TEST_IMAGE_REL.split("/")[1:])
-if not os.path.exists(TEST_IMAGE):   # Downloads を整理したあとは、同じ並びの控え(dev/test_solver_real.py の images_path と同じ)
+if not os.path.exists(TEST_IMAGE):   # Downloads を整理したあとは、同じ並びのコピー(dev/test_solver_real.py の images_path と同じ)
     _copy = os.path.join(IMAGES, "Documents", "claude", "zahyou", "testdata", "images", *TEST_IMAGE_REL.split("/")[1:])
     if os.path.exists(_copy):
         TEST_IMAGE = _copy

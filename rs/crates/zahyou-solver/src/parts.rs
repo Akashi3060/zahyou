@@ -1,11 +1,11 @@
 //! 解法の部品(Python 版 dev/solver_core.py の同じ名前の関数)。探索の本体(search.rs)もこれを使う。
 //!
-//! 試験(Python の値との突き合わせ)のために公開している。値と並びは Python 版と同じ:
+//! テスト(Python の値との突き合わせ)のために公開している。値と並びは Python 版と同じ:
 //! - 星の並べ替え: `sv_box_order`・`sv_uniformize`・`sv_order_stars`・`_SvField` の検証の星の並び(3.2 節)
 //! - quad 作り: `sv_quad_geometry`・`sv_quads_newest`(newpoint 方式、3.3 節)
 //! - コード: `sv_field_codes`・`sv_code_variants`(正準化・境界の近くは両方・鏡像、3.4 節)
 //! - quad の大きさの範囲: `sv_quad_ab_range`(3.5 節)
-//! - 4 点の当てはめ: `sv_fit_similarity_many` の 1 組ぶん(3.6 節)
+//! - 4 点のフィット: `sv_fit_similarity_many` の 1 組ぶん(3.6 節)
 //! - 検証の積み上げ: `sv_verify_core` の 1 仮説ぶん(最近傍は Python と同じく単精度の距離で選ぶ。3.7 節)
 //! - 一致の重み・F 分布の点・HEALPix の 1 辺: `sv_logodds_weight`・`sv_f_upper`・`sv_healpix_side_rad`
 //! - 解の判定: `sv_accept_logodds`・`sv_tuneup_accepted`(3.7 節の 6)
@@ -208,7 +208,7 @@ pub fn quads_newest(n: usize, dimquads: usize, g: &QuadGeometry, ab2_lo: f64, ab
     out
 }
 
-/// [`quads_newest`] の、結果を out の後ろに足す版。
+/// [`quads_newest`] の、結果を out の後ろに足すバージョン。
 pub fn quads_newest_into(
     n: usize,
     dimquads: usize,
@@ -298,7 +298,7 @@ pub struct CodeVariants {
     pub q: Vec<[f64; 4]>,
     /// 元の codes の行
     pub row: Vec<usize>,
-    /// 索引の quad の星 A, B, C(, D) に対応する画像側の quad の列(3 星は 4 つめが usize::MAX)
+    /// インデックスの quad の星 A, B, C(, D) に対応する画像側の quad の列(3 星は 4 つめが usize::MAX)
     pub perm: Vec<[usize; 4]>,
     /// 鏡像の形か
     pub mirror: Vec<bool>,
@@ -306,7 +306,7 @@ pub struct CodeVariants {
 
 /// 照合に投げるコードの形を全部作る(Python の `sv_code_variants`)。
 ///
-/// - 正準化は索引と同じ: 4 星は cx + dx ≤ 1(破れていれば A↔B = 全成分 1 − v)、cx ≤ dx(破れていれば C↔D)。
+/// - 正準化はインデックスと同じ: 4 星は cx + dx ≤ 1(破れていれば A↔B = 全成分 1 − v)、cx ≤ dx(破れていれば C↔D)。
 ///   3 星は cx ≤ 1/2。境界から 1.5·codetol 以内なら入れ替えた形も問い合わせる
 ///   (= 4 通りの並びのうち cx + dx ≤ 1 + 1.5·codetol かつ cx ≤ dx + 1.5·codetol のものを全部)。
 /// - 鏡像: (x, y) を入れ替えた形 (cy, cx, dy, dx) にも同じことをする(parity が Both か Mirror)。
@@ -367,7 +367,7 @@ pub fn code_variants(codes: &[[f64; 4]], dimquads: usize, codetol: f64, parity: 
     out
 }
 
-/// 索引の段で使える quad の AB の長さの範囲 [minAB, maxAB](px)(Python の `sv_quad_ab_range`)。
+/// インデックスのスケールで使える quad の AB の長さの範囲 [minAB, maxAB](px)(Python の `sv_quad_ab_range`)。
 ///
 /// fudge = SCALE_U × codetol / (√2 × s_hi)、minAB = max(SCALE_L / s_hi − fudge, quad_min_frac × 短辺)、
 /// maxAB = SCALE_U / s_lo + fudge(SCALE は ″、s は ″/px)。
@@ -396,7 +396,7 @@ pub(crate) fn py_max(a: f64, b: f64) -> f64 {
     if b > a { b } else { a }
 }
 
-// ------------------------------------------------------------------ 4 点の当てはめ ---
+// ------------------------------------------------------------------ 4 点のフィット ---
 
 /// 4 点(3 点)からの回転+等方スケールの TAN(Python の `sv_fit_similarity_many` の 1 組ぶん)。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -429,7 +429,7 @@ fn np_sum(v: &[f64]) -> f64 {
     }
 }
 
-/// 4 点(3 点)から回転+等方スケールを当てる(行列式の符号は見ない = 鏡像も表せる)。
+/// 4 点(3 点)から回転+等方スケールをフィットする(行列式の符号は見ない = 鏡像も表せる)。
 ///
 /// 接点 r = 星の単位ベクトルの和の方向、CRPIX = 画像の点の重心。星を r で投影した (ξ, η) と画像の点から
 /// それぞれ重心を引き、C = Σ fᵢ pᵢᵀ = U S Vᵀ、R = V Uᵀ、スケール = √(Σ|pᵢ|² / Σ|fᵢ|²)、CD = スケール × R。
@@ -636,7 +636,7 @@ pub(crate) fn nearest_refs(
 
 /// 対数オッズの積み上げ(Python の `sv_verify_core` を 1 仮説ぶん。設計書 3.7 節の 5)。
 ///
-/// test_xy は画像の星(検証に使う全部)、test_idx はこの仮説の並び(test_xy の行。−1 は詰め物)、
+/// test_xy は画像の星(検証に使う全部)、test_idx はこの仮説の並び(test_xy の行。−1 はパディング)、
 /// sig2 は列ごとの σ²(px²)、ref_xy はこの仮説の参照星(sweep の順)、logbg = −ln(有効面積)。
 ///
 /// logd(μ) = ln(d + (1 − d)·μ/NR) + logbg、logfg = ln((1 − d)/(2π σᵢ² NR)) − dist²/(2σᵢ²)。
@@ -816,7 +816,7 @@ pub fn f_upper(d1: f64, d2: f64, z: f64) -> f64 {
     ((bb + (bb * bb - aa * cc).sqrt()) / aa).powi(3)
 }
 
-/// HEALPix の 1 辺の目安(ラジアン)= √(4π / 12) / nside。
+/// HEALPix の 1 辺のおおよその長さ(ラジアン)= √(4π / 12) / nside。
 pub fn healpix_side_rad(nside: u32) -> f64 {
     (4.0 * std::f64::consts::PI / 12.0).sqrt() / nside as f64
 }
@@ -826,15 +826,15 @@ pub fn healpix_side_rad(nside: u32) -> f64 {
 /// この探索で nhyp 個の仮説を試したところで、解とみなす対数オッズ(Python の `sv_accept_logodds`。設計書 3.7 節の 6)。
 ///
 /// nhyp が accept_hyps0 以下なら logodds_solve、超えたら logodds_solve + ln(nhyp / accept_hyps0)。
-/// 考え方: 偶然の仮説の尤度比が K を超える見込みは 1 つあたり 1/K 以下なので、当て直す前の尤度比に k 個目で 1e9·k/1e5 を
-/// 求めれば、探索全体の見込みは 1e−4·(1 + ln(N/1e5)) 以下になる。ただし実装はこの値を最後の改良(一致した星への当て直し)
+/// 考え方: 偶然の仮説の尤度比が K を超える見込みは 1 つあたり 1/K 以下なので、再フィットする前の尤度比に k 個目で 1e9·k/1e5 を
+/// 求めれば、探索全体の見込みは 1e−4·(1 + ln(N/1e5)) 以下になる。ただし実装はこの値を最後の改良(一致した星への再フィット)
 /// の後の対数オッズと比べ、tune-up を通らない仮説の入口は固定の logodds_solve のままなので、厳密な上限ではない(その経路で
-/// 保証されるのは固定の 1e9 と同じ N/1e9 まで)。当て直しの上げ幅が ln(N/1e5) より小さい偶然の解を止める目安で、
+/// 保証されるのは固定の 1e9 と同じ N/1e9 まで)。再フィットによる上げ幅が ln(N/1e5) より小さい偶然の解を止めるための基準で、
 /// tune-up 経由の偶然の解は、試した仮説が tune_gain_hyps0(1e6)個を超えてからは `tuneup_accepted` が受け持つ
 /// (1e5〜1e6 個はこの値だけで止める。候補の記録 8,364 件に、その範囲で tune-up で solve に届いて一致が増えないものは無かった)。
 /// 代償: 対数オッズ L の本物の解でも、初めて出るのが N > accept_hyps0·e^(L − logodds_solve) 個目なら捨てる
-/// (L = 24 で 2.7e6、26.9 で 4.8e7)。N は探索 1 回で全部の系列にまたがって数えるので、星図データが多いほど・速いほど
-/// 同じ締め切りの中で基準が厳しくなる(比較の画像の正しい解に L < 50 かつ N > 1e5 は無いが、星の少ない画像に偽の検出を足して
+/// (L = 24 で 2.7e6、26.9 で 4.8e7)。N は探索 1 回で全部の系列にまたがって数えるので、インデックスファイルが多いほど・速いほど
+/// 同じタイムアウトの中で基準が厳しくなる(比較の画像の正しい解に L < 50 かつ N > 1e5 は無いが、星の少ない画像に偽の検出を足して
 /// 作ると、仮説 1e5 個を超えて初めて出る 21〜22 の正しい解を落とす。docs/rust-port.md 14.6・14.7)。
 pub fn accept_logodds(p: &Params, nhyp: u64) -> f64 {
     let n = nhyp as f64;
@@ -848,13 +848,13 @@ pub fn accept_logodds(p: &Params, nhyp: u64) -> f64 {
 /// この探索で nhyp 個の仮説を試したところで、tune-up(1 次の改良で検証し直す)で solve に届いた仮説を解にしてよいか
 /// (Python の `sv_tuneup_accepted`)。
 ///
-/// 改良は検証に使ったのと同じ星に WCS を当て直すので、それだけでオッズが上がる(偶然の仮説で 4〜8.5)。
+/// 改良は検証に使ったのと同じ星に WCS を再フィットするので、それだけでオッズが上がる(偶然の仮説で 4〜8.5)。
 /// 本物の仮説なら改良で新しい星が並ぶので、nhyp が tune_gain_hyps0 を超えたら、改良後の一致数が 4 点の検証の一致数より
 /// tune_min_gain 以上多いことを求める。それまでは求めない: 星の少ない画像の本物の解は、星が全部一致済みで増えようがない
 /// (星 8 個の 3I_00010 は仮説 4,553 個目に tune-up で 21.9・一致 4 → 4 で解ける。星 17〜31 個の画像に偽の検出が数個混ざると、
 /// quad を試し尽くす探索でも、仮説 1.0e5〜2.4e5 個目に同じ形の正しい解が出る)。見つかった誤った解は、どれも 266 万個目より後。
 /// 代償: tune_gain_hyps0 を超えてから tune-up で上がり、一致が増えない本物の候補も捨てる(比較の画像では s-30d-r3 の
-/// 仮説 582 万個目の 1 候補で、別の仮説で先に解けていて結果は変わらない)。区切りが 1e5 だったときは、星の少ない画像に
+/// 仮説 582 万個目の 1 候補で、別の仮説で先に解けていて結果は変わらない)。チェックポイントが 1e5 だったときは、星の少ない画像に
 /// 偽の検出を足して作ると 1e5 個のすぐ上で正しい解を落としたので、1e6 にした(docs/rust-port.md 14.6・14.7)。
 pub fn tuneup_accepted(p: &Params, nhyp: u64, nmatch_before: usize, nmatch_after: usize) -> bool {
     if !(p.tune_min_gain > 0 && (nhyp as f64) > p.tune_gain_hyps0) {
@@ -1230,7 +1230,7 @@ mod tests {
         res
     }
 
-    /// 試験用の乱数(xorshift)。
+    /// テスト用の乱数(xorshift)。
     struct Rng(u64);
 
     impl Rng {
@@ -1252,7 +1252,7 @@ mod tests {
     }
 
     /// 最近傍(並べ替えを不安定にした)と積み上げ(ln を μ が増えたときだけ計算する)が、変える前の形と to_bits まで同じ。
-    /// 乱数の星野で、一致・偽物・取り合い(付け替えあり・なし)・詰め物(−1)・打ち切り・同じ x の参照星・NaN を混ぜる。
+    /// 乱数の星野で、一致・偽物・取り合い(付け替えあり・なし)・パディング(−1)・打ち切り・同じ x の参照星・NaN を混ぜる。
     #[test]
     fn nearest_and_accumulate_match_reference() {
         let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
@@ -1280,7 +1280,7 @@ mod tests {
             if it % 97 == 0 && !ref_xy.is_empty() {
                 ref_xy[0][0] = f64::NAN; // x が NaN の参照星(並べ替えが安定に戻る道)
             }
-            // 並び: 画像の星の番号(ときどき詰め物 −1、ときどき同じ星を 2 回)
+            // 並び: 画像の星の番号(ときどきパディング −1、ときどき同じ星を 2 回)
             let test_idx: Vec<i64> = (0..nt)
                 .map(|i| match (rng.next() * 20.0) as usize {
                     0 => -1,

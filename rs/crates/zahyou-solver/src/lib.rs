@@ -1,24 +1,24 @@
 //! 解法(Lang et al. 2010 の quad 法)。Python 版の基準実装 dev/solver_core.py の `sv_solve`・`sv_verify_wcs` と、
-//! dev/zahyou_core.py の `solve_offline`(試行のはしご)を移したもの(設計書 docs/design-native-solver.md 3 節、
+//! dev/zahyou_core.py の `solve_offline`(段階的な試行)を移したもの(設計書 docs/design-native-solver.md 3 節、
 //! docs/rust-port.md 4.5 節)。
 //!
 //! 流れ(`solve`)
 //!   1. 星を明るい順 → 一様化。quad には先頭 max_quad_stars 個、検証には先頭 max_verify_stars 個。
-//!      ヒントがあれば、タイルの索引は「その段の quad が照合で残りうるタイル」に絞る。
-//!   2. 星を 1 つずつ足し、足した星を含む quad だけを作る(newpoint)。quad が束にたまったら照合へ。
-//!   3. 索引ごとに AB の長さで quad を選び、コード(通常と鏡像、正準化の境界の近くは両方の並び)を
-//!      code_ball に投げる。当たりはスケールとヒントで安く捨ててから、4 点で回転+等方スケールを当てる。
+//!      ヒントがあれば、タイルに分かれたインデックスは「そのスケールの quad が照合で残りうるタイル」に絞る。
+//!   2. 星を 1 つずつ足し、足した星を含む quad だけを作る(newpoint)。quad がバッチにたまったら照合へ。
+//!   3. インデックスごとに AB の長さで quad を選び、コード(通常と鏡像、正準化の境界の近くは両方の並び)を
+//!      code_ball に投げる。当たりはスケールとヒントで安く捨ててから、4 点で回転+等方スケールをフィットする。
 //!   4. 仮説を系列ごとに newpoint の順で 8192 個ずつ検証する(安い足切り → 対数オッズ)。
 //!      tune 以上 solve 未満なら 1 次で改良して検証し直す。
 //!   5. solve 以上になった最初の仮説を改良して返す。ただし、改良した後の対数オッズが「試した仮説の数で上げた値」
 //!      (`parts::accept_logodds`)に届かないもの、試した仮説が 1e6 個を超えてから tune-up で上がったのに改良で一致が
 //!      増えないもの(`parts::tuneup_accepted`)は解にしない(astrometry.net には無い条件。設計書 3.7 節の 6)。
 //!
-//! 探す順と判定は Python と同じ。並列(rayon)にするのは索引のファイルごとの照合・当たりの安い棄却と当てはめ・
-//! 検証の束の中の仮説ごとの検証だけで、結果は Python の順に並べてから選ぶので、スレッドの数によらず同じ解になる。
-//! 締め切りと中止は重い処理の区切りごと(code_ball の問い合わせ 512 個(search.rs の BALL_CHUNK。Python は 2048)・仮説 1 つ・
+//! 探す順と判定は Python と同じ。並列(rayon)にするのはインデックスファイルごとの照合・当たりの安い棄却とフィット・
+//! 検証のバッチの中の仮説ごとの検証だけで、結果は Python の順に並べてから選ぶので、スレッドの数によらず同じ解になる。
+//! タイムアウトと中止は重い処理の一定の単位ごと(code_ball の問い合わせ 512 個(search.rs の BALL_CHUNK。Python は 2048)・仮説 1 つ・
 //! タイル 1 枚)に見る。
-//! 中身の壊れた索引は、そのファイル(か系列)を外して探索を続ける。
+//! 中身の壊れたインデックスは、そのファイル(か系列)を外して探索を続ける。
 //!
 //! 座標の約束は zahyou-wcs と同じ(画素は 0 始まり、x = 列、y = 行。CD は度/px)。
 #![forbid(unsafe_code)]
@@ -62,7 +62,7 @@ pub struct SolveRequest {
     pub stars: Vec<FieldStar>,
     pub width: usize,
     pub height: usize,
-    /// 画素スケールの範囲 [″/px]。無ければ手持ちの索引から逆算する
+    /// 画素スケールの範囲 [″/px]。無ければ手持ちのインデックスから逆算する
     pub scale_lo: Option<f64>,
     pub scale_hi: Option<f64>,
     /// ヒント (赤経 度, 赤緯 度, 半径 度)
@@ -150,7 +150,7 @@ impl Default for Params {
     }
 }
 
-/// 締め切り・中止・ログの受け渡し。
+/// タイムアウト・中止・ログの受け渡し。
 pub struct Control<'a> {
     pub deadline: Option<Instant>,
     pub cancel: &'a AtomicBool,
@@ -181,7 +181,7 @@ pub struct Solution {
     pub nfield: usize,
     /// 検証に使った参照星の数(同)
     pub nref: usize,
-    /// 解いた索引(例 "index-5205-02")
+    /// 解いたインデックス(例 "index-5205-02")
     pub index_name: String,
     /// 照合に投げた画像の quad の数
     pub quads_tried: u64,
@@ -211,9 +211,9 @@ pub struct StarMatch {
 #[derive(Clone, Debug)]
 pub struct SolveDetail {
     pub solution: Solution,
-    /// 画像の星の番号(SolveRequest.stars の添字。索引の quad の A, B, C, D の順)
+    /// 画像の星の番号(SolveRequest.stars の添字。インデックスの quad の A, B, C, D の順)
     pub quad_field: Vec<usize>,
-    /// 索引の星の番号
+    /// インデックスの星の番号
     pub quad_index: Vec<u32>,
     /// 最後の検証で一致した星
     pub matches: Vec<StarMatch>,
@@ -235,7 +235,7 @@ pub fn solve(req: &SolveRequest, catalog: &Catalog, params: &Params, ctl: &Contr
     solve_detailed(req, catalog, params, ctl, &SolveOptions::default()).map(|o| o.map(|d| d.solution))
 }
 
-/// [`solve`] の、解の素性(quad の星・一致)も返し、trace も書ける版。
+/// [`solve`] の、解の素性(quad の星・一致)も返し、trace も書けるバージョン。
 pub fn solve_detailed(
     req: &SolveRequest,
     catalog: &Catalog,
@@ -277,7 +277,7 @@ fn check_hint(hint: Option<(f64, f64, f64)>) -> Result<(), String> {
     Ok(())
 }
 
-/// 探索 1 回(索引の持ち方を外から渡す。試行のはしごは壊れた索引の記録を持ち越す)。
+/// 探索 1 回(インデックスの持ち方を外から渡す。段階的な試行では壊れたインデックスの記録を持ち越す)。
 /// Invalid はヒント・スケールなどの入力がおかしいとき(Python の ValueError)。
 pub(crate) fn solve_in(
     req: &SolveRequest,
@@ -362,13 +362,13 @@ pub struct VerifyReport {
     pub matches: Vec<StarMatch>,
 }
 
-/// 与えた WCS をそのまま検証して対数オッズを返す(Python の sv_verify_wcs。試験と、Python と同じ値が出るかの
+/// 与えた WCS をそのまま検証して対数オッズを返す(Python の sv_verify_wcs。テストと、Python と同じ値が出るかの
 /// 確かめ用。探索では使わない)。
 ///
-/// 参照星は系列 indexid の全タイルから集める(探索の検証と同じ)。quad = (画像の星の番号, 索引の名前,
-/// 索引の星の番号) を渡すと、探索と同じく σ の広がりと RoR を quad から決め、quad の星を両側から外す
+/// 参照星は系列 indexid の全タイルから集める(探索の検証と同じ)。quad = (画像の星の番号, インデックスの名前,
+/// インデックスの星の番号) を渡すと、探索と同じく σ の広がりと RoR を quad から決め、quad の星を両側から外す
 /// ([`SolveDetail`] の quad_field・index_name・quad_index をそのまま渡せば、解の logodds と同じ値になる)。
-/// quad が無ければ σ = pix(広がりなし)、RoR は画像全体。系列・索引が無い、quad の形がおかしいときは Err。
+/// quad が無ければ σ = pix(広がりなし)、RoR は画像全体。系列・インデックスが無い、quad の形がおかしいときは Err。
 #[allow(clippy::too_many_arguments)]
 pub fn verify_wcs(
     stars: &[FieldStar],
@@ -442,7 +442,7 @@ pub fn verify_wcs(
 
 // ------------------------------------------------------------------ オフライン解析 ---
 
-/// オフライン解析の試行のはしご(Python の solve_offline。設計書 4 節)。
+/// オフライン解析の段階的な試行(Python の solve_offline。設計書 4 節)。
 pub struct OfflineRequest<'a> {
     pub prep: &'a zahyou_image::Prep,
     /// 標準の検出(明るい順)
@@ -453,17 +453,17 @@ pub struct OfflineRequest<'a> {
     pub scale: Option<f64>,
     /// 目標の方向をヒントにするとき (赤経, 赤緯, 半径) 度
     pub hint: Option<(f64, f64, f64)>,
-    /// 全体の締め切り [秒]
+    /// 全体のタイムアウト [秒]
     pub timeout_s: f64,
 }
 
 /// オフライン解析の本体。ログは Python 版と同じ形(`[i/N] ラベル  (最大 t 秒)` → `✅ 解析成功 (ラベル)`)。
 ///
 /// 条件(ヒント+スケール既知 → ヒント+スケール全域 → 全天+スケール既知 → 全天+スケール全域)ごとに、
-/// 深い検出の星 → 標準の検出の星の順に [`solve`] を試す。各試行には残り時間の一部を割り当てる。
-/// 事前のログ(画素スケール・手持ちの段)と、解けなかったときの案内・「■ 中止しました。」は呼ぶ側(app)が出す。
-/// 終わったら索引の mmap を放す(Python の finally の catalog.close())。
-/// 案内に要る「深い検出の星の数」「どこで止まったか」も欲しいときは [`solve_offline_detailed`]。
+/// ディープ検出の星 → 標準の検出の星の順に [`solve`] を試す。各試行には残り時間の一部を割り当てる。
+/// 事前のログ(画素スケール・手持ちのスケール)と、解けなかったときの案内・「■ 中止しました。」は呼ぶ側(app)が出す。
+/// 終わったらインデックスの mmap を放す(Python の finally の catalog.close())。
+/// 案内に要る「ディープ検出の星の数」「どこで止まったか」も欲しいときは [`solve_offline_detailed`]。
 pub fn solve_offline(
     req: &OfflineRequest,
     catalog: &Catalog,
@@ -477,13 +477,13 @@ pub fn solve_offline(
 /// (Python の `_solve_offline` は、星が足りない・途中で失敗したときは案内を出さずに戻る)。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OfflineStop {
-    /// 試行のはしごを試した(解けた・全部試した・時間切れ)
+    /// 段階的な試行を行った(解けた・全部試した・時間切れ)
     #[default]
     Tried,
     /// 3 個以上の星の組が無かった。星が 1 個以上なら「星が N 個しかない」はログに出してある。
     /// 1 つも無いとき(「星が 1 つも無い」)の文は呼ぶ側が出す
     TooFewStars,
-    /// 使える索引が 1 つも無かった(文は呼ぶ側が出す)
+    /// 使えるインデックスが 1 つも無かった(文は呼ぶ側が出す)
     NoIndex,
     /// 途中で失敗した(panic。「オフライン解析が途中で失敗しました」はログに出してある)
     Failed,
@@ -494,13 +494,13 @@ pub enum OfflineStop {
 pub struct OfflineOutcome {
     /// 解(解けなければ None)
     pub solution: Option<Solution>,
-    /// 深い検出の星の数(検出できなかった・失敗したときは 0)。案内の「写っている星が N 個」は
+    /// ディープ検出の星の数(検出できなかった・失敗したときは 0)。案内の「写っている星が N 個」は
     /// Python と同じく max(標準の検出の数, これ)
     pub n_deep: usize,
     pub stop: OfflineStop,
 }
 
-/// [`solve_offline`] の、止まった理由と深い検出の星の数も返す版。中止なら Err(Cancelled)。
+/// [`solve_offline`] の、止まった理由とディープ検出の星の数も返すバージョン。中止なら Err(Cancelled)。
 pub fn solve_offline_detailed(
     req: &OfflineRequest,
     catalog: &Catalog,
@@ -517,7 +517,7 @@ pub fn solve_offline_detailed(
     r
 }
 
-/// 索引の mmap を放す(Catalog::close)。mmap を外す仕事(触ったページの多い大きな索引では 0.1 秒ほど)は
+/// インデックスの mmap を放す(Catalog::close)。mmap を外す仕事(触ったページの多い大きなインデックスでは 0.1 秒ほど)は
 /// 別のスレッドで行い、呼ぶ側(中止の 0.2 秒以内の約束)を待たせない。開いている表のハンドルを先に集めてから
 /// 目録の側を放し、集めたハンドルを別のスレッドで捨てる(最後のハンドルが消えたときに mmap が外れる)。
 fn release_in_background(catalog: &Catalog) {
@@ -562,13 +562,13 @@ mod tests {
         assert_eq!(solve(&req, &cat, &Params::default(), &ctl).unwrap_err(), SolveError::Cancelled);
     }
 
-    /// ほかのプロセスが書き込み用に開いている索引(Windows では共有違反で開けない)は「壊れている」とせず、
-    /// その探索の中でだけ外す。ほかの索引で解け、閉じられたあとの次の試行(同じ Store)では開き直して使う。
-    /// 星図データ(index-4113〜4117)と rs/testdata/solver_synth.json の corrupt の星野が無ければ SKIP。
+    /// ほかのプロセスが書き込み用に開いているインデックス(Windows では共有違反で開けない)は「壊れている」とせず、
+    /// その探索の中でだけ外す。ほかのインデックスで解け、閉じられたあとの次の試行(同じ Store)では開き直して使う。
+    /// インデックスファイル(index-4113〜4117)と rs/testdata/solver_synth.json の corrupt の星野が無ければ SKIP。
     #[test]
     fn index_open_for_writing_is_not_called_broken() {
         if !cfg!(windows) {
-            // 共有モードで書き込み中の索引を断るのも、索引の表を開くのも Windows だけ(zahyou-index の map_readonly)
+            // 共有モードで書き込み中のインデックスを断るのも、インデックスの表を開くのも Windows だけ(zahyou-index の map_readonly)
             eprintln!("SKIP: index_open_for_writing_is_not_called_broken: Windows 以外ではインデックスの表を開かない");
             return;
         }

@@ -3,7 +3,7 @@
 #
 #  役割 : どんな天体画像 (FITS / PNG / JPEG / TIFF / 動画キューブ) が来ても
 #         「星の座標リスト」を作り、自前の解析エンジン (solver_*.py) で確実に解く。
-#         WSL も astrometry.net の実行ファイルも使わない。星図データ (index-*.fits)
+#         WSL も astrometry.net の実行ファイルも使わない。インデックスファイル (index-*.fits)
 #         だけを読む。
 # ==============================================================================
 
@@ -31,7 +31,7 @@ except ImportError:                                   # pragma: no cover
 # 自前の解析エンジン (sv_solve / SvIndexCatalog / SvCancelled)。
 # zahyou_engine.py に組み立てるときはこの import ごと消え、同じ名前空間に入った
 # solver_*.py の中身をそのまま使う。ここが効くのは、このファイルを単体で import
-# したとき (dev/test_robust.py など) だけ。読み込み・検出だけの試験は solver_*.py が
+# したとき (dev/test_robust.py など) だけ。読み込み・検出だけのテストは solver_*.py が
 # 無くても動くよう、solver そのものが無いときだけは黙って先へ進む。
 try:
     from solver_core import *                         # noqa: F401,F403
@@ -51,7 +51,7 @@ class SolveInput:
         self.data = data                 # 2次元 float32 (星検出用)
         self.header = header if header is not None else fits.Header()
         self.note = note                 # 読み込み方法の説明
-        # 表示用。検出用と同じ幾何であること (同じ WCS を当てるため)
+        # 表示用。検出用と同じ幾何であること (同じ WCS を適用するため)
         self.display = display_data if display_data is not None else data
         # 表示するとき上下を反転するか (行 0 が画面の上に来る画像なら True)
         self.flip_y = flip_y
@@ -268,7 +268,7 @@ def load_image_any(path):
         raise ValueError("画像が一様です (全画素が同じ値)。露出やファイルを確認してください。")
 
     # 星図 (白地に黒い星) は明暗が逆。星の検出は「明るい点」を
-    # 探すので、そのままでは 1 つも拾えない。検出に使う面だけ反転する。
+    # 探すので、そのままでは 1 つも検出できない。検出に使う面だけ反転する。
     # 表示は元のまま (白地の星図は白地で見せたほうが自然)。
     if looks_inverted(data):
         data = float(np.nanmax(data)) - data
@@ -456,11 +456,11 @@ def detect_sources(sub, mask, sigma, min_sources=12, max_sources=400,
     疎な星野では雑音のこぶも同じだけ増える (合成テストで純度 100% → 30%)。
     どの値でも「本物だけ増やす」ことはできなかったので 5.0 のままにしてある。
     これは図に緑の丸で出す星で、確かなものだけを残す。解析エンジンには、暗い星まで
-    拾う detect_sources_deep の星を先に渡す (solve_offline)。
+    検出する detect_sources_deep の星を先に渡す (solve_offline)。
 
-    しきい値の段の「σ」は smooth_sigma = sigma / 2 を単位にしているが、σ=1 の
+    しきい値の段階の「σ」は smooth_sigma = sigma / 2 を単位にしているが、σ=1 の
     ガウスでぼかした白色雑音の実際の標準偏差は sigma / (2√π) ≈ 0.28 sigma
-    (3I の画像の実測 0.31 sigma)。つまり最後の段 2.0 は実際には約 3.2σ で、
+    (3I の画像の実測 0.31 sigma)。つまり最後の段階 2.0 は実際には約 3.2σ で、
     書いてある値より 1.6〜1.8 倍高い。図の星を変えないために、このままにしてある。
     """
     if ndimage is None:
@@ -507,12 +507,12 @@ def detect_sources(sub, mask, sigma, min_sources=12, max_sources=400,
     return best[:max_sources], used
 
 
-# ------------------------------------------------ 解析エンジンに渡す星 (深い検出) ---
+# -------------------------------------------- 解析エンジンに渡す星 (ディープ検出) ---
 #
 # detect_sources は図に出す星なので、領域の面積と開口 SNR で確かなものだけを残す。
 # 星の少ない画像ではそれが数個にとどまり、解析エンジンの検証 (対数オッズ) の
 # 証拠が足りなくなる (3I: 星 8 個で対数オッズ 21.6〜21.9、合格は 20.7。この検出の星 15 個で 47.7)。
-# 解析エンジンに渡す星は次の考え方で別に拾う (solve-field の image2xy と同じ方針。コードは自前):
+# 解析エンジンに渡す星は次の考え方で別に検出する (solve-field の image2xy と同じ方針。コードは自前):
 #   背景を引く → 星の幅に合わせてガウスでぼかす (整合フィルター) →
 #   局所の雑音の u 倍を超える局所の極大を星とする。
 # u は「雑音だけの画像で偽の極大が画像全体で 2 個ほど」になる値にする (下の式)。
@@ -523,9 +523,9 @@ _DEEP_FALSE_RATE = 0.045        # 偽の極大の数の係数 (白色雑音で�
 
 def _block_map(img, valid, box, fn):
     """
-    box 画素の升ごとに fn (升の値を最後の軸に並べた配列 → 升ごとの値) を計算し、
-    3x3 の中央値でならしてから升の中心を節点に双一次で引き伸ばす (外側は端の値)。
-    マスクの画素は NaN にして渡す。升が縦横 3 つ未満なら None。
+    box 画素四方のブロックごとに fn (ブロックの値を最後の軸に並べた配列 → ブロックごとの値) を計算し、
+    3x3 の中央値でならしてからブロックの中心を節点に双一次で引き伸ばす (外側は端の値)。
+    マスクの画素は NaN にして渡す。ブロックが縦横 3 つ未満なら None。
     """
     ny, nx = img.shape
     by, bx = ny // box, nx // box
@@ -536,7 +536,7 @@ def _block_map(img, valid, box, fn):
     t = np.where(valid, img, np.nan)[oy:oy + h, ox:ox + w].astype(np.float32)
     t = t.reshape(by, box, bx, box).transpose(0, 2, 1, 3).reshape(by, bx, box * box)
     with warnings.catch_warnings():
-        warnings.simplefilter("ignore")              # 全部マスクの升 (All-NaN slice)
+        warnings.simplefilter("ignore")              # 全部マスクのブロック (All-NaN slice)
         coarse = fn(t)
     good = np.isfinite(coarse)
     if not good.any():
@@ -561,7 +561,7 @@ def _median_last(t):
 
 
 def _mad_sigma_last(t):
-    """最後の軸の MAD から出した標準偏差。有効な画素が 1/4 未満の升は NaN。"""
+    """最後の軸の MAD から出した標準偏差。有効な画素が 1/4 未満のブロックは NaN。"""
     med = _median_last(t)
     mad = _median_last(np.abs(t - med[..., None]))
     n = np.sum(np.isfinite(t), axis=-1)
@@ -647,7 +647,7 @@ def _false_peaks(u, area, s):
 def _peak_offset(a, b, c):
     """
     3 点 (左, 中央, 右) の極大の位置を -0.5〜0.5 で返す。値が全部正ならガウスに
-    ちょうど合う対数の放物線、そうでなければ普通の放物線を当てる。
+    ちょうど合う対数の放物線、そうでなければ普通の放物線をフィットする。
     """
     if a > 0.0 and b > 0.0 and c > 0.0:
         la, lb, lc = math.log(a), math.log(b), math.log(c)
@@ -663,11 +663,11 @@ def _peak_offset(a, b, c):
 def detect_sources_deep(sub, mask, sigma, max_sources=400, target_false=2.0, min_u=4.0,
                         info=None):
     """
-    深い検出 (解析エンジンに渡す星)。detect_sources より暗い星まで拾う。
+    ディープ検出 (解析エンジンに渡す星)。detect_sources より暗い星まで検出する。
 
       1. σ=1 でぼかした画像の明るい星から、星像の幅 (σ_psf) を測る
       2. 画像を σ = 1.25 σ_psf (測れなければ 1.5、1〜8 に収める) のガウスでぼかし、
-         升ごとの中央値で背景を引く。雑音は升ごとの MAD で場所ごとに測る
+         ブロックごとの中央値で背景を引く。雑音はブロックごとの MAD で場所ごとに測る
       3. 局所の極大のうち、その場所の雑音の u 倍を超えるものを候補にする。
          u は _false_peaks が target_false 個 (画像全体) になる値 (min_u 以上)
       4. 明るい順に見て、次のものは捨てる:
@@ -675,17 +675,17 @@ def detect_sources_deep(sub, mask, sigma, max_sources=400, target_false=2.0, min
          ・ぼかした像の曲率で見た伸びが 4 倍を超える (光跡・線)
          ・鋭さが明るい星の典型の 2 倍を超える (ベイヤーで十字に広がったホットピクセル)
          ・まわりの輪 (ぼかした星像の σ の 3 倍の半径) の中央値より雑音の 3 倍以上高くない
-           (大きなかぶりの上で、背景の当てはめの残りに雑音が乗っただけの極大。月明かりの
-           合成画像で偽の星が 42 → 5 個。前処理の背景は 64 画素の升を双一次で引き伸ばすので、
-           急なかぶりでは升の節点に折れ目のこぶが残る)
-      5. 位置はぼかした像の 3x3 に (対数の) 放物線を当てて小数まで出す
+           (大きなかぶりの上で、背景のフィットの残りに雑音が乗っただけの極大。月明かりの
+           合成画像で偽の星が 42 → 5 個。前処理の背景は 64 画素のブロックを双一次で引き伸ばすので、
+           急なかぶりではブロックの節点に折れ目のこぶが残る)
+      5. 位置はぼかした像の 3x3 に (対数の) 放物線をフィットして小数まで出す
 
     戻り値は detect_sources と同じ形 (星のリスト, しきい値 u)。リストは明るい順。
     flux はぼかした像の頂の値から出したガウスの全光量 (並べ替えの目安)、
     snr は頂の値 / その場所の雑音、area は FWHM の円の面積 (目安)。
     info に dict を渡すと、測った値 (s_psf, s, u, 候補の数, 捨てた理由ごとの数, 秒) を入れる。
 
-    以前の版は画像を 2x2 にまとめて detect_sources をかけていたが、効くのは FWHM が
+    以前のバージョンは画像を 2x2 にまとめて detect_sources をかけていたが、効くのは FWHM が
     7 画素以上の星だけだった。ここでは星の幅に合わせてぼかすので、細い星でも太い星でも
     同じように効く。
     """
@@ -730,7 +730,7 @@ def detect_sources_deep(sub, mask, sigma, max_sources=400, target_false=2.0, min
     nmap = _block_map(sm, ~bad, int(max(32, round(16 * s))), _mad_sigma_last)
     if nmap is None:
         nmap = np.full(sm.shape, ns, dtype=np.float32)
-    nmap = np.maximum(nmap, 0.7 * ns)              # 星で埋まった升で雑音を低く見積もらない
+    nmap = np.maximum(nmap, 0.7 * ns)              # 星で埋まったブロックで雑音を低く見積もらない
 
     # 3. しきい値と候補
     area = float((~bad).sum())
@@ -848,7 +848,7 @@ def _first_float(header, keys):
 
 def rig_key(header, shape):
     """
-    「同じ機材・同じ画像サイズ」を表す鍵。
+    「同じ機材・同じ画像サイズ」を表すキー。
     画素スケールは焦点距離とセンサーで決まるので、これが同じなら前回の実測値が使える。
     """
     ny, nx = shape
@@ -885,7 +885,7 @@ def estimate_pixel_scale(header, focal_length_mm=None, shape=None):
       4. ヘッダの焦点距離 x 画素サイズ
       5. 前に同じ機材で解いたときの実測値  ← 2 回目以降は設定不要で速くなる
 
-    5 を最後に置いているのは、鏡筒を替えてもカメラが同じなら鍵が一致してしまうため。
+    5 を最後に置いているのは、鏡筒を替えてもカメラが同じならキーが一致してしまうため。
     ヘッダが焦点距離を書いてくれているなら、そちらを信じた方が安全。
     """
     if focal_length_mm:
@@ -938,9 +938,9 @@ def implied_focal_length(header, scale_arcsec):
     return 206.264806 * pix / scale_arcsec
 
 
-# ============================================================== 星図データ ===
+# ===================================================== インデックスファイル ===
 
-# 星図データ (astrometry.net 形式の index-*.fits) の既定の置き場所。
+# インデックスファイル (astrometry.net 形式の index-*.fits) の既定の置き場所。
 # GUI は［準備］タブの欄、ノートブックはセル C の INDEX_DIR で変えられる。
 DEFAULT_INDEX_DIR = (r"C:\AstrometryData" if os.name == "nt"
                      else "/usr/share/astrometry")
@@ -1023,7 +1023,7 @@ def _in_gui():
 
 
 def _index_get_advice(series):
-    """足りない段の取り方。GUI は［準備］タブ、ノートブックは配布ページの zip とセル C の INDEX_DIR。"""
+    """足りないスケールの取り方。GUI は［準備］タブ、ノートブックは配布ページの zip とセル C の INDEX_DIR。"""
     if _in_gui():
         return (f"取得: ［準備］タブのスケールの一覧で index-{series} にチェックを入れ、"
                 "「選んだスケールをダウンロード」を押してください。")
@@ -1041,20 +1041,20 @@ def _index_get_advice(series):
 
 
 def _index_place_advice():
-    """星図データの置き場所の直し方 (GUI とノートブックで違う)。"""
+    """インデックスファイルの置き場所の直し方 (GUI とノートブックで違う)。"""
     if _in_gui():
         return "［準備］タブでインデックスファイルをダウンロードするか、置き場所を指定し直してください。"
     return ("配布ページ (README の 5 章) の zip を展開するか、"
             "セル C の INDEX_DIR をインデックスファイルのある場所に直してください。")
 
 
-# 星図データの目録 (SvIndexCatalog) を覚えておく。作るときにヘッダーを 1 本ずつ
+# インデックスファイルの目録 (SvIndexCatalog) を覚えておく。作るときにヘッダーを 1 本ずつ
 # 検査するので、置き場所と中身が前回と同じなら解析のたびに作り直さない。
 _INDEX_CATALOG = {"key": None, "catalog": None}
 
 
 def _index_dir_key(index_dir):
-    """置き場所の「中身の目印」: フォルダーの更新時刻と、索引ファイルの名前・大きさ・更新時刻。"""
+    """置き場所と中身を表すキー: フォルダーの更新時刻と、インデックスファイルの名前・大きさ・更新時刻。"""
     d = os.path.abspath(index_dir)
     try:
         dir_mtime = os.stat(d).st_mtime_ns
@@ -1070,7 +1070,7 @@ def _index_dir_key(index_dir):
 
 
 def index_catalog(index_dir=None):
-    """星図データの目録 (SvIndexCatalog) を返す。置き場所と中身が前回と同じなら使い回す。"""
+    """インデックスファイルの目録 (SvIndexCatalog) を返す。置き場所と中身が前回と同じなら使い回す。"""
     index_dir = index_dir or DEFAULT_INDEX_DIR
     key = _index_dir_key(index_dir)
     if (key is not None and key == _INDEX_CATALOG["key"]
@@ -1084,10 +1084,10 @@ def index_catalog(index_dir=None):
 
 def release_index_catalog():
     """
-    覚えている目録を手放す (索引ファイルの mmap を閉じる)。
+    覚えている目録を手放す (インデックスファイルの mmap を閉じる)。
 
     Windows では mmap 中のファイルを消したり置き換えたりできない。
-    GUI は星図データを落とし直す前にこれを呼ぶ。
+    GUI はインデックスファイルをダウンロードし直す前にこれを呼ぶ。
     """
     catalog = _INDEX_CATALOG["catalog"]
     _INDEX_CATALOG.update(key=None, catalog=None)
@@ -1100,7 +1100,7 @@ def release_index_catalog():
 
 
 def _catalog_names(catalog):
-    """目録に入っている (検査に通った) 索引ファイルの名前の一覧。"""
+    """目録に入っている (検査に通った) インデックスファイルの名前の一覧。"""
     names = set()
     for f in getattr(catalog, "files", None) or []:
         names.add(os.path.basename(str(getattr(f, "path", f))))
@@ -1116,7 +1116,7 @@ def _problem_text(p):
 
 def solver_diagnostics(index_dir=None):
     """
-    星図データが本当に使えるかを事前に確かめる。置き場所を走査し、ヘッダーを検査する。
+    インデックスファイルが本当に使えるかを事前に確かめる。置き場所を走査し、ヘッダーを検査する。
 
     戻り値の形は v6 (WSL 版) と同じ {"ok", "messages", "indexes", "cfg", "paths"}。
     indexes は検査に通ったファイルの名前、cfg は空、paths は置き場所だけ。
@@ -1158,7 +1158,7 @@ def solver_diagnostics(index_dir=None):
 # ================================================================ オフライン解析 ===
 
 def _cancel_checker(cancel):
-    """中止の合図を「呼ぶと True/False を返す関数」にそろえる (threading.Event でも関数でも受ける)。"""
+    """中止のフラグを「呼ぶと True/False を返す関数」にそろえる (threading.Event でも関数でも受ける)。"""
     if cancel is None:
         return lambda: False
     if callable(getattr(cancel, "is_set", None)):
@@ -1203,7 +1203,7 @@ def _solution_header(sol, width, height):
 
 
 def _solution_note(sol):
-    """解の中身を 1 行に (索引・一致した星・対数オッズ・試した quad・時間)。"""
+    """解の中身を 1 行に (インデックス・一致した星・対数オッズ・試した quad・時間)。"""
     parts = []
     name = getattr(sol, "index_name", None)
     if name:
@@ -1278,15 +1278,15 @@ def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
                   diagnostics=None, index_dir=None, prep=None, cancel=None):
     """
     オフライン (zahyou 自前の解析エンジン sv_solve) で解く。条件を変えながら粘り強く挑む。
-    星は深い検出 (detect_sources_deep) の星を先に、sources (図に出す標準の検出の星) を
+    星はディープ検出 (detect_sources_deep) の星を先に、sources (図に出す標準の検出の星) を
     予備に使う。戻り値: WCS ヘッダ (CRPIX は 1 始まり) or None。
 
-    例外は投げない (中止したときも None)。全体の締め切りは timeout 秒の壁時計で、
-    試行ごとに残り時間の一部を割り当て、その締め切りを sv_solve に渡す。
+    例外は投げない (中止したときも None)。全体のタイムアウトは timeout 秒の壁時計で、
+    試行ごとに残り時間の一部を割り当て、そのタイムアウトの時刻を sv_solve に渡す。
     v6 (WSL) は試行の打ち切りが --cpulimit 任せで、合計が 45 秒ほどはみ出していた。
 
-      prep   : run() が作った前処理の結果 (sub, mask, sigma)。深い検出に使う
-      cancel : 中止の合図 (threading.Event か、呼ぶと True を返す関数)
+      prep   : run() が作った前処理の結果 (sub, mask, sigma)。ディープ検出に使う
+      cancel : 中止のフラグ (threading.Event か、呼ぶと True を返す関数)
       work_dir は使わない (v6 の引数の並びを保つために残してある)
     """
     try:
@@ -1297,8 +1297,8 @@ def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
         _log(f"\n  ❌ オフライン解析が途中で失敗しました: {type(e).__name__}: {e}")
         return None
     finally:
-        # 索引ファイルの mmap を放す (目録とヘッダーの検査結果は覚えたまま。次の解析で開き直す)。
-        # 開いたままだと、GUI を開いている間は Explorer やほかのプロセスから星図データを
+        # インデックスファイルの mmap を放す (目録とヘッダーの検査結果は覚えたまま。次の解析で開き直す)。
+        # 開いたままだと、GUI を開いている間は Explorer やほかのプロセスからインデックスファイルを
         # 消したり置き換えたりできない (Windows)
         cat = _INDEX_CATALOG["catalog"]
         if cat is not None:
@@ -1319,9 +1319,9 @@ def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
     fov_h = ny * scale / 60.0 if scale else None
     fov_short = min(fov_w, fov_h) if scale else None
     # 星の並び (quad) は「短いほうの辺」に収まる大きさまでしか作れないので、
-    # 必要な index は短辺で決まる。横幅だけ見ていると足りない段を見落とす。
+    # 必要な index は短辺で決まる。横幅だけ見ていると足りないスケールを見落とす。
     #   実測: 23.6′ x 13.4′ の画像 (ごく普通の 16:9) で、横幅に合う 22′〜30′ の
-    #   段だけでは 120 秒かけても解けず、短辺に合う 11′〜16′ を足したら 10 秒で
+    #   スケールだけでは 120 秒かけても解けず、短辺に合う 11′〜16′ を足したら 10 秒で
     #   解けた。掩蔽観測のように縦を切り詰めるとこの差はさらに開く。
     if scale:
         _log(f"  - 画素スケール {scale:.3f}″/px ({how}) "
@@ -1363,11 +1363,11 @@ def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
              f"(画角 {wide[0] * nx / 60:.1f}′〜{wide[1] * nx / 60:.0f}′ 相当)")
 
     # 星の組は 2 つ。
-    #   深い = 解析エンジンのために暗い星まで拾い直した星 (detect_sources_deep)
+    #   ディープ = 解析エンジンのために暗い星まで検出し直した星 (detect_sources_deep)
     #   標準 = run() が検出して図に緑の丸で出す星 (detect_sources)
-    # 深い検出の星を先に渡す。解析エンジンは quad に使わなかった星で検証するので、
+    # ディープ検出の星を先に渡す。解析エンジンは quad に使わなかった星で検証するので、
     # 星が多いほど対数オッズの余裕が増える。実測 (sv_solve にブラインドで直接):
-    #   3I は標準 8 個で 21.6 (合格 20.7 のぎりぎり) → 深い 15 個で 47.7、
+    #   3I は標準 8 個で 21.6 (合格 20.7 のぎりぎり) → ディープ 15 個で 47.7、
     #   c2025a6 は 159 → 317、ほかの実写は同等。標準の星は予備に回す。
     if stopped():
         _log("\n  ■ 中止しました。")
@@ -1395,9 +1395,9 @@ def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
              f"  ❌ 星が {n_max} 個しかないので解析できません (3 個以上要ります)。")
         return None
 
-    # 試行のはしご: 探す範囲の狭い (速い) 条件から順に、条件ごとに 深い → 標準 の星で。
+    # 段階的な試行: 探す範囲の狭い (速い) 条件から順に、条件ごとに ディープ → 標準 の星で。
     # (ラベル, 星, ヒント, スケールの範囲, 残り時間の何割まで使うか)
-    # sv_solve は quad を試し尽くせば締め切り前に戻るので、狭い条件は両方の星で試しても安い。
+    # sv_solve は quad を試し尽くせばタイムアウト前に戻るので、狭い条件は両方の星で試しても安い。
     conds = []
     if hint and narrow:
         conds.append(("座標ヒント + スケール既知", hint, narrow, 0.25))
@@ -1489,11 +1489,11 @@ def internet_available(timeout=4):
 
 def _with_deadline(fn, timeout, label, cancel=None):
     """
-    指定時間で必ず戻る呼び出し。中止の合図 (cancel) が立てば 0.5 秒以内に None で戻る。
+    指定時間で必ず戻る呼び出し。中止のフラグ (cancel) が立てば 0.5 秒以内に None で戻る。
     v5 は with ThreadPoolExecutor(...) を使っていたため、タイムアウト後も
     ブロックの出口でワーカーの終了を待ってしまい、実際には打ち切れなかった。
 
-    fn 自身が TimeoutError を投げたとき (astroquery の solve_timeout 切れ) は、こちらの締め切りとは
+    fn 自身が TimeoutError を投げたとき (astroquery の solve_timeout 切れ) は、こちらのタイムアウトとは
     区別して知らせる。Python 3.11 以降は concurrent.futures.TimeoutError と組み込みの TimeoutError が
     同じクラスなので、区別しないと「〜秒で終わりませんでした」と誤って出る。
     """
@@ -1549,12 +1549,12 @@ def solve_online(image_path, api_key, sources=None, shape=None, timeout=120,
 
     ast = AstrometryNet()
     ast.api_key = api_key
-    # astroquery 0.4.10 の solve_from_image は、photutils を import できると画像を上げず、
+    # astroquery 0.4.10 の solve_from_image は、photutils を import できると画像をアップロードせず、
     # CCDData.read (FITS しか読めない) と DAOStarFinder で星を数え直して位置を送る。そのままだと
     # JPEG・PNG・TIFF はそこで例外になり、FITS でも「画像そのものを送ります」が事実と違う (v6 の exe がそうだった)。
-    # 内部の旗をこのインスタンスにだけ立てて、いつも画像を上げさせる。force_image_upload=True は 0.4.8 から非推奨で、
-    # 引数が消えると「Setting force_image_upload is not allowed」で画像の段が必ず失敗するので使わない。
-    # 予告どおり photutils の経路が消えれば、この旗は読まれなくなるだけで画像は送られる。
+    # 内部のフラグをこのインスタンスにだけ立てて、いつも画像をアップロードさせる。force_image_upload=True は 0.4.8 から非推奨で、
+    # 引数が消えると「Setting force_image_upload is not allowed」で画像を送る段階が必ず失敗するので使わない。
+    # 予告どおり photutils の経路が消えれば、このフラグは読まれなくなるだけで画像は送られる。
     ast._no_source_detector = True
     settings = {"publicly_visible": "n"}      # 星の位置を送るときも画像を送るときも
     if hint_radec is not None:

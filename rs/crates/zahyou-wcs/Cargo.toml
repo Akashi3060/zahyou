@@ -10,5 +10,5 @@ publish.workspace = true
 [dependencies]
 
 [dev-dependencies]
-# 試験で Python 基準実装の値(rs/testdata/wcs_*.json)を読むだけ。float_roundtrip で小数の読み取りを正確にする
+# テストで Python 基準実装の値(rs/testdata/wcs_*.json)を読むだけ。float_roundtrip で小数の読み取りを正確にする
 serde_json = { version = "1", features = ["float_roundtrip"] }

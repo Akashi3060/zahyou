@@ -1,5 +1,5 @@
-//! zahyou の座標系: 天球の単位ベクトル・TAN 投影・WCS(TAN/SIP)・当てはめ・FITS ヘッダーのカード・目標までのずれ。
-//! Python 版の基準実装は dev/solver_wcs.py(WCS と当てはめ)と dev/zahyou_plot.py の report_offsets(ずれ)。
+//! zahyou の座標系: 天球の単位ベクトル・TAN 投影・WCS(TAN/SIP)・フィット・FITS ヘッダーのカード・目標までのずれ。
+//! Python 版の基準実装は dev/solver_wcs.py(WCS とフィット)と dev/zahyou_plot.py の report_offsets(ずれ)。
 //!
 //! - geom.rs     単位ベクトルと TAN 投影
 //! - sip.rs      SIP の多項式とニュートン法

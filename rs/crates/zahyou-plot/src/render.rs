@@ -5,11 +5,11 @@
 //! - 既定の大きさは Python 版と同じ 12 × (12·ny/nx + 1.2) インチ、100 dpi(幅 1200 px)。1 pt = dpi/72 px
 //! - 余白は tight_layout と同じく 1.08 × 10 pt + 枠からはみ出す文字(`plan`)。画像は縦横比を保って
 //!   残りの領域の中央に置く(imshow の aspect="equal")
-//! - 文字の置き方は WCSAxes の RectangularFrame・AxisLabels と matplotlib の題と同じ(`decorations`)。
+//! - 文字の置き方は WCSAxes の RectangularFrame・AxisLabels と matplotlib のタイトルと同じ(`decorations`)。
 //!   文字の箱の大きさは matplotlib(Agg)と同じ決め方(font.rs の `Line`)
 //! - 画像は表示の大きさへ面積平均で縮める(拡大のときも同じ式で、端だけなめらかになる)
-//! - 意図して変えた所: 上の辺に目盛りの文字がある図(極のそば)では、題をその上へ逃がす
-//!   (Python 版は題が目盛りの文字・軸名に重なって読めない)
+//! - 意図して変えた所: 上の辺に目盛りの文字がある図(極のそば)では、タイトルをその上へ逃がす
+//!   (Python 版はタイトルが目盛りの文字・軸名に重なって読めない)
 
 use rayon::prelude::*;
 use tiny_skia::{FillRule, LineCap, LineJoin, Mask, Paint, PathBuilder, Pixmap, Rect, Stroke, StrokeDash, Transform};
@@ -49,7 +49,7 @@ pub struct RgbaImage {
     pub data: Vec<u8>,
 }
 
-/// 図の中の軸の矩形と、画像の座標 → 画面(px、左上が原点・y 下向き)の写し。
+/// 図の中の軸の矩形と、画像の座標 → 画面(px、左上が原点・y 下向き)の変換。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AxesBox {
     /// 軸の左上(px)
@@ -296,14 +296,14 @@ fn draw_text(pm: &mut Pixmap, fonts: &Fonts, line: &Line, color: Color, origin: 
     blit(pm, &cov, color, fx, fy, rot);
 }
 
-/// 図の文字(目盛りの文字・軸名・題)を組んだもの。位置に関係しないので 1 度だけ組む。
+/// 図の文字(目盛りの文字・軸名・タイトル)を組んだもの。位置に関係しないので 1 度だけ組む。
 struct Texts {
     ticks: Vec<Text1>,
     axis: Vec<Text1>,
     title: Vec<Text1>,
 }
 
-/// 図の文字を全部組む(目盛りの文字・軸名 10 pt、題 14 pt)。
+/// 図の文字を全部組む(目盛りの文字・軸名 10 pt、タイトル 14 pt)。
 fn measure_all(c: &Content, fonts: Option<&Fonts>, ppt: f64) -> Texts {
     let fig = c.fig;
     let tick_px = style::TICK_LABEL_SIZE as f64 * ppt;
@@ -312,7 +312,7 @@ fn measure_all(c: &Content, fonts: Option<&Fonts>, ppt: f64) -> Texts {
     Texts {
         ticks: c.tick_labels().iter().map(|l| measure(fonts, &l.spans(), tick_px, false)).collect(),
         axis: c.axis_labels().iter().map(|a| measure(fonts, &plain(&a.text), axis_px, false)).collect(),
-        // 題が空なら行も無い(matplotlib は空の題を置かない)
+        // タイトルが空なら行も無い(matplotlib は空のタイトルを置かない)
         title: if fig.title.is_empty() {
             Vec::new()
         } else {
@@ -355,14 +355,14 @@ fn union_box(a: Option<[f64; 4]>, b: [f64; 4]) -> [f64; 4] {
     }
 }
 
-/// 目盛りの文字・軸名・題を置く(WCSAxes の RectangularFrame と matplotlib の題と同じ置き方)。
+/// 目盛りの文字・軸名・タイトルを置く(WCSAxes の RectangularFrame と matplotlib のタイトルと同じ置き方)。
 ///
 /// - 目盛りの文字: 目盛りの点から外へ pad = 目盛りの長さ + すき間(3.5 + 3.5 pt)。WCSAxes と同じく文字の**下端**で合わせる:
 ///   下の辺は中央寄せで下端を点の pad + 10 pt 下に、上の辺は下端を pad 上に、左の辺は右寄せ・右の辺は左寄せで、
 ///   下端を点の 5 pt(文字の大きさの半分)下に
 /// - 軸名: **全部の**目盛りの文字の外接矩形(astropy は座標と辺をまとめた和を使う)から 10 pt(軸名の大きさ × minpad 1)
 ///   外に、中心を置く。左は 90°、右は 270° 回す。目盛りの文字が無ければ枠から 10 pt
-/// - 題: 最後の行の基準線を枠の上端から 6 pt 上に置き(matplotlib の va="baseline" は最後の行の基準線)、
+/// - タイトル: 最後の行の基準線を枠の上端から 6 pt 上に置き(matplotlib の va="baseline" は最後の行の基準線)、
 ///   前の行は「前の行の深さ + max(1.2 × "lp" の高さ, 1.2 × その行の高さ)」ずつ上へ。外接矩形の下端が枠より下になるときは
 ///   上へずらす(`_update_title_position`)。上の辺に目盛りの文字・軸名があるときはその上に置く
 ///   (Python 版は WCSAxes の上の文字を避けずに重ねてしまう。ここだけ変えてある)
@@ -531,7 +531,7 @@ pub struct Layout {
     pub size: (u32, u32),
     /// 軸の矩形
     pub axes: AxesBox,
-    /// 題の外接矩形(題が空なら None)
+    /// タイトルの外接矩形(タイトルが空なら None)
     pub title: Option<[f64; 4]>,
     /// 軸名の (座標 0 = 赤経・1 = 赤緯, 辺, 外接矩形)
     pub axis_labels: Vec<(usize, Side, [f64; 4])>,
@@ -568,8 +568,8 @@ fn dpi(opts: &RenderOptions) -> f64 {
 ///
 /// - 左・右・下の余白は、目盛りの文字と軸名が枠からはみ出す長さ + pad(1.08 × 10 pt)。枠の外向きの目盛り
 ///   (3.5 pt)は数えない(matplotlib の tight_layout も WCSAxes の目盛りを数えない)
-/// - 上の余白は、上の辺の目盛りの文字・軸名のはみ出し + pad。題が図の上端から pad の内側に収まらないときだけ広げる
-///   (Python 版の tight_layout は、題を縦横比で縮める前の枠に対して測るので、ふつうは題の分を足さない)
+/// - 上の余白は、上の辺の目盛りの文字・軸名のはみ出し + pad。タイトルが図の上端から pad の内側に収まらないときだけ広げる
+///   (Python 版の tight_layout は、タイトルを縦横比で縮める前の枠に対して測るので、ふつうはタイトルの分を足さない)
 /// - 軸の矩形は縦横比を保って、余白を除いた領域の中央に置く(imshow の aspect="equal"、anchor "C")。
 ///   この図はふつう横幅で大きさが決まり縦が余るので、下の余白の分だけ画像が上に寄る(Python 版と同じ)
 fn plan(c: &Content, texts: &Texts, w: u32, h: u32, ppt: f64) -> (AxesBox, Vec<Deco>) {
@@ -597,8 +597,8 @@ fn plan(c: &Content, texts: &Texts, w: u32, h: u32, ppt: f64) -> (AxesBox, Vec<D
     let mut m = [pad; 4];
     let mut bx = fit(m);
     let mut decos = decorations(c, texts, &bx, ppt);
-    // はみ出しの長さは枠の大きさにほとんどよらないので数回で決まる。題の分の上の余白は、縦が余るときは
-    // 足した長さの半分しか題が下がらないので、少しずつ足す(壊れた入力でも回数で打ち切る)
+    // はみ出しの長さは枠の大きさにほとんどよらないので数回で決まる。タイトルの分の上の余白は、縦が余るときは
+    // 足した長さの半分しかタイトルが下がらないので、少しずつ足す(壊れた入力でも回数で打ち切る)
     for _ in 0..16 {
         let (bw, bh) = bx.size();
         let mut ext = [0.0f64; 4];
@@ -883,7 +883,7 @@ fn render_pixmap(fig: &Figure, opts: &RenderOptions, fonts: Option<&Fonts>) -> R
             }
         }
     }
-    // 目盛りの文字・軸名・題(置き場所は plan で決めたもの)
+    // 目盛りの文字・軸名・タイトル(置き場所は plan で決めたもの)
     for d in &decos {
         if let Some(line) = &texts.get(d.which).line {
             draw_text(&mut pm, fonts, line, fg, d.origin, d.rot);

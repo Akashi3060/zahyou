@@ -45,12 +45,12 @@ from PIL import Image
 
 RS_DIR = Path(__file__).resolve().parents[1]
 REPO_DIR = RS_DIR.parent
-WIN_W, WIN_H = 1180, 780  # --shot の既定の窓の大きさ(論理座標)
+WIN_W, WIN_H = 1180, 780  # --shot の既定のウィンドウの大きさ(論理座標)
 
 TARGET = "UCAC4 660-021020"
 TARGET_SEED = {"ra": 61.91199157844, "dec": 41.98626242835, "name": TARGET}
 DEFAULT_IMAGE = Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Downloads" / "Capture_00001 00_10_33.fits"
-if not DEFAULT_IMAGE.is_file():   # Downloads を整理したあとは、同じ並びの控え(dev/test_solver_real.py の images_path と同じ)
+if not DEFAULT_IMAGE.is_file():   # Downloads を整理したあとは、同じ並びのコピー(dev/test_solver_real.py の images_path と同じ)
     _copy = DEFAULT_IMAGE.parents[1] / "Documents" / "claude" / "zahyou" / "testdata" / "images" / "Downloads" / DEFAULT_IMAGE.name
     if _copy.is_file():
         DEFAULT_IMAGE = _copy
@@ -59,12 +59,12 @@ if not DEFAULT_IMAGE.is_file():   # Downloads を整理したあとは、同じ�
 DEAD_PROXY = "http://0.0.0.0:9"
 PROXY_VARS = ("ALL_PROXY", "HTTPS_PROXY", "HTTP_PROXY")
 
-# 切り抜きの枠(論理座標 x0, y0, x1, y1)。None は窓全体。7.0.0-beta.1(左の列に送り棒と API キーの欄がある並び)で合わせた
+# 切り抜きの枠(論理座標 x0, y0, x1, y1)。None はウィンドウ全体。7.0.0-beta.1(左の列にスクロールバーと API キーの欄がある並び)で合わせた
 NUMBERS = (371, 89, 1050, 178)  # 上の 3 つの数字と、その下の細い行(画像中心・画素スケール・視野・所要)
 TARGET_BOX = (6, 91, 347, 320)  # 左の列の「目標」の枠
 TOOLBAR = (376, 712, 742, 746)  # 図の下のボタン(全体・戻る・進む・移動・拡大・画像を保存)
 FIGURE = (375, 214, 1173, 711)  # 図の欄(「撮影時の向き」「北が上」の図。マニュアルの図 1・2 にも使う)
-APIKEY_BOX = (6, 380, 347, 742)  # --left-end で下まで送った左の列の「解析」の枠(方法・打ち切り・API キーの欄)
+APIKEY_BOX = (6, 380, 347, 742)  # --left-end で下までスクロールした左の列の「解析」の枠(方法・打ち切り・API キーの欄)
 INDEX_BOX = (8, 262, 432, 722)  # ［準備］タブの「インデックスファイル」の枠
 
 
@@ -81,7 +81,7 @@ def shots(image: str) -> list[dict]:
          "crops": {"app-dark": None}},
         {"name": "blind", "net": "block", "args": run + ["--blind", "--out-tab", "orig", "--light"],
          "crops": {"app-blind": None, "app-blind-numbers": NUMBERS}},
-        # 解析はしない(欄に既定のキーを伏せ字で入れたまま、左の列をいちばん下まで送って撮る)
+        # 解析はしない(欄に既定のキーを伏せ字で入れたまま、左の列をいちばん下までスクロールして撮る)
         {"name": "apikey", "net": "block", "args": ["--tab", "run", "--image", image, "--left-end", "--light"],
          "crops": {"app-apikey": APIKEY_BOX}},
         {"name": "prepare", "net": "block", "args": ["--tab", "env", "--light"],
@@ -161,7 +161,7 @@ def shoot(exe: Path, spec: dict, raw_dir: Path, gui: dict, block: bool) -> Path:
 
 def crop(raw: Path, box: tuple[int, int, int, int] | None, dest: Path) -> tuple[int, int]:
     with Image.open(raw) as im:
-        im = im.convert("RGB")  # egui の写しは RGBA。透明は使っていないので落とす
+        im = im.convert("RGB")  # egui のスクリーンショットは RGBA。透明は使っていないので落とす
         if box is not None:
             k = im.width / WIN_W
             if abs(im.height / WIN_H - k) > 0.01:

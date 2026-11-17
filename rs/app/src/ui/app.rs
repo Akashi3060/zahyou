@@ -23,8 +23,8 @@ use crate::APP_VER;
 pub const APP_NAME: &str = "zahyou";
 
 /// 起動したときのログの 1 行目(例「zahyou v7.0.0-beta.N (β版・Rust 版)   フォント: …」。正式版なら「(Rust 版)」)。
-/// 窓を開いていれば、次の行に描き方と GPU(`RENDER_INFO`)を書く。
-/// 解析ログの見出し(pipeline の「  zahyou 版   画像名」)は Python の基準値と比べる行なので、そちらには添えない
+/// ウィンドウを開いていれば、次の行に描き方と GPU(`RENDER_INFO`)を書く。
+/// 解析ログの見出し(pipeline の「  zahyou バージョン   画像名」)は Python の基準値と比べる行なので、そちらには添えない
 pub fn startup_line(fonts: &str) -> String {
     let kind = match zahyou_net::update::prerelease_label(APP_VER) {
         Some(l) => format!("{l}・Rust 版"),
@@ -51,10 +51,10 @@ pub enum Progress {
     Det(u64, u64),
 }
 
-/// ダイアログの持ち主(本体の窓)。None なら持ち主なし(自己診断・画面を出さないとき)
+/// ダイアログの持ち主(本体のウィンドウ)。None なら持ち主なし(自己診断・画面を出さないとき)
 pub type Host<'a> = Option<&'a eframe::Frame>;
 
-/// 画面の部品から頼まれた処理(ダイアログを出しうるもの)。描き終えてから、本体の窓を持ち主にして順に行う
+/// 画面の部品から頼まれた処理(ダイアログを出しうるもの)。描き終えてから、本体のウィンドウを持ち主にして順に行う
 /// (eframe の Frame は update の間しか借りられないので、描く途中の部品からは直接呼ばない)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -78,7 +78,7 @@ pub struct Options {
     pub headless: bool,
     /// 解析の結果を解かずに、この WCS で出す(隠しの引数 --debug-wcs)
     pub debug_wcs: Option<PathBuf>,
-    /// 起動したついでの確認(星図データ・更新)をしない
+    /// 起動したついでの確認(インデックスファイル・更新)をしない
     pub no_startup_checks: bool,
     /// 設定を保存しない(画面の撮影)
     pub no_save: bool,
@@ -104,7 +104,7 @@ pub struct ZahyouApp {
     pub detail: String,
     pub figs: [Option<FigureView>; 2],
     pub fig_src: [Option<FigureOut>; 2],
-    // 前回の結果(ResultView)は持ち続けない。以前は last_result に入れていたが読む所が無く、図(縮小の段と rgba。
+    // 前回の結果(ResultView)は持ち続けない。以前は last_result に入れていたが読む所が無く、図(縮小の段階と rgba。
     // 24 MP・目標ありで約 450 MB)を、clear_figures() のあとも次の結果が来るまで握っていた。
     // 表示と保存に要る分は figs・fig_src が Arc で持つ。「前の結果」を使う機能を足すなら、そのとき足し直す。
 
@@ -122,7 +122,7 @@ pub struct ZahyouApp {
 
     // --- 準備 ---
     pub env_state: Option<Survey>,
-    /// 表の 3 行(星図データ・検査・総合): (OK か, 文)。None は未確認
+    /// 表の 3 行(インデックスファイル・検査・総合): (OK か, 文)。None は未確認
     pub env_rows: [(Option<bool>, String); 3],
     pub lbl_env: String,
     pub marks: BTreeMap<u32, bool>,
@@ -130,7 +130,7 @@ pub struct ZahyouApp {
     // --- 解析の枠 ---
     /// API キーの欄を伏せ字にせず見せる(覚えない。起動するたびに伏せ字)
     pub show_api_key: bool,
-    /// 自己診断: ［解析］タブの左の列をいちばん下まで送って描く(小さい窓で下に隠れる欄も、送れば窓に入るかを見る)
+    /// 自己診断: ［解析］タブの左の列をいちばん下まで送って描く(小さいウィンドウで下に隠れる欄も、送ればウィンドウに入るかを見る)
     pub scroll_left_end: bool,
     /// ［解析］タブの左の列を送れる量 [pt](描くたびに測る。scroll_left_end のときに使う)
     pub left_scroll_max: f32,
@@ -214,20 +214,20 @@ impl ZahyouApp {
     // ============================================================ 起動時 ===
     fn startup(&mut self) {
         self.log_run_line(&startup_line(&self.fonts.summary()));
-        // 開いた描き方と GPU(問い合わせのときに分かるように。窓を出さない自己診断・試験では空)
+        // 開いた描き方と GPU(問い合わせのときに分かるように。ウィンドウを出さない自己診断・テストでは空)
         if let Some(r) = crate::RENDER_INFO.get() {
             self.log_run_line(&format!("描画: {r}"));
         }
         if self.opts.no_startup_checks {
             return;
         }
-        // 前の版の入れ替えで残った zahyou.exe.old を消す(入れ替えの直後は古いプロセスが終わるのを少し待つ)
+        // 前のバージョンの入れ替えで残った zahyou.exe.old を消す(入れ替えの直後は古いプロセスが終わるのを少し待つ)
         if let Ok(exe) = std::env::current_exe() {
             std::thread::spawn(move || {
                 let _ = zahyou_net::cleanup_old_versions(&exe, Duration::from_secs(10));
             });
         }
-        // 星図データ(画面はふさがない)
+        // インデックスファイル(画面はふさがない)
         let dir = self.index_dir();
         let job = self.job(LogTo::Env);
         worker::spawn_quiet(job, "survey-quiet", move |job| {
@@ -362,7 +362,7 @@ impl ZahyouApp {
         self.actions.push(a);
     }
 
-    /// 頼まれた処理を行う(ダイアログは host を持ち主にする = 出ている間は本体の窓を操作できないモーダル)
+    /// 頼まれた処理を行う(ダイアログは host を持ち主にする = 出ている間は本体のウィンドウを操作できないモーダル)
     pub fn perform(&mut self, a: Action, host: Host) {
         match a {
             Action::ChooseImage => self.choose_image(host),
@@ -379,7 +379,7 @@ impl ZahyouApp {
         }
     }
 
-    /// 知らせ・確認の箱(Python の messagebox)。持ち主があれば、その窓に従うモーダルにする
+    /// 知らせ・確認の箱(Python の messagebox)。持ち主があれば、そのウィンドウに従うモーダルにする
     fn message(
         &mut self,
         host: Host,
@@ -398,7 +398,7 @@ impl ZahyouApp {
         d.show()
     }
 
-    /// ファイルの選択の箱(持ち主があれば、その窓に従うモーダル)
+    /// ファイルの選択の箱(持ち主があれば、そのウィンドウに従うモーダル)
     fn file_dialog(host: Host) -> rfd::FileDialog {
         let d = rfd::FileDialog::new();
         match host {
@@ -459,7 +459,7 @@ impl ZahyouApp {
         }
     }
 
-    /// 窓へ落とされたファイル(画像を選んだのと同じに扱う。v6 には無かった)
+    /// ウィンドウへドロップされたファイル(画像を選んだのと同じに扱う。v6 には無かった)
     fn take_dropped(&mut self, ctx: &egui::Context) {
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
         if let Some(p) = dropped.into_iter().next() {
@@ -486,7 +486,7 @@ impl ZahyouApp {
             );
             return;
         }
-        // 探索半径が負・0・数でないと、ヒントの段が黙って捨てられて全天を探すことになる(Python も始める前に止める)
+        // 探索半径が負・0・数でないと、ヒントの段階が黙って捨てられて全天を探すことになる(Python も始める前に止める)
         if let Some(m) = bridge::radius_problem(&self.s.radius) {
             self.warn(host, &m);
             return;
@@ -623,7 +623,7 @@ impl ZahyouApp {
     }
 
     /// 置き場所が変わったとき、前の置き場所で調べた結果を捨てて表を「未確認」に戻す
-    /// (古い結果で「足りない段なし」などと判断しないように)。
+    /// (古い結果で「足りないスケールなし」などと判断しないように)。
     pub fn forget_env(&mut self) {
         self.env_state = None;
         self.env_rows = [(None, "未確認".into()), (None, "未確認".into()), (None, "未確認".into())];
@@ -681,7 +681,7 @@ impl ZahyouApp {
             msg += &format!(" / 解ける画角 {}′〜{}′", survey::g(a), survey::g(b));
         }
         self.lbl_env = msg;
-        // 既にある段は外しておく
+        // 既にあるスケールは外しておく
         for (s, v) in self.marks.iter_mut() {
             if idx.scales.contains(s) {
                 *v = false;
@@ -690,10 +690,10 @@ impl ZahyouApp {
         self.env_state = Some(st);
     }
 
-    /// 押したときの置き場所で、そろって検査に通っている段を数え直す(Python の _have_scales)。
+    /// 押したときの置き場所で、そろって検査に通っているスケールを数え直す(Python の _have_scales)。
     ///
-    /// 起動時や「状態を確認」のときの結果(env_state)は使わない。置き場所を変えた直後や、Explorer で星図データを
-    /// 消したあとは古いので、それで「足りない段なし」と判断すると確認なしで何 GB も落とし始める。
+    /// 起動時や「状態を確認」のときの結果(env_state)は使わない。置き場所を変えた直後や、Explorer でインデックスファイルを
+    /// 消したあとは古いので、それで「足りないスケールなし」と判断すると確認なしで何 GB もダウンロードし始める。
     /// 検査はファイルの大きさと更新時刻で覚えているので、2 回目からは速い。
     fn have_scales(&self) -> Vec<u32> {
         survey::survey(&self.index_dir()).index.scales
@@ -782,7 +782,7 @@ impl ZahyouApp {
             self.index_dir().display()
         );
         if !self.ask(host, &q) {
-            // やめたら印も押す前に戻す(残すと、続けて「まとめて準備する」を押したときにその段を落とす)
+            // やめたらチェックも押す前に戻す(残すと、続けて「まとめて準備する」を押したときにそのスケールをダウンロードする)
             self.marks = before;
             self.status = "やめました。".into();
             return;
@@ -836,8 +836,8 @@ impl ZahyouApp {
     /// 「まとめて準備する」(Python の _prepare_all)
     ///
     /// スケールにチェックを入れてあればそのスケールを、無ければおすすめのスケール(画角 4′ 以上)をそろえる。そろっていれば検査だけ。
-    /// 落とす段があるときは、印の有無にかかわらず押したときの置き場所で数え直して容量を見せて聞く。聞いた段より
-    /// 多く足りなくなっていたら(聞いている間に消したなど)、ワーカーは落とさずに止める。
+    /// ダウンロードするスケールがあるときは、チェックの有無にかかわらず押したときの置き場所で数え直して容量を見せて聞く。
+    /// 聞いたスケールより多く足りなくなっていたら(聞いている間に消したなど)、ワーカーはダウンロードせずに止める。
     pub fn prepare_all(&mut self, host: Host) {
         let scales = self.marked();
         let need = survey::need_scales(&scales, &self.have_scales());
@@ -971,7 +971,7 @@ impl ZahyouApp {
         self.frame_with(ctx, None);
     }
 
-    /// 画面 1 枚ぶん。描き終えたら、頼まれた処理を host(本体の窓)を持ち主にして行う
+    /// 画面 1 枚ぶん。描き終えたら、頼まれた処理を host(本体のウィンドウ)を持ち主にして行う
     pub fn frame_with(&mut self, ctx: &egui::Context, host: Host) {
         self.pump();
         self.take_dropped(ctx);
@@ -1071,7 +1071,7 @@ pub fn fig_index(t: ResultTab) -> Option<usize> {
     }
 }
 
-/// ログに 1 行足す。絵文字の異体字セレクター U+FE0F(「⚠️」の後ろ半分)は落とす: egui の既定のフォントにも
+/// ログに 1 行足す。絵文字の異体字セレクター U+FE0F(「⚠️」の後ろ半分)は取り除く: egui の既定のフォントにも
 /// Consolas にも字形が無く □ になる(HackGen が無い PC の等幅の欄)。字そのもの(⚠)は残るので意味は変わらない。
 fn push_log_text(buf: &mut String, s: &str) {
     buf.extend(s.chars().filter(|&c| c != '\u{FE0F}'));
@@ -1082,7 +1082,7 @@ fn push_log_text(buf: &mut String, s: &str) {
 mod result_memory_tests {
     use super::*;
 
-    /// 小さな図 1 枚(画面の形と元の図)。試験の手元にも Arc を 1 つずつ残す
+    /// 小さな図 1 枚(画面の形と元の図)。テストの手元にも Arc を 1 つずつ残す
     fn small_out() -> FigureOut {
         let (w, h) = (40usize, 30usize);
         let img = zahyou_image::Image2D::new(w, h, vec![10.0f32; w * h]).unwrap();

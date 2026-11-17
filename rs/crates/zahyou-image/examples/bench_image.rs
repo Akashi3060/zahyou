@@ -3,8 +3,8 @@
 //!     cargo run --release -p zahyou-image --example bench_image -- <画像> [回数]
 //!
 //! 6000×4000 の合成画像は `python rs/testdata/gen_image.py --big <DIR>` で作る(Python の時間も
-//! `<DIR>\big_expected.json` に入る)。各段の時間は `回数` 回のうち最も速いもの。
-//! 環境変数 ZAHYOU_BENCH_DEEP_JSON にファイル名を入れると、深い検出の全部の星と測った値を JSON で書き出す。
+//! `<DIR>\big_expected.json` に入る)。各段階の時間は `回数` 回のうち最も速いもの。
+//! 環境変数 ZAHYOU_BENCH_DEEP_JSON にファイル名を入れると、ディープ検出の全部の星と測った値を JSON で書き出す。
 
 use std::time::Instant;
 
@@ -63,7 +63,7 @@ fn main() {
     let (t_det60, d60) = best(n, || detect_sources(&prep, &DetectOpts::with_min_sources(60)));
     let (t_deep, deep3) = best(n, || detect_deep(&prep, &DeepOpts::default()));
     if let Some(p) = std::env::var_os("ZAHYOU_BENCH_DEEP_JSON") {
-        // 深い検出の全部の星と測った値を JSON で書き出す(Python の値と突き合わせるため)
+        // ディープ検出の全部の星と測った値を JSON で書き出す(Python の値と突き合わせるため)
         let stars: Vec<String> = deep3
             .0
             .iter()

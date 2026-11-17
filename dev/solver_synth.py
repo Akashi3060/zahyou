@@ -1,23 +1,23 @@
 # ==============================================================================
-#  solver_synth.py — 試験用: 索引の星から「正解つきの合成星野」を作る
+#  solver_synth.py — テスト用: インデックスの星から「正解つきの合成星野」を作る
 #
 #  docs/design-native-solver.md の 8 節・12 節。エンジンには入れない(build_nb.py はつながない)。
-#  dev/test_solver_synth.py と dev/test_solver_real.py が使い、第 2 段(別の言語への移植)の試験も
-#  ここで作った星野を JSON にして同じ入力に使う。乱数の種と索引ファイルが同じなら、出力は完全に同じ。
+#  dev/test_solver_synth.py と dev/test_solver_real.py が使い、第 2 段階(別の言語への移植)のテストも
+#  ここで作った星野を JSON にして同じ入力に使う。乱数の種とインデックスファイルが同じなら、出力は完全に同じ。
 #  numpy と標準ライブラリ、solver_wcs / solver_index だけを使う。最上位の名前は sv_ / _sv_ / SV_ で始める。
 #
-#  約束(dev/solver_truth.json と同じ定義。試験の物差しはどれもこの定義で測る)
+#  約束(dev/solver_truth.json と同じ定義。テストの指標はどれもこの定義で測る)
 #    - 画素は 0 始まり(x = 列、y = 行)。配列の向きのまま(表示の上下反転 flip_y は考えない)。
 #    - 中心 = 配列の中央 ((W−1)/2, (H−1)/2) が写る天球の位置。正解の WCS は CRPIX をここに置く。
 #    - 回転 = 配列の +y(行が増える向き)の位置角。北から東回り、度、[0, 360)。
 #    - パリティ = 配列座標での det CD の符号(+1 / −1)。mirror=True は det CD > 0
-#      (y を上にして見ると空の鏡像。行 0 が画面の上の FITS(SharpCap など)を素直に写すとこちら)。
+#      (y を上にして見ると空の鏡像。行 0 が画面の上の FITS(SharpCap など)をそのまま表示するとこちら)。
 #      mirror=False は det CD < 0(y を上にすると北が上なら東が左 = 普通の空)。
 #    - 画素スケール = 中心での画素 → 接平面の写像の √|det|(″/px)。SIP があれば SIP 込み。
 #    - 星の明るさは等級ではなく「各系列の sweep の順位」から作る(5200 系には等級が無いため)。
 #
-#  星の集め方(実写と同じく、どの 1 つの索引よりも星が多い状態にする)
-#    1. 視野に入る星を、手持ちの複数の系列(細かい段と粗い段)から集める。系列ごとに
+#  星の集め方(実写と同じく、どの 1 つのインデックスよりも星が多い状態にする)
+#    1. 視野に入る星を、手持ちの複数の系列(細かいスケールと粗いスケール)から集める。系列ごとに
 #       sweep の小さい順(同じ値は乱数で)に並べた順位をつける。
 #    2. 1″ 以内の重複(同じ星が複数の系列に入っている)は 1 つにまとめ、順位は最小のものを採る。
 #       位置は Gaia(5200 系)を優先する(Tycho-2 の 4100 系とは元期の差で 1″ 弱ずれることがある)。
@@ -39,7 +39,7 @@ from solver_index import *
 
 SV_SYNTH_FORMAT = "zahyou-synth-field-1"
 SV_SYNTH_DEDUP_ARCSEC = 1.0          # これより近い星は同じ星とみなす
-SV_SYNTH_MAX_SERIES_STARS = 4000     # 視野に入る星の見込みがこれより多い系列は使わない(細かすぎる段)
+SV_SYNTH_MAX_SERIES_STARS = 4000     # 視野に入る星の見込みがこれより多い系列は使わない(細かすぎるスケール)
 SV_SYNTH_FLUX_TOP = 1.0e5            # いちばん明るい星のフラックス
 SV_SYNTH_FLUX_JITTER_MAG = 0.3       # 明るさの揺らぎ(等級の標準偏差)
 SV_SYNTH_TOL = {"center_arcsec": 2.0,   # 中心のずれ(″)。0.5 px のほうが大きければそちら
@@ -83,7 +83,7 @@ def sv_synth_truth_wcs(center_ra, center_dec, scale_arcsec, width, height,
     """正解の WCS。CRVAL = 中心、CRPIX = 配列の中央、CD は sv_synth_cd。
 
     sip: None(TAN だけ)/ 数(隅でのずれ [px]。sv_synth_sip_radial)/ (A, B) の係数。
-    SIP があれば逆変換 AP, BP も画像全体の格子で当てておく。
+    SIP があれば逆変換 AP, BP も画像全体の格子でフィットしておく。
     """
     cd = sv_synth_cd(scale_arcsec, rotation_deg, mirror)
     crpix = ((float(width) - 1.0) / 2.0, (float(height) - 1.0) / 2.0)
@@ -100,7 +100,7 @@ def sv_synth_truth_wcs(center_ra, center_dec, scale_arcsec, width, height,
     return w
 
 
-# ------------------------------------------------------------------ 物差し ---
+# -------------------------------------------------------------------- 指標 ---
 
 def _sv_synth_jacobian(pts, basis_xyz, h):
     """中心と ±h の 4 点(pts[0] が中心、続いて +x, −x, +y, −y)を basis_xyz の接平面(東, 北)に投影し、
@@ -114,7 +114,7 @@ def _sv_synth_jacobian(pts, basis_xyz, h):
 
 
 def sv_synth_measure(wcs, width, height, step=1.0, ref_xyz=None):
-    """WCS の中心・画素スケール・+y の位置角・パリティを測る(試験の物差し。約束は冒頭)。
+    """WCS の中心・画素スケール・+y の位置角・パリティを測る(テストの指標。約束は冒頭)。
 
     wcs は SvWcs か、画素 (x, y)(0 始まり、配列の向き。numpy の配列)→ 単位ベクトル (…, 3) を返す関数
     (astropy の WCS を測るときは呼ぶ側で包む。原点 0 で all_pix2world を呼ぶこと)。
@@ -299,7 +299,7 @@ def _sv_synth_jitter(rng, n):
 def sv_synth_field(catalog, center_ra, center_dec, scale_arcsec, width, height,
                    rotation_deg=0.0, mirror=False, sip=None, seed=0, n_stars=60,
                    drop_frac=0.3, distractor_frac=0.3, pos_noise_px=0.3, series=None):
-    """索引の星から正解つきの合成星野を作る(作り方は冒頭)。
+    """インデックスの星から正解つきの合成星野を作る(作り方は冒頭)。
 
     catalog: SvIndexCatalog。center_ra, center_dec: 配列の中央の位置(度)。scale_arcsec: ″/px。
     rotation_deg: 配列の +y の位置角。mirror: det CD > 0 にするか。sip: sv_synth_truth_wcs。
@@ -308,7 +308,7 @@ def sv_synth_field(catalog, center_ra, center_dec, scale_arcsec, width, height,
     戻り値 {"xy" (N,2) 明るい順, "flux" (N,), "truth" SvWcs, "width", "height", "meta" {…}}。
     meta は JSON にそのまま書ける: "kind" = "sky"、"params"(この関数の引数。series は実際に使ったもの)、
     "series"(系列ごとの視野内の星の数)、"counts"、"truth_summary"(sv_synth_measure)、
-    星ごとの "is_real"・"star_xyz"(偽の星は None)・"source"(「索引名#星番号」。偽の星は None)。
+    星ごとの "is_real"・"star_xyz"(偽の星は None)・"source"(「インデックス名#星番号」。偽の星は None)。
     """
     W, H = int(width), int(height)
     rng = np.random.default_rng(int(seed))
@@ -402,7 +402,7 @@ def sv_synth_random_field(width, height, n_stars=60, seed=0):
 # ------------------------------------------------------------------ JSON ---
 
 def sv_synth_to_json(field):
-    """合成星野を JSON に書ける dict に(浮動小数はそのまま。Python の json は往復で値が変わらない)。"""
+    """合成星野を JSON に書ける dict に(浮動小数はそのまま。Python の json は書いて読み戻しても値が変わらない)。"""
     t = field.get("truth")
     return {"format": SV_SYNTH_FORMAT, "width": int(field["width"]), "height": int(field["height"]),
             "xy": np.asarray(field["xy"], dtype=np.float64).tolist(),

@@ -1,9 +1,9 @@
 //! 表示の伸張。Python 版 `dev/zahyou_plot.py` の `_norm`(astropy の ImageNormalize + AsinhStretch(1.0))と、
-//! matplotlib の灰色の色表(`imshow(..., cmap="gray")`、256 段)で 8 bit にするところ。
+//! matplotlib の灰色の色表(`imshow(..., cmap="gray")`、256 階調)で 8 bit にするところ。
 //!
 //! 範囲は「背景の中央値 − 1σ」から「max(99.9 パーセント点, 中央値 + 12σ)」まで(中央値と σ は 3σ クリップ)。
 //! 値 v は x = (v − vmin) / (vmax − vmin)、y = asinh(x) / asinh(1) で写し、matplotlib と同じく
-//! y·256 を切り捨てた段の色にする(0 未満は黒、1 以上は白、有限でない値は透明)。
+//! y·256 を切り捨てた階調の色にする(0 未満は黒、1 以上は白、有限でない値は透明)。
 //!
 //! 途中の型も Python 版と同じにしてある:
 //! - σ クリップは float32 の画像に対する astropy の値(zahyou_image::kernels::sigma_clipped_stats がビット一致)
@@ -51,7 +51,7 @@ impl Norm {
     }
 }
 
-/// matplotlib の Colormap.__call__ の段の選び方(N = 256)。NaN は None(「悪い値」= 透明)。
+/// matplotlib の Colormap.__call__ の階調の選び方(N = 256)。NaN は None(「悪い値」= 透明)。
 #[inline]
 fn lut_index(y: f64) -> Option<usize> {
     let mut xa = y * 256.0;
@@ -100,11 +100,11 @@ pub fn compute_norm(data: &[f32]) -> Option<Norm> {
 
 /// 有限な値だけを、並びを保ったまま集める(`data[np.isfinite(data)]`)。
 ///
-/// 全部有限なら写さずに `data` をそのまま返す(図 1 の表示用画像はふつう NaN を含まない)。写した配列は
-/// 元と同じ並び・同じ値になるだけなので、後の和(区切りは配列の先頭からの位置で決まる)・σ クリップ・
+/// 全部有限ならコピーせずに `data` をそのまま返す(図 1 の表示用画像はふつう NaN を含まない)。コピーした配列は
+/// 元と同じ並び・同じ値になるだけなので、後の和(ブロックの境目は配列の先頭からの位置で決まる)・σ クリップ・
 /// パーセント点はビット単位で同じ。NaN・±∞ を含むとき(北が上の図は外側がいつも NaN)は、CHUNK ごとに
-/// 個数を数えて合計の長さで 1 回だけ確保し、塊ごとの出力の区切りへ並列に書く(旧版は塊ごとの Vec を作って
-/// から 1 本のスレッドで concat していた)。数える述語と書く述語は同じ is_finite なので区切りの長さは合い、
+/// 個数を数えて合計の長さで 1 回だけ確保し、塊ごとの出力の区間へ並列に書く(旧版は塊ごとの Vec を作って
+/// から 1 本のスレッドで concat していた)。数える述語と書く述語は同じ is_finite なので区間の長さは合い、
 /// 並びも旧版と同じ。
 pub(crate) fn finite_values(data: &[f32]) -> Cow<'_, [f32]> {
     if data.len() < CHUNK {
@@ -140,8 +140,8 @@ pub(crate) fn finite_values(data: &[f32]) -> Cow<'_, [f32]> {
 /// Rust は描き直した画像を float32 で持つので、値を float64 にして同じ式で計算する(差は float32 の丸め程度)。
 /// float64 なので、±∞ を float32 の最大値にした画素があっても 2 乗の和があふれない(Python と同じ)。
 pub fn compute_norm_f64(data: &[f32]) -> Option<Norm> {
-    // NaN を含む data を直接読む形にはしない(和の 8192 個の区切りが写した配列とずれて、最後の桁が変わる)。
-    // finite_values は写した配列と同じ並び・同じ値を返す(全部有限なら data そのもの)ので、区切りも同じ
+    // NaN を含む data を直接読む形にはしない(和の 8192 個のブロックの境目がコピーした配列とずれて、最後の桁が変わる)。
+    // finite_values はコピーした配列と同じ並び・同じ値を返す(全部有限なら data そのもの)ので、ブロックの境目も同じ
     let vals = finite_values(data);
     if vals.is_empty() {
         return None;
@@ -184,7 +184,7 @@ fn finish(med: f64, sigma: f64, p: f64) -> Norm {
     Norm { vmin: lo, vmax: hi }
 }
 
-/// float64 の和(8192 個ずつの区切りの和を、並列に求めてから先頭から順に足す)。
+/// float64 の和(8192 個ずつのブロックの和を、並列に求めてから先頭から順に足す)。
 fn sum_f64_of<F: Fn(f32) -> f64 + Sync>(vals: &[f32], f: F) -> f64 {
     let parts: Vec<f64> = vals.par_chunks(8192).map(|c| sum8(c, &f)).collect();
     parts.iter().sum()
@@ -204,7 +204,7 @@ fn std_f64(vals: &[f32]) -> f64 {
     (ss / n).sqrt()
 }
 
-/// float64 の和(8192 個ずつの区切りの和を順に足す。区切りの中は 8 本の部分和)。
+/// float64 の和(8192 個ずつのブロックの和を順に足す。ブロックの中は 8 本の部分和)。
 #[inline]
 fn sum8<F: Fn(f32) -> f64>(c: &[f32], f: &F) -> f64 {
     let mut r = [0.0f64; 8];
@@ -226,8 +226,8 @@ const BIG: usize = 1 << 20;
 
 /// 有限な float32 の配列のうち、float64 にして [lo, hi] に入る値の (個数, 中央値, σ)(`np.median`・`np.std`)。
 ///
-/// 読むのは 2 回だけ: 1 回目で個数・鍵の上位 16 bit のヒストグラム・和、2 回目で中央値の入る段の下位 16 bit の
-/// ヒストグラムと偏差の 2 乗の和。値を写して集め直さない(σ クリップで残る値は「元の配列のうち、それまでの
+/// 読むのは 2 回だけ: 1 回目で個数・キーの上位 16 bit のヒストグラム・和、2 回目で中央値の入るビンの下位 16 bit の
+/// ヒストグラムと偏差の 2 乗の和。値をコピーして集め直さない(σ クリップで残る値は「元の配列のうち、それまでの
 /// 境界の共通部分に入る値」なので、区間で選べば同じ集合になる)。
 fn median_std_in(vals: &[f32], lo: f64, hi: f64) -> (usize, f64, f64) {
     let keep = |x: f32| {
@@ -404,14 +404,14 @@ pub fn percentile_f64(vals: &[f32], q: f64) -> f64 {
     if gamma >= 0.5 { b - diff * (1.0 - gamma) } else { a + diff * gamma }
 }
 
-/// float32 の大小と同じ順になる 32 bit の鍵(負の数はビットを反転、正の数は符号ビットを立てる)。
+/// float32 の大小と同じ順になる 32 bit のキー(負の数はビットを反転、正の数は符号ビットを立てる)。
 #[inline]
 fn f32_key(x: f32) -> u32 {
     let b = x.to_bits();
     if b & 0x8000_0000 != 0 { !b } else { b | 0x8000_0000 }
 }
 
-/// 鍵のヒストグラム(65536 段)。`bin` が None の値は数えない。
+/// キーのヒストグラム(65536 ビン)。`bin` が None の値は数えない。
 fn hist16<F: Fn(u32) -> Option<u32> + Sync>(vals: &[f32], bin: F) -> Vec<u32> {
     vals.par_chunks(CHUNK)
         .fold(
@@ -436,7 +436,7 @@ fn hist16<F: Fn(u32) -> Option<u32> + Sync>(vals: &[f32], bin: F) -> Vec<u32> {
         )
 }
 
-/// ヒストグラムで、順位 k の入る段と、その段より前の個数。
+/// ヒストグラムで、順位 k の入るビンと、そのビンより前の個数。
 fn find_bin(h: &[u32], k: usize) -> (usize, usize) {
     let mut cum = 0usize;
     for (i, &c) in h.iter().enumerate() {
@@ -449,7 +449,7 @@ fn find_bin(h: &[u32], k: usize) -> (usize, usize) {
 }
 
 /// 小さい方から k 番目(0 始まり)の値を、複数の k について(NaN を含まない配列)。
-/// 長い配列は鍵(32 bit)の上位 16 bit・下位 16 bit の 2 段のヒストグラムで正確に選ぶ(並べ替えない)。
+/// 長い配列はキー(32 bit)の上位 16 bit・下位 16 bit の 2 段階のヒストグラムで正確に選ぶ(並べ替えない)。
 fn kth_many(vals: &[f32], ks: &[usize]) -> Vec<f32> {
     let n = vals.len();
     if n == 0 {
@@ -483,11 +483,11 @@ fn key_to_f32(k: u32) -> f32 {
     if k & 0x8000_0000 != 0 { f32::from_bits(k & 0x7FFF_FFFF) } else { f32::from_bits(!k) }
 }
 
-/// 伸張して 8 bit の段にする速い写し(結果は [`Norm::gray8`] と同じ)。
+/// 伸張して 8 bit の階調にする速い変換(結果は [`Norm::gray8`] と同じ)。
 ///
-/// 段の境目 y = k/256(k = 1〜255)を x = (v − vmin)/(vmax − vmin) の値 X_k = sinh(k·asinh(1)/256) に直しておき、
+/// 階調の境目 y = k/256(k = 1〜255)を x = (v − vmin)/(vmax − vmin) の値 X_k = sinh(k·asinh(1)/256) に直しておき、
 /// 画素ごとには x を二分探索するだけにする(asinh を呼ばない)。境目から相対 1e-9 以内の x と、x が有限でないときだけ
-/// 元の式で計算する(asinh の丸めは 1e-15 程度なので、それより離れた x では段が変わらない)。
+/// 元の式で計算する(asinh の丸めは 1e-15 程度なので、それより離れた x では階調が変わらない)。
 pub(crate) struct GrayMap {
     norm: Norm,
     /// X_1〜X_255(増加列)
@@ -517,7 +517,7 @@ impl GrayMap {
         if !x.is_finite() {
             return n.gray8(v);
         }
-        // 段 = x 以下の境目の数
+        // 階調 = x 以下の境目の数
         let k = self.xs.partition_point(|&t| t <= x);
         let near = |i: usize| (x - self.xs[i]).abs() <= GUARD * self.xs[i];
         if (k > 0 && near(k - 1)) || (k < 255 && near(k)) {
@@ -549,7 +549,7 @@ mod tests {
 
     #[test]
     fn lut_matches_matplotlib_truncation() {
-        // matplotlib 3.10 の get_cmap("gray")(linspace(0,1,256), bytes=True) と同じ(gen_plot.py で全段を照合する)
+        // matplotlib 3.10 の get_cmap("gray")(linspace(0,1,256), bytes=True) と同じ(gen_plot.py で全階調を照合する)
         assert_eq!(GRAY_LUT[0], 0);
         assert_eq!(GRAY_LUT[32], 32);
         assert_eq!(GRAY_LUT[33], 32);
@@ -593,7 +593,7 @@ mod tests {
 
     #[test]
     fn fast_gray_matches_formula() {
-        // 速い写しが元の式と同じ段を返す: 乱数の値、境目の前後の float32、範囲の外、ふつうでない伸張の範囲
+        // 速い変換が元の式と同じ階調を返す: 乱数の値、境目の前後の float32、範囲の外、ふつうでない伸張の範囲
         let norms = [
             Norm { vmin: 995.9105882644653, vmax: 6466.2255859375 },
             Norm { vmin: -387.25, vmax: 7886.05 },
@@ -612,7 +612,7 @@ mod tests {
                 let u = (st >> 11) as f64 / (1u64 << 53) as f64;
                 vals.push((n.vmin + (u * 1.4 - 0.2) * (n.vmax - n.vmin)) as f32);
             }
-            // 段の境目そのもの(元の式を float32 の上で二分探索して、境目の両側の値)
+            // 階調の境目そのもの(元の式を float32 の上で二分探索して、境目の両側の値)
             for k in 1..256usize {
                 let span = n.vmax - n.vmin;
                 if !span.is_finite() || span <= 0.0 {
@@ -672,7 +672,7 @@ mod tests {
     #[test]
     fn finite_values_matches_old() {
         // NaN・±∞ を混ぜた配列(塊の境目をまたぐ長さ、塊がまるごと非有限、先頭・末尾が非有限)と、全部有限の配列で、
-        // 新版の写し(または写さない)が旧版と要素ごとに to_bits まで同じ。伸張の範囲(float32 と float64)も同じ
+        // 新版のコピー(またはコピーしない場合)が旧版と要素ごとに to_bits まで同じ。伸張の範囲(float32 と float64)も同じ
         let mut st: u64 = 12345;
         let mut rnd = || {
             st = st.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
@@ -714,7 +714,7 @@ mod tests {
             let old = finite_values_old(d);
             assert_eq!(new.len(), old.len(), "例 {k}");
             assert!(new.iter().zip(&old).all(|(a, b)| a.to_bits() == b.to_bits()), "例 {k}");
-            // 全部有限なら写さない
+            // 全部有限ならコピーしない
             if d.iter().all(|x| x.is_finite()) {
                 assert!(matches!(new, Cow::Borrowed(_)), "例 {k}");
             }

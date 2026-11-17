@@ -3,17 +3,17 @@
 //! 引数なしで画面を出す。画面を出さない入口(exe は windows サブシステムなので結果は --out へも書く):
 //!
 //!   zahyou.exe --selftest <画像> [--online|--offline] [--out f]   画面を組み立てて解析を通す自己診断
-//!   zahyou.exe --engine-check [--out f]                         フォントと星図データの目録を確かめる
+//!   zahyou.exe --engine-check [--out f]                         フォントとインデックスファイルの目録を確かめる
 //!   zahyou.exe --update-check [--out f]                         更新の確認だけ
-//!   zahyou.exe --bench [--out f]                                解析の速さの物差し(JSON。pipeline 係)
-//!   zahyou.exe --bench-gui [<画像>] [--out f]                    画面まわりの速さ(フォント・星図データの検査・図の縮小の段)
+//!   zahyou.exe --bench [--out f]                                解析の速さのベンチマーク(JSON。pipeline モジュール)
+//!   zahyou.exe --bench-gui [<画像>] [--out f]                    画面まわりの速さ(フォント・インデックスファイルの検査・図の縮小の段階)
 //!   zahyou.exe --shot <png> [...]                               画面を自分で撮って閉じる(ui/shot.rs)
-//!   zahyou.exe --bench-ui <画像> [...]                           描画方式の物差し(窓を出す。ui/bench_ui.rs)
+//!   zahyou.exe --bench-ui <画像> [...]                           描画方式のベンチマーク(ウィンドウを出す。ui/bench_ui.rs)
 //!
 //! 描き方(DirectX 12 か OpenGL か・どの GPU か)は `RenderChoice`。既定と、開けなかったときに順に試す描き方は
 //! `RENDER_ORDER`(決めた根拠は docs/rust-port.md の「描画方式の実測と決定」)。手で選ぶときは --dx12 / --glow / --gpu display|low|high|warp。
 //!
-//! 設計は docs/rust-port.md。解析の流れは pipeline.rs(別の係)、画面は ui/。
+//! 設計は docs/rust-port.md。解析の流れは pipeline.rs(別のモジュール)、画面は ui/。
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![forbid(unsafe_code)]
 
@@ -33,21 +33,21 @@ use ui::app::{Options, TopTab, ZahyouApp};
 use ui::cli::{arg_value, has};
 use ui::settings::ResultTab;
 
-/// 画面に出す版名。パッケージの版(rs/Cargo.toml)に "v" を付け、末尾の 0 の部分を省いたもの(build.rs の `version_label`。
-/// 例: 8.0.0 → "v8"、8.0.0-beta.1 → "v8-beta.1")。版名は v7・v8 のような整数の形で、GitHub のタグ名と同じ。
+/// 画面に出すバージョン名。パッケージのバージョン(rs/Cargo.toml)に "v" を付け、末尾の 0 の部分を省いたもの(build.rs の `version_label`。
+/// 例: 8.0.0 → "v8"、8.0.0-beta.1 → "v8-beta.1")。バージョン名は v7・v8 のような整数の形で、GitHub のタグ名と同じ。
 /// "-dev" で終わる試作版は更新の確認をしない。"-beta.N" などのプレリリースは、GitHub のプレリリースも含めて
-/// 同じ大きな版(v8)の新しいものを探す(zahyou_net::update)。
+/// 同じメジャーバージョン(v8)の新しいものを探す(zahyou_net::update)。
 pub const APP_VER: &str = env!("ZAHYOU_VERSION_LABEL");
 
 static START: OnceLock<Instant> = OnceLock::new();
 
-/// 版名の後ろに添える「 (β版)」(プレリリースの版のときだけ。正式版・"-dev" では空)。
+/// バージョン名の後ろに添える「 (β版)」(プレリリースのバージョンのときだけ。正式版・"-dev" では空)。
 /// ウィンドウのタイトル・ログの見出し・［使い方］の「いまのバージョン」で使う(正式版に上げれば自然に消える)
 pub fn prerelease_suffix() -> String {
     zahyou_net::update::prerelease_label(APP_VER).map(|l| format!(" ({l})")).unwrap_or_default()
 }
 
-/// 窓の題(例「zahyou v8 — 天体画像から目標への向きを求める」、β版なら「zahyou v8-beta.1 (β版) — …」)
+/// ウィンドウのタイトル(例「zahyou v8 — 天体画像から目標への向きを求める」、β版なら「zahyou v8-beta.1 (β版) — …」)
 pub fn window_title() -> String {
     format!("zahyou {APP_VER}{} — 天体画像から目標への向きを求める", prerelease_suffix())
 }
@@ -68,12 +68,12 @@ fn main() -> ExitCode {
     } else if has(&args, "--selftest") {
         ui::cli::selftest(&args)
     } else if has(&args, "--bench-ui") {
-        // 描画方式の物差し(本物の窓を出して図を自動で動かす)
+        // 描画方式のベンチマーク(本物のウィンドウを出して図を自動で動かす)
         ui::bench_ui::run(&args)
     } else if has(&args, "--bench-gui") {
         ui::cli::bench(&args)
     } else if has(&args, "--bench") {
-        // 解析の速さの物差し(pipeline 係)
+        // 解析の速さのベンチマーク(pipeline モジュール)
         let out = arg_value(&args, "--out").map(PathBuf::from);
         selftest::bench(out.as_deref())
     } else {
@@ -108,7 +108,7 @@ fn run_gui(args: &[String]) -> i32 {
     let native = choice.native_options(viewport);
     let args_owned: Vec<String> = args.to_vec();
     let ff_path = first_frame.clone();
-    // 画面のスレッドの panic(窓を開く途中の OpenGL の設定探しなど)も受け止めて、理由を知らせる
+    // 画面のスレッドの panic(ウィンドウを開く途中の OpenGL の設定探しなど)も受け止めて、理由を知らせる
     let result = ui::worker::guarded(|| {
         eframe::run_native(
             "zahyou",
@@ -131,7 +131,7 @@ fn run_gui(args: &[String]) -> i32 {
             }),
         )
     });
-    // 閉じるまでにかかった時間(起動の物差しの --first-frame のときだけ書き足す)
+    // 閉じるまでにかかった時間(起動のベンチマークの --first-frame のときだけ書き足す)
     if let Some(p) = &ff_path
         && let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(p)
     {
@@ -201,7 +201,7 @@ pub enum Backend {
     Glow,
 }
 
-/// DX12 で使う GPU の選び方。OpenGL は窓を出す画面の GPU のドライバー(と GPU の会社の設定)で決まり、ここでは選べない
+/// DX12 で使う GPU の選び方。OpenGL はウィンドウを出す画面の GPU のドライバー(と GPU の会社の設定)で決まり、ここでは選べない
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GpuPick {
     /// Windows が列挙する先頭の GPU(主の画面をつないでいる GPU。ノート PC ではふつう内蔵 GPU)。wgpu の PowerPreference::None
@@ -210,7 +210,7 @@ pub enum GpuPick {
     LowPower,
     /// 外付けの GPU を先に(速さ)。wgpu の HighPerformance(egui の既定)
     HighPerformance,
-    /// ソフトウェアの WARP(Microsoft Basic Render Driver)。最後の手段と試験用
+    /// ソフトウェアの WARP(Microsoft Basic Render Driver)。最後の手段とテスト用
     Warp,
 }
 
@@ -259,7 +259,7 @@ pub struct RenderChoice {
     pub gpu: GpuPick,
     /// DX12 の GPU メモリを小さな塊で確保する(wgpu の MemoryHints::MemoryUsage)
     pub lean_memory: bool,
-    /// 垂直同期(物差しで上限なしの速さを見るときだけ切る)
+    /// 垂直同期(ベンチマークで上限なしの速さを見るときだけ切る)
     pub vsync: bool,
     /// OpenGL をハードウェア支援つきで開く。--no-hw で切ると Windows の OpenGL 1.1(ソフトウェア)を選ぶので開けない。
     /// GPU のドライバーが無い環境の代わりに、OpenGL で開けなかったときの順を試すためのもの
@@ -269,8 +269,8 @@ pub struct RenderChoice {
 }
 
 impl RenderChoice {
-    /// 引数から決める: --dx12 / --glow(描き方の指定)、--gpu display|low|high|warp、--mem lean|perf(物差し用)、
-    /// --no-vsync・--no-hw(物差しと試験用)、--render-step N(開き直した先。RENDER_ORDER の N 番目)
+    /// 引数から決める: --dx12 / --glow(描き方の指定)、--gpu display|low|high|warp、--mem lean|perf(ベンチマーク用)、
+    /// --no-vsync・--no-hw(ベンチマークとテスト用)、--render-step N(開き直した先。RENDER_ORDER の N 番目)
     pub fn from_args(args: &[String]) -> RenderChoice {
         let gpu_arg = arg_value(args, "--gpu").and_then(|s| GpuPick::from_key(&s));
         let lean_memory = match arg_value(args, "--mem").as_deref() {
@@ -289,7 +289,7 @@ impl RenderChoice {
             None
         };
         let (backend, gpu, step) = match (step, named) {
-            // 開き直した先は表の順に従う(WARP 以外の段は --gpu の指定を引き継ぐ)
+            // 開き直した先は表の順に従う(WARP 以外の段階は --gpu の指定を引き継ぐ)
             (Some(k), _) => {
                 let (b, g) = RENDER_ORDER[k];
                 (b, if g == GpuPick::Warp { g } else { gpu_arg.unwrap_or(g) }, Some(k))
@@ -351,7 +351,7 @@ impl RenderChoice {
         let lean = self.lean_memory;
         let setup = egui_wgpu::WgpuSetupCreateNew {
             instance_descriptor: wgpu::InstanceDescriptor {
-                // egui の既定と同じく環境変数 WGPU_BACKEND を見る(試験で WGPU_BACKEND=metal にして DX12 を失敗させる)
+                // egui の既定と同じく環境変数 WGPU_BACKEND を見る(テストで WGPU_BACKEND=metal にして DX12 を失敗させる)
                 backends: wgpu::Backends::from_env().unwrap_or(wgpu::Backends::DX12),
                 flags: wgpu::InstanceFlags::from_build_config().with_env(),
                 memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
@@ -407,7 +407,7 @@ fn one_line(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// 開いた描き方と GPU の説明(RENDER_INFO と物差しの記録に使う)
+/// 開いた描き方と GPU の説明(RENDER_INFO とベンチマークの記録に使う)
 pub fn describe_renderer(cc: &eframe::CreationContext<'_>) -> String {
     if let Some(rs) = &cc.wgpu_render_state {
         let i = rs.adapter.get_info();
@@ -425,7 +425,7 @@ pub fn describe_renderer(cc: &eframe::CreationContext<'_>) -> String {
 /// 一度でも画面を描いたか(描いたあとの panic は開き直さない)
 pub static FRAME_SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// 画面を開けなかった・止まったことを箱で知らせる(exe は windows サブシステムなので、標準エラーは見えない)
+/// 画面を開けなかった・止まったことをメッセージボックスで知らせる(exe は windows サブシステムなので、標準エラーは見えない)
 fn tell_failure(text: &str) {
     rfd::MessageDialog::new()
         .set_title("zahyou")
@@ -469,7 +469,7 @@ fn apply_shot_args(app: &mut ZahyouApp, args: &[String], path: Option<PathBuf>, 
     if let Some(d) = arg_value(args, "--index-dir") {
         app.s.indexdir = d;
     }
-    // ［解析］の左の列をいちばん下(API キーの欄)まで送って撮る(小さい窓で下に隠れる欄を目で確かめるため)
+    // ［解析］の左の列をいちばん下(API キーの欄)まで送って撮る(小さいウィンドウで下に隠れる欄を目で確かめるため)
     if has(args, "--left-end") {
         app.scroll_left_end = true;
     }
@@ -520,7 +520,7 @@ mod render_choice_tests {
         // 範囲の外の番号は無視して先頭から(開き直しが終わらなくなることはない)
         assert_eq!(RenderChoice::from_args(&args("--render-step 99")).step, Some(0));
         assert_eq!(RenderChoice::from_args(&args("--render-step x")).step, Some(0));
-        // 表の WARP の段は --gpu に上書きされない
+        // 表の WARP の段階は --gpu に上書きされない
         let last = RENDER_ORDER.len() - 1;
         if RENDER_ORDER[last].1 == GpuPick::Warp {
             assert_eq!(RenderChoice::from_args(&args(&format!("--gpu high --render-step {last}"))).gpu, GpuPick::Warp);

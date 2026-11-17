@@ -1,4 +1,4 @@
-"""オンライン解析 (solve_online) が nova.astrometry.net へ送る中身の試験。ネットには出ない。
+"""オンライン解析 (solve_online) が nova.astrometry.net へ送る中身のテスト。ネットには出ない。
 
 astroquery の送信の関数 (AstrometryNetClass._request) を偽物に差し替え、送るはずだった
 request-json を取り出して中身を確かめる。返事も偽物 (ログイン → 受付 → 解けた → WCS) を返す。
@@ -8,9 +8,9 @@ request-json を取り出して中身を確かめる。返事も偽物 (ログ�
   - 星の位置を送るとき (solve_from_source_list) も、画像を送るとき (solve_from_image) も
     publicly_visible = "n" (公開しない) が request-json に入っている
   - 星の位置で解けずに画像へ切り替えたときも、2 回とも "n"
-  - photutils が入っていても、画像の段では画像ファイルそのものを送る (exe と同じ。FITS でも JPEG でも)。
-    astroquery 0.4.10 は photutils があると画像を上げずに星を数え直して位置を送り、FITS 以外はそこで例外になる。
-    それを止める旗 (_no_source_detector) は solve_online の AstrometryNet にだけ立ち、クラスの既定は変えない
+  - photutils が入っていても、画像の段階では画像ファイルそのものを送る (exe と同じ。FITS でも JPEG でも)。
+    astroquery 0.4.10 は photutils があると画像をアップロードせずに星を数え直して位置を送り、FITS 以外はそこで例外になる。
+    それを止めるフラグ (_no_source_detector) は solve_online の AstrometryNet にだけ立ち、クラスの既定は変えない
   - 送るのは星の位置・画像の大きさ・手がかり・公開の指定・セッションだけ (知らない項目が増えたら失敗)
   - API キーはログインのときだけ送り、解析の受付には入らない
   - 対照: astroquery に何も指定しないと publicly_visible は送られない (= サーバーの既定の「公開」になる)
@@ -168,7 +168,7 @@ class patched_nova:
         return False
 
 
-# ------------------------------------------------------------- 試験の材料 ---
+# ------------------------------------------------------------- テストの材料 ---
 
 def make_star_fits(path, ny=160, nx=200, n=25, seed=7):
     """星を植えた小さな FITS (photutils の経路で星が見つかるように)。"""
@@ -191,7 +191,7 @@ def make_star_jpeg(path, fits_path):
 
 
 def _solve_catching(solve_online, path, sources=None):
-    """solve_online を呼び、例外は (None, 説明) にして返す (試験を止めずに FAIL として記録するため)。"""
+    """solve_online を呼び、例外は (None, 説明) にして返す (テストを止めずに FAIL として記録するため)。"""
     try:
         return solve_online(path, FAKE_KEY, sources=sources, shape=SHAPE, timeout=30), ""
     except Exception as e:
@@ -229,7 +229,7 @@ def _check_submission(tag, sub, expect_kind, extra=None):
     return not probs, ("; ".join(probs) + " / " if probs else "") + desc
 
 
-# ------------------------------------------------------------------ 試験 ---
+# ------------------------------------------------------------------ テスト ---
 
 def run_cases(label, solve_online, img_path, jpg_path):
     # 1. 星の位置を送る (いつもの経路)

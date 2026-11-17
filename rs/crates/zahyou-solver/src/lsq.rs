@@ -1,7 +1,7 @@
-//! 改良の当てはめ(Python の `sv_fit_wcs_lsq` の今の版)と残差。
+//! 改良のフィット(Python の `sv_fit_wcs_lsq` の今のバージョン)と残差。
 //!
-//! zahyou-wcs の `try_fit_wcs_lsq` は接点を決まった回数だけ動かす版なので、ここでは Python の今の版
-//! (残った定数項を画素に直して 1e-8 px 以下になるまで、上限 40 回。上限で 0.01 px を超えて残れば失敗)を写す。
+//! zahyou-wcs の `try_fit_wcs_lsq` は接点を決まった回数だけ動かすバージョンなので、ここでは Python の今のバージョン
+//! (残った定数項を画素に直して 1e-8 px 以下になるまで、上限 40 回。上限で 0.01 px を超えて残れば失敗)を移植する。
 //! 多項式の最小二乗は zahyou-wcs の QR(`linalg::lstsq_qr`)、SIP の逆変換は `fit_sip_inverse` を使う。
 
 use zahyou_wcs::linalg::{det2, inv2, lstsq_qr};
@@ -12,7 +12,7 @@ use zahyou_wcs::{Mat2, Sip, Vec3, Wcs, fit_sip_inverse, fit_sip_inverse_bounds, 
 pub(crate) const LSQ_MAX_SHIFTS: usize = 40;
 /// CRPIX に残る定数項(画素に直したもの)がこれ以下なら接点を動かすのをやめる。
 const LSQ_TOL_PX: f64 = 1e-8;
-/// 上限まで動かしてもこれを超えて残れば、当てはめは失敗。
+/// 上限まで動かしてもこれを超えて残れば、フィットは失敗。
 const LSQ_FAIL_PX: f64 = 0.01;
 
 /// 長さ 1 にする(Python の sv_normalize と同じ式。長さ 0 なら NaN)。
@@ -44,8 +44,8 @@ fn solve2(a: &Mat2, b: [f64; 2]) -> [f64; 2] {
     [x0, x1]
 }
 
-/// 2 本の目的値をそれぞれ Σ c[p][q] u^p v^q(min_deg ≤ p+q ≤ order)で重みつき最小二乗に当てる
-/// (Python の `_sv_poly_lstsq`)。u, v は最大の絶対値で割ってから当てる。戻り値は行優先の (order+1)² 2 本。
+/// 2 本の目的値をそれぞれ Σ c[p][q] u^p v^q(min_deg ≤ p+q ≤ order)で重みつき最小二乗でフィットする
+/// (Python の `_sv_poly_lstsq`)。u, v は最大の絶対値で割ってからフィットする。戻り値は行優先の (order+1)² 2 本。
 fn poly_lstsq(
     u: &[f64],
     v: &[f64],
@@ -95,13 +95,13 @@ fn poly_lstsq(
     Ok([c0, c1])
 }
 
-/// 対応する画像の点と星から、TAN(+SIP)を重みつき最小二乗で当てる(Python の `sv_fit_wcs_lsq`)。
+/// 対応する画像の点と星から、TAN(+SIP)を重みつき最小二乗でフィットする(Python の `sv_fit_wcs_lsq`)。
 ///
 /// CRPIX は固定(既定は画像の点の重みつき重心)。接点(既定は星の重みつきの和の方向)のまわりで星を
-/// 投影し、ξ と η をそれぞれ u, v(画素 − CRPIX)の多項式(0 ≤ p+q ≤ 次数、次数 = max(1, sip_order))で当てる。
-/// 定数項を CD⁻¹ で画素に直した大きさが 1e-8 px 以下になるまで接点を動かして当て直す(iterations は上限)。
+/// 投影し、ξ と η をそれぞれ u, v(画素 − CRPIX)の多項式(0 ≤ p+q ≤ 次数、次数 = max(1, sip_order))でフィットする。
+/// 定数項を CD⁻¹ で画素に直した大きさが 1e-8 px 以下になるまで接点を動かして再フィットする(iterations は上限)。
 /// 上限まで動かしても 0.01 px を超えるずれが残れば失敗。sip_order ≥ 2 なら SIP と逆変換(次数 sip_order+1、
-/// `size` = (幅, 高さ) の画像全体の格子。無ければ点の範囲)も当てる。重み 0 の点は使わない。
+/// `size` = (幅, 高さ) の画像全体の格子。無ければ点の範囲)もフィットする。重み 0 の点は使わない。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn fit_wcs_lsq(
     field: &[[f64; 2]],
@@ -210,7 +210,7 @@ pub(crate) fn fit_wcs_lsq(
         if left <= LSQ_TOL_PX || k >= iterations {
             break;
         }
-        // 接点をそこへ動かして当て直す(最後の当てはめのあとには動かさない)
+        // 接点をそこへ動かして再フィットする(最後のフィットのあとには動かさない)
         r = deproject(coef[0][0] * rad, coef[1][0] * rad, r, east, north);
         k += 1;
     }
@@ -275,7 +275,7 @@ mod tests {
 
     #[test]
     fn lsq_recovers_wide_field_off_center() {
-        // 広い視野(40°)で星が片側だけでも、中心を CRPIX にして当てれば元の TAN に戻る
+        // 広い視野(40°)で星が片側だけでも、中心を CRPIX にしてフィットすれば元の TAN に戻る
         let truth = Wcs::tan(radec_to_xyz(120.0, 30.0), [999.5, 649.5], [[-0.02, 0.0], [0.0, 0.02]]);
         let mut f = Vec::new();
         let mut s = Vec::new();

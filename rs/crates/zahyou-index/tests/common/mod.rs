@@ -1,4 +1,4 @@
-//! 試験の共通の道具: 星図データと基準値(JSON)の場所、SKIP の出し方、sha256。
+//! テストの共通の道具: インデックスファイルと基準値(JSON)の場所、SKIP の出し方、sha256。
 #![allow(dead_code)]
 
 use std::path::PathBuf;
@@ -6,12 +6,12 @@ use std::path::PathBuf;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-/// 星図データの置き場所(環境変数 ZAHYOU_INDEX_DIR で変えられる)。
+/// インデックスファイルの置き場所(環境変数 ZAHYOU_INDEX_DIR で変えられる)。
 pub fn index_dir() -> PathBuf {
     std::env::var_os("ZAHYOU_INDEX_DIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\AstrometryData"))
 }
 
-/// 索引の表を開けない OS か。zahyou-index が mmap するのは Windows だけなので、ほかの OS では星図データを使う試験をしない
+/// インデックスの表を開けない OS か。zahyou-index が mmap するのは Windows だけなので、ほかの OS ではインデックスファイルを使うテストをしない
 /// (`need` と `index_path` が SKIP の側へ倒す。理由は 1 度だけ出す)。
 pub fn tables_unavailable() -> bool {
     static ONCE: std::sync::Once = std::sync::Once::new();
@@ -22,7 +22,7 @@ pub fn tables_unavailable() -> bool {
     true
 }
 
-/// 索引 1 本のパス(無ければ None。Windows 以外でも None)。
+/// インデックス 1 本のパス(無ければ None。Windows 以外でも None)。
 pub fn index_path(tag: &str) -> Option<PathBuf> {
     if tables_unavailable() {
         return None;
@@ -45,7 +45,7 @@ pub fn load_json(name: &str) -> Option<Value> {
     serde_json::from_str(&s).ok()
 }
 
-/// SKIP を出す(試験は通す)。
+/// SKIP を出す(テストは通す)。
 pub fn skip(name: &str, why: &str) {
     eprintln!("SKIP {name}: {why}");
 }
@@ -83,7 +83,7 @@ pub fn vec3(v: &Value) -> [f64; 3] {
     [a[0], a[1], a[2]]
 }
 
-/// 星図データと基準値の両方があるときだけ値を返す。どちらかが無ければ(Windows 以外でも)SKIP と出して None。
+/// インデックスファイルと基準値の両方があるときだけ値を返す。どちらかが無ければ(Windows 以外でも)SKIP と出して None。
 pub fn need(name: &str, json: &str, tags: &[&str]) -> Option<Value> {
     if tables_unavailable() {
         skip(name, "Windows 以外では索引の表を開かない");

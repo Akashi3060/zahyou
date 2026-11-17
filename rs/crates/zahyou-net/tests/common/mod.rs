@@ -1,5 +1,5 @@
-//! 試験の道具: localhost の小さな HTTP サーバー(Range と故障の注入つき)、python -m http.server、
-//! 照合用の JSON、一時フォルダー、偽の索引ファイル。
+//! テストの道具: localhost の小さな HTTP サーバー(Range と故障の注入つき)、python -m http.server、
+//! 照合用の JSON、一時フォルダー、偽のインデックスファイル。
 #![allow(dead_code)]
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -198,9 +198,9 @@ impl Counter {
 
 // ------------------------------------------------------------- 一時フォルダー ---
 
-/// 試験ごとの空のフォルダー(%TMP%\zahyou-net-tests\<名前>-<pid>)。`&Path` として使え、値が消えるときに中身ごと消す。
-/// 以前は消しておらず、試験を回すたびに pid ごとのフォルダーがたまっていた(2026-10-17 に 511 個・75 MB)。
-/// 試験が落ちて巻き戻るときは、中を調べられるよう消さずに場所を出す。
+/// テストごとの空のフォルダー(%TMP%\zahyou-net-tests\<名前>-<pid>)。`&Path` として使え、値が消えるときに中身ごと消す。
+/// 以前は消しておらず、テストを回すたびに pid ごとのフォルダーがたまっていた(2026-10-17 に 511 個・75 MB)。
+/// テストが落ちて巻き戻るときは、中を調べられるよう消さずに場所を出す。
 pub struct TempDir(PathBuf);
 
 impl TempDir {
@@ -228,7 +228,7 @@ impl Drop for TempDir {
             eprintln!("試験が落ちたので一時フォルダーを残します: {}", self.0.display());
             return;
         }
-        // 親(zahyou-net-tests)は消さない。並んで走るほかの試験が中に作ろうとしているところかもしれない
+        // 親(zahyou-net-tests)は消さない。並んで走るほかのテストが中に作ろうとしているところかもしれない
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
@@ -246,7 +246,7 @@ pub fn testdata_path(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("testdata").join(name)
 }
 
-/// testdata/net_python.json。無ければ None(試験は SKIP)。
+/// testdata/net_python.json。無ければ None(テストは SKIP)。
 pub fn python_values() -> Option<serde_json::Value> {
     let p = testdata_path("net_python.json");
     match std::fs::read(&p) {
@@ -258,7 +258,7 @@ pub fn python_values() -> Option<serde_json::Value> {
     }
 }
 
-// ------------------------------------------------------------- 偽の索引ファイル ---
+// ------------------------------------------------------------- 偽のインデックスファイル ---
 
 fn card(key: &str, value: &str) -> String {
     let s = if value.is_empty() { format!("{key:<8}") } else { format!("{key:<8}= {value:>20}") };
@@ -274,7 +274,7 @@ fn block(cards: &[String]) -> Vec<u8> {
     s.into_bytes()
 }
 
-/// 形だけ正しい索引ファイル(ヘッダー 2 つと、`data` バイトの表)。
+/// 形だけ正しいインデックスファイル(ヘッダー 2 つと、`data` バイトの表)。
 pub fn fake_index(indexid: u32, healpix: i32, data: usize) -> Vec<u8> {
     let prim = block(&[
         card("SIMPLE", "T"),
@@ -309,9 +309,9 @@ pub fn fake_index(indexid: u32, healpix: i32, data: usize) -> Vec<u8> {
 
 // ------------------------------------------------------------- python -m http.server ---
 
-/// 試験に使う Python: ZAHYOU_PYTHON、無ければホームフォルダーの下の Python 3.13(利用者ごとの既定の入れ先)、
+/// テストに使う Python: ZAHYOU_PYTHON、無ければホームフォルダーの下の Python 3.13(利用者ごとの既定のインストール先)、
 /// それも無ければ PATH の python。ホームフォルダーから組み立てるのは、作者のホームの絶対パスをソースに書かないため。
-/// LOCALAPPDATA から組み立てないのは、試験は LOCALAPPDATA を一時フォルダーへ向けて回す決まりだから。
+/// LOCALAPPDATA から組み立てないのは、テストは LOCALAPPDATA を一時フォルダーへ向けて回す決まりだから。
 pub fn python_exe() -> PathBuf {
     if let Some(p) = std::env::var_os("ZAHYOU_PYTHON") {
         return PathBuf::from(p);
@@ -324,7 +324,7 @@ pub fn python_exe() -> PathBuf {
     }
 }
 
-/// `python -m http.server` を localhost に立てる。Python が無ければ None(試験は SKIP)。
+/// `python -m http.server` を localhost に立てる。Python が無ければ None(テストは SKIP)。
 pub struct PyServer {
     child: Child,
     pub port: u16,

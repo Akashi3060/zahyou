@@ -1,8 +1,8 @@
 //! 画面を出さない入口: 自己診断(`zahyou.exe --selftest 画像 [--out 結果.txt] [--online|--offline]`)と
-//! 速さの物差し(`zahyou.exe --bench [--out 結果.json]`)。
+//! 速さのベンチマーク(`zahyou.exe --bench [--out 結果.json]`)。
 //!
-//! 自己診断は Python 版 `gui/zahyou_gui.py` の `selftest` のうち、画面に依らない項目(エンジン・星図データ・
-//! 解析・3 つの数字・図・ログ・目標なし)を受け持つ。画面の項目(ボタンの見切れ・配色など)は gui の係が
+//! 自己診断は Python 版 `gui/zahyou_gui.py` の `selftest` のうち、画面に依らない項目(エンジン・インデックスファイル・
+//! 解析・3 つの数字・図・ログ・目標なし)を受け持つ。画面の項目(ボタンの見切れ・配色など)は gui のモジュールが
 //! [`selftest_rows`] の結果に足して [`format_report`] で書く。
 #![forbid(unsafe_code)]
 
@@ -55,9 +55,9 @@ fn run_logged(params: &RunParams, env: &RunEnv) -> (RunResult, String) {
 
 /// 画面に依らない自己診断の項目(Python の selftest の順)。
 ///
-/// - `force`: Some なら解析の方法をそれにする(--online / --offline)。None なら、星図データがそろっていれば
+/// - `force`: Some なら解析の方法をそれにする(--online / --offline)。None なら、インデックスファイルがそろっていれば
 ///   オフラインのみ、無ければ自動(Python と同じ)
-/// - `index_dir`: 星図データの置き場所(None なら C:\AstrometryData)
+/// - `index_dir`: インデックスファイルの置き場所(None なら C:\AstrometryData)
 /// - `log_out`: 最後の解析のログ(Python と同じく 2 回目 = 目標なしの解析のログ)
 pub fn selftest_rows(
     image: &Path,
@@ -174,18 +174,18 @@ pub fn all_passed(rows: &[Check]) -> bool {
 // `--selftest` の入口は画面の項目も足す ui/cli.rs の `selftest`(記憶と設定を一時へ向けてから
 // selftest_rows と gui_selftest::run を通す)。画面の項目なしの入口は使われていなかったので消した(2026-10-17)。
 
-// ================================================================== 速さの物差し ===
+// ================================================================== 速さのベンチマーク ===
 
-/// 速さの物差しの 1 段。
+/// 速さのベンチマークの 1 段階。
 #[derive(Clone, Debug, PartialEq)]
 pub struct Stage {
     pub name: &'static str,
-    /// 最も速かった回の秒数(測れなかった段は None)
+    /// 最も速かった回の秒数(測れなかった段階は None)
     pub seconds: Option<f64>,
     pub note: String,
 }
 
-/// 1 枚の画像の段ごとの時間。
+/// 1 枚の画像の段階ごとの時間。
 #[derive(Clone, Debug, PartialEq)]
 pub struct BenchImage {
     pub label: String,
@@ -196,7 +196,7 @@ pub struct BenchImage {
 }
 
 /// 速さを測る画像の既定: 手元の実写(あれば)と、6000×4000 の合成画像(一時フォルダーに作って消す)。
-/// 実写は `$ZAHYOU_TEST_IMAGES/Downloads/Capture_00001 00_10_33.fits`(既定はホームフォルダー。試験の画像と同じ決まり)。
+/// 実写は `$ZAHYOU_TEST_IMAGES/Downloads/Capture_00001 00_10_33.fits`(既定はホームフォルダー。テストの画像と同じ決まり)。
 /// 実行時に組み立てるのは、作者のホームのパスを配る exe に書き込まないため(docs/release-v7.md の 4.1 節)。
 pub fn bench_real() -> Option<PathBuf> {
     std::env::var_os("ZAHYOU_TEST_IMAGES")
@@ -205,10 +205,10 @@ pub fn bench_real() -> Option<PathBuf> {
         .map(|base| PathBuf::from(base).join("Downloads").join("Capture_00001 00_10_33.fits"))
 }
 
-/// `--bench`。段ごとの時間(読み込み・前処理・検出・解法・北が上の再投影と描画・PNG)を測り、表示して
+/// `--bench`。段階ごとの時間(読み込み・前処理・検出・解法・北が上の再投影と描画・PNG)を測り、表示して
 /// `out_json` があれば JSON で書く。戻り値は終了コード。
 ///
-/// 環境変数 ZAHYOU_BENCH_DIR があれば、合成画像をそこに作って残す(あれば作り直さない)。Python 版の物差し
+/// 環境変数 ZAHYOU_BENCH_DIR があれば、合成画像をそこに作って残す(あれば作り直さない)。Python 版のベンチマーク
 /// (rs/testdata/bench_pipeline.py)に同じ画像を読ませて比べるため。
 /// 環境変数 ZAHYOU_BENCH_IMAGES(`;` 区切りのパス)があれば、既定の画像の代わりにそれを測る。
 pub fn bench(out_json: Option<&Path>) -> i32 {
@@ -279,8 +279,8 @@ fn best_of<T>(repeat: usize, mut f: impl FnMut() -> T) -> (f64, T) {
     }
 }
 
-/// 1 枚の画像を段ごとに測る。解法(目標なし・画角も不明のブラインド)で解けたときだけ、その WCS で北が上の段を測る。
-/// 解けなければ、画像に入っている WCS があればそれで北が上の段を測る(合成画像は WCS を持っている)。
+/// 1 枚の画像を段階ごとに測る。解法(目標なし・画角も不明のブラインド)で解けたときだけ、その WCS で北が上の段階を測る。
+/// 解けなければ、画像に入っている WCS があればそれで北が上の段階を測る(合成画像は WCS を持っている)。
 pub fn bench_image(label: &str, path: &Path, repeat: usize) -> Result<BenchImage, String> {
     use zahyou_image::DetectOpts;
     let mut stages = Vec::new();
@@ -297,7 +297,7 @@ pub fn bench_image(label: &str, path: &Path, repeat: usize) -> Result<BenchImage
         note: format!("{} 個 (しきい値 {})", sources.len(), thr.map(crate::scale::fmt_g).unwrap_or_else(|| "-".into())),
     });
 
-    // 解法(星図データがあれば)
+    // 解法(インデックスファイルがあれば)
     let (nx, ny) = (loaded.data.width, loaded.data.height);
     let diag = pipeline::solver_diagnostics(Path::new(pipeline::DEFAULT_INDEX_DIR));
     let mut wcs = None;
@@ -338,7 +338,7 @@ pub fn bench_image(label: &str, path: &Path, repeat: usize) -> Result<BenchImage
 
     match wcs {
         Some(w) => {
-            // 目標は画像中心から少し北東(図 2 の題と矢印まで作る)
+            // 目標は画像中心から少し北東(図 2 のタイトルと矢印まで作る)
             let c = w.pix_to_radec((nx as f64 - 1.0) / 2.0, (ny as f64 - 1.0) / 2.0);
             let target = Some((c.0 + 0.01, (c.1 + 0.01).min(90.0)));
             let (t, nu) = best_of(repeat, || zahyou_plot::reproject_north_up(&loaded.display, &w));
@@ -408,7 +408,7 @@ pub fn bench_image(label: &str, path: &Path, repeat: usize) -> Result<BenchImage
         ),
     });
     // 目標なし(完全ブラインド・画角も分からない)で解析全体。画像に WCS が無いときだけ(合成画像は空の本物の
-    // 星ではないので解けない)。上の段は目標(既定の天体)をヒントにするので、別の空の画像ではヒントが外れる
+    // 星ではないので解けない)。上の段階は目標(既定の天体)をヒントにするので、別の空の画像ではヒントが外れる
     if !has_wcs && diag.ok {
         let blind = RunParams { mode: InputMode::None, ignore_existing_wcs: true, ..params.clone() };
         let (t, res) = best_of(repeat, || {
@@ -459,7 +459,7 @@ fn bench_json(results: &[BenchImage]) -> String {
     serde_json::to_string_pretty(&v).unwrap_or_else(|_| "{}".to_string())
 }
 
-/// 速さの物差し用の合成画像(float32 の FITS、TAN の WCS つき)。星 `nstars` 個・雑音・ゆるい勾配。
+/// 速さのベンチマーク用の合成画像(float32 の FITS、TAN の WCS つき)。星 `nstars` 個・雑音・ゆるい勾配。
 /// 擬似乱数は `seed` から決まる(同じ引数なら同じファイル)。
 pub fn write_synthetic_fits(path: &Path, width: usize, height: usize, nstars: usize, seed: u64) -> Result<(), String> {
     let mut rng = SplitMix64(seed);

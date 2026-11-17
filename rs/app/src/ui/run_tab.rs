@@ -93,7 +93,7 @@ impl ZahyouApp {
             .frame(egui::Frame::new().inner_margin(egui::Margin { left: 0, right: 8, top: 0, bottom: 0 }))
             .show_inside(ui, |ui| {
                 let mut area = egui::ScrollArea::vertical().id_salt("run_left_scroll").auto_shrink([false, false]);
-                // 自己診断: いちばん下(API キーの欄)まで送って描く(小さい窓では下に隠れる。送れば窓に入るかを見る)。
+                // 自己診断: いちばん下(API キーの欄)まで送って描く(小さいウィンドウでは下に隠れる。送ればウィンドウに入るかを見る)。
                 // 送る量は前の 1 枚で測ったもの。scroll_to_cursor は 2 枚あとにしか効かないので使わない
                 if self.scroll_left_end {
                     area = area.vertical_scroll_offset(self.left_scroll_max);
@@ -306,7 +306,7 @@ mod tests {
     use eframe::egui::{Pos2, RawInput, Rect, vec2};
     use zahyou_net::nova::DEFAULT_API_KEY;
 
-    /// 窓を出さない画面(確認はいつも「キャンセル」、設定は一時ファイルで保存しない)
+    /// ウィンドウを出さない画面(確認はいつも「キャンセル」、設定は一時ファイルで保存しない)
     fn headless(fonts_on: bool) -> (egui::Context, ZahyouApp) {
         crate::ui::settings::override_path(std::env::temp_dir().join("zahyou-test-cancel.json"));
         let ctx = egui::Context::default();
@@ -325,7 +325,7 @@ mod tests {
     }
 
     /// 1 枚描いて、描いた文字を全部返す
-    /// `ppp` は画面の拡大率(Windows の表示スケール 100%・150%・200% = 1.0・1.5・2.0)。窓の大きさは論理 pt
+    /// `ppp` は画面の拡大率(Windows の表示スケール 100%・150%・200% = 1.0・1.5・2.0)。ウィンドウの大きさは論理 pt
     fn frame_texts(ctx: &egui::Context, app: &mut ZahyouApp, size: egui::Vec2, ppp: f32) -> Vec<String> {
         let mut input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), ..Default::default() };
         input.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(ppp);
@@ -374,7 +374,7 @@ mod tests {
                 assert!(ok, "{msg}");
             }
         }
-        // 「表示」にすると見える(描いた文字を拾えていることの確かめ。値は書かない)
+        // 「表示」にすると見える(描いた文字を読み取れていることの確かめ。値は書かない)
         app.show_api_key = true;
         let texts = frame_texts(&ctx, &mut app, vec2(1180.0, 780.0), 1.0);
         assert!(texts.iter().any(|t| t.contains(DEFAULT_API_KEY)), "「表示」でキーが見えない");

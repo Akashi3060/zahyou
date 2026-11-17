@@ -2,7 +2,7 @@
 """
 zahyou-index(Rust)の照合用の値を Python 基準実装(dev/solver_index.py)で作る。
 
-    python gen_index.py        # index_*.json を書く(星図データ C:\\AstrometryData が要る。ZAHYOU_INDEX_DIR で変えられる)
+    python gen_index.py        # index_*.json を書く(インデックスファイルのフォルダー C:\\AstrometryData が要る。ZAHYOU_INDEX_DIR で変えられる)
 
 書くもの(このスクリプトと同じフォルダー):
   index_scan.json         253 本の走査: 名前の順の files(ヘッダーの値・タイルの中心と外接半径・検査の要約)、
@@ -11,11 +11,11 @@ zahyou-index(Rust)の照合用の値を Python 基準実装(dev/solver_index.py)
                           そのフォルダーの走査結果
   index_healpix.json      xy 方式の HEALPix: 乱数の点 → 番号(nside 8 通り)、nside 2・3 の全ピクセルの中心と外接半径、
                           ピクセルの中の点
-  index_ball_<tag>.json   索引 1 本ごと: code_ball の問い合わせと答え(問い合わせごとの件数と sha256)、
+  index_ball_<tag>.json   インデックス 1 本ごと: code_ball の問い合わせと答え(問い合わせごとの件数と sha256)、
                           stars_in_cone の中心・半径と答え、星と quad の値の見本
   index_select.json       select / tiles_near の入力と答え(index_scan.json の files の番号の並び)
 
-照合の約束(Rust の試験 crates/zahyou-index/tests/python_match.rs と同じ):
+照合の約束(Rust のテスト crates/zahyou-index/tests/python_match.rs と同じ):
   - code_ball の答えは (問い合わせの番号, quad の番号) を '<u4' で交互に並べたバイト列の sha256(16 進)
   - stars_in_cone の答えは星の番号の並び('<u4')の sha256
   - 実数は repr(最短で元に戻る桁)。Rust は serde_json の float_roundtrip で同じビットに戻す
@@ -51,7 +51,7 @@ CONE_PLAN = {"4119": (200, (1.0, 10.0, 40.0, 120.0)), "4115": (100, (0.5, 3.0, 2
              "4111": (100, (0.5, 3.0, 20.0)), "4107": (60, (0.05, 0.25, 1.0, 5.0)),
              "5206-00": (200, (0.3, 2.0, 10.0, 30.0)), "5205-02": (60, (0.1, 1.0, 5.0, 30.0)),
              "5202-00": (60, (0.03, 0.2, 1.0, 4.0))}
-# 速さの物差しの円錐(test_solver_index の case_12 と同じ半径: 968×548・1.4616″/px の対角の半分 × 1.05)
+# 速さのベンチマークの円錐(test_solver_index の case_12 と同じ半径: 968×548・1.4616″/px の対角の半分 × 1.05)
 BENCH_CONE_RAD = math.hypot(968, 548) / 2 * 1.4616 * 1.05 / si.SV_ARCSEC_PER_RAD
 
 

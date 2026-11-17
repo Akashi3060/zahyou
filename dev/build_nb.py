@@ -328,7 +328,7 @@ def build():
     compile(engine, "zahyou_engine.py", "exec")         # 構文の壊れたエンジンを書き出さない
 
     # --- セル A = エンジン読み込み / セル B = 画像選択 ----------------------
-    # 2 つ目の pip の行は、この版の Release に添えた zahyou-native の wheel を探す(rs/py/README.md)
+    # 2 つ目の pip の行は、このバージョンの Release に添えた zahyou-native の wheel を探す(rs/py/README.md)
     cell_a = read("nb_loader.py").replace("{RELEASE_TAG}", f"v{_cargo_major()}")
     cell_b = read("nb_pick.py")
 

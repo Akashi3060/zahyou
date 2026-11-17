@@ -14,7 +14,7 @@
 //! キーが混じっていれば [`redact_key`] で伏せてから返す。
 //! 星のリストは Python 版と同じく 1 始まり(FITS 規約)に直して送る。明るい順に並べて渡すこと。
 //!
-//! 中止: 要求はどれも別のスレッドで投げ、50 ms ごとに中止の合図を見ながら応答を待つ(中止なら待たずに戻る。
+//! 中止: 要求はどれも別のスレッドで投げ、50 ms ごとに中止のフラグを見ながら応答を待つ(中止なら待たずに戻る。
 //! 投げた要求は裏で時間切れまで続くことがある = Python の _with_deadline と同じ)。画像を送っている途中なら、
 //! 本文の読み出しを止めて送るのをやめる。中止のあとで新しい要求(特に画像の送信)は始めない。
 
@@ -58,7 +58,7 @@ pub fn private_settings(settings: &[(String, Value)]) -> Vec<(String, Value)> {
 ///
 /// 画面の「API キー」の欄の初めの値で、欄の「元に戻す」もこれに戻す(2026-10-16 にユーザーが決めた)。
 /// 利用者は nova.astrometry.net に登録して得た自分のキーに替えられる。v6 のソースで公開済みの値だが、
-/// ログ・画面の文・自己診断・試験の出力には値を出さない(出すのは長さと一致だけ。[`ApiKey::describe`])。
+/// ログ・画面の文・自己診断・テストの出力には値を出さない(出すのは長さと一致だけ。[`ApiKey::describe`])。
 pub const DEFAULT_API_KEY: &str = "axvhxwfkvnzreobn";
 
 /// 環境変数 ASTROMETRY_API_KEY の API キー(空なら None)。
@@ -72,7 +72,7 @@ pub fn initial_api_key() -> String {
     api_key_from_env().unwrap_or_else(|| DEFAULT_API_KEY.to_string())
 }
 
-/// API キーの値。Debug では値を伏せる(試験の失敗の表示や、設定・解析の条件を `{:?}` で書いたときに値が出ないように)。
+/// API キーの値。Debug では値を伏せる(テストの失敗の表示や、設定・解析の条件を `{:?}` で書いたときに値が出ないように)。
 /// 値を文字列に直す Display は持たない。値は [`ApiKey::expose`](nova へ送るときと入力欄)でだけ取り出す。
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct ApiKey(String);
@@ -325,7 +325,7 @@ pub fn split_cards(header: &str) -> Vec<String> {
     out
 }
 
-/// nova.astrometry.net の API の窓口。
+/// nova.astrometry.net の API のクライアント。
 pub struct NovaClient {
     base: String,
     session: Option<String>,
@@ -336,7 +336,7 @@ pub struct NovaClient {
 }
 
 impl NovaClient {
-    /// `base` は "https://nova.astrometry.net" の形(試験では localhost)。
+    /// `base` は "https://nova.astrometry.net" の形(テストでは localhost)。
     pub fn new(base: &str) -> NovaClient {
         NovaClient {
             base: base.trim_end_matches('/').to_string(),
@@ -427,7 +427,7 @@ impl NovaClient {
         subid(&v).map_err(NetError::Failed)
     }
 
-    /// 画像そのものを送る。戻り値 subid。中止の合図が立てば、送っている途中でも本文の読み出しを止めて Cancelled。
+    /// 画像そのものを送る。戻り値 subid。中止のフラグが立てば、送っている途中でも本文の読み出しを止めて Cancelled。
     pub fn submit_image(&self, settings: &[(String, Value)], path: &Path, stop: &dyn Fn() -> bool) -> Result<u64, NetError> {
         validate_settings(settings).map_err(NetError::Failed)?;
         if stop() {
@@ -461,7 +461,7 @@ impl NovaClient {
         subid(&v).map_err(NetError::Failed)
     }
 
-    /// 結末が出るまで待つ(astroquery の `monitor_submission`)。状態の問い合わせの失敗は締め切りまで続ける。
+    /// 結末が出るまで待つ(astroquery の `monitor_submission`)。状態の問い合わせの失敗はタイムアウトまで続ける。
     pub fn monitor(&self, subid: u64, timeout: Duration, stop: &dyn Fn() -> bool, log: &dyn Fn(&str)) -> Result<Outcome, NetError> {
         let start = Instant::now();
         let mut job: Option<u64> = None;
@@ -530,9 +530,9 @@ fn net_msg(e: &NetError) -> String {
     }
 }
 
-/// 要求 f を別のスレッドで走らせ、中止の合図を 50 ms ごとに見ながら終わるのを待つ。
+/// 要求 f を別のスレッドで走らせ、中止のフラグを 50 ms ごとに見ながら終わるのを待つ。
 ///
-/// 中止なら f の終わりを待たずに Err(Cancelled) を返し、f に渡した合図(abandon)を立てる(画像の本文の読み出しは
+/// 中止なら f の終わりを待たずに Err(Cancelled) を返し、f に渡したフラグ(abandon)を立てる(画像の本文の読み出しは
 /// それを見て止まる)。f はそのまま裏で時間切れまで続くことがあるが、結果は捨てる。スレッドを作れなければ
 /// その場で走らせる(そのときは中止を待てない)。
 fn run_stoppable<T: Send + 'static>(
@@ -553,7 +553,7 @@ fn run_stoppable<T: Send + 'static>(
         }
     });
     if spawned.is_err() {
-        // スレッドを作れない(資源切れ)。中止は待てないが、その場で投げる
+        // スレッドを作れない(リソース不足)。中止は待てないが、その場で投げる
         let f = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
         return match f {
             Some(f) => f(abandon).map_err(NetError::Failed),
@@ -574,7 +574,7 @@ fn run_stoppable<T: Send + 'static>(
     }
 }
 
-/// 送る本文の読み出し。abandon が立ったら(中止)誤りを返し、送るのをやめさせる。
+/// 送る本文の読み出し。abandon が立ったら(中止)エラーを返し、送るのをやめさせる。
 struct StopReader<'a> {
     data: &'a [u8],
     pos: usize,
@@ -621,7 +621,7 @@ pub fn solve_online(req: &OnlineRequest, stop: &dyn Fn() -> bool, log: &dyn Fn(&
     solve_online_with(&mut client, req, stop, log)
 }
 
-/// [`solve_online`] の窓口を指定する版(試験用)。
+/// [`solve_online`] で使うクライアントを指定できるもの(テスト用)。
 ///
 /// ログの行と失敗の文に API キーが混じっていれば伏せる([`redact_key`]。nova の応答をそのまま文に入れる箇所があるため)。
 pub fn solve_online_with(client: &mut NovaClient, req: &OnlineRequest, stop: &dyn Fn() -> bool, log: &dyn Fn(&str)) -> Result<Option<NovaSolution>, NetError> {

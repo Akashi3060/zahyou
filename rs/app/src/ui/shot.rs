@@ -1,4 +1,4 @@
-//! 画面の自分の撮影(--shot <png>)。試作 P1 の方式: 数フレーム描いてから egui に画面の写しを頼み、
+//! 画面の自分の撮影(--shot <png>)。試作 P1 の方式: 数フレーム描いてから egui にスクリーンショットを頼み、
 //! 返ってきた画素を PNG に書いて閉じる。崩れ・豆腐(□)・はみ出しを目で確かめるため。
 //!
 //!   zahyou.exe --shot out.png [--tab run|env|help] [--out-tab orig|northup|log] [--dark|--light]
@@ -54,7 +54,7 @@ pub fn after_frame(app: &mut ZahyouApp, ctx: &egui::Context) {
     let Some(mut plan) = app.shot.take() else {
         return;
     };
-    // 最初の描画までの時間(起動の速さの物差し)
+    // 最初の描画までの時間(起動の速さの指標)
     if app.frames == 1
         && let Some(p) = &plan.first_frame
     {
