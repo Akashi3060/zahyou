@@ -3,6 +3,8 @@ C:\\AstrometryData のインデックスファイルを、画角のスケール�
 
   python make_index_zips.py 5202 5203 5204
   python make_index_zips.py --src C:\\AstrometryData --out D:\\dist 5204
+  python make_index_zips.py --base-from <配布中の AstrometryData.zip> --out D:\\dist
+      (基本セットは詰め直さず、README だけを足す。FITS の中身と大きさを配布中のものと同じに保つため)
 
 利用者が「自分の画角に必要なスケールだけ」ダウンロードできるように、scale ごとに分ける。
 zip の中身は AstrometryData/index-....fits なので、
@@ -23,17 +25,8 @@ SCALE_FOV = {
 }
 TILES = 48
 
-README = """\
-astrometry.net インデックスファイル (index files)
-=================================================
-
-このアーカイブは index-{scale}-00 〜 47 の 48 ファイルです。
-対応する画角: {lo}′ 〜 {hi}′
-  (画角 = 画像の横幅[px] x 画素スケール["/px] / 60)
-
-出典: https://portal.nersc.gov/project/cosmo/temp/dstn/index-5200/LITE/
-      5200 シリーズ LITE (Tycho-2 + Gaia DR2)
-
+# スケールごとの zip と基本セットの zip で共通の部分(データの条件・v7 と v6 での使い方・スケールの表)
+README_COND = """\
 データの条件とクレジット
 ------------------------
 この zip を人に渡すときは、この README を外さずに一緒に渡してください。
@@ -58,14 +51,9 @@ astrometry.net インデックスファイル (index files)
   has been provided by national institutions, in particular the institutions
   participating in the Gaia Multilateral Agreement.
 
-展開のしかた
-------------
-C:\\ 直下に展開してください。次のようになれば正しい配置です。
+"""
 
-    C:\\AstrometryData\\index-{scale}-00.fits
-    ...
-    C:\\AstrometryData\\index-{scale}-47.fits
-
+README_TAIL = """\
 zahyou v7 から(試作版 v7-dev を含む)は、置くだけで読みます。WSL も設定ファイルも要りません。
 
 v6 (WSL を使う版) で使う場合は、WSL 側の /etc/astrometry.cfg に
@@ -87,6 +75,60 @@ v6 (WSL を使う版) で使う場合は、WSL 側の /etc/astrometry.cfg に
     index-5206 :  16′ 〜 22′
     index-4107 〜 4119 : 22′ 〜 2000′
 """
+
+# スケールごとの zip(AstrometryData-index-<スケール>.zip)の README。{scale}・{lo}・{hi} を埋める
+README = """\
+astrometry.net インデックスファイル (index files)
+=================================================
+
+このアーカイブは index-{scale}-00 〜 47 の 48 ファイルです。
+対応する画角: {lo}′ 〜 {hi}′
+  (画角 = 画像の横幅[px] x 画素スケール["/px] / 60)
+
+出典: https://portal.nersc.gov/project/cosmo/temp/dstn/index-5200/LITE/
+      5200 シリーズ LITE (Tycho-2 + Gaia DR2)
+
+""" + README_COND + """\
+展開のしかた
+------------
+C:\\ 直下に展開してください。次のようになれば正しい配置です。
+
+    C:\\AstrometryData\\index-{scale}-00.fits
+    ...
+    C:\\AstrometryData\\index-{scale}-47.fits
+
+""" + README_TAIL
+
+# 基本セット(AstrometryData.zip。4100 系 13 ファイルと 5205・5206 の 96 ファイル)の README
+README_BASE = """\
+astrometry.net インデックスファイル (index files) — 基本セット
+=================================================================
+
+このアーカイブは次の 109 ファイルです。
+    index-4107.fits    〜 index-4119.fits     13 ファイル  画角  22′ 〜 2000′
+    index-5205-00.fits 〜 index-5205-47.fits  48 ファイル  画角  11′ 〜 16′
+    index-5206-00.fits 〜 index-5206-47.fits  48 ファイル  画角  16′ 〜 22′
+対応する画角: 11′ 〜 2000′
+  (画角 = 画像の横幅[px] x 画素スケール["/px] / 60)
+画角が 11′ より狭いときは、AstrometryData-index-5204.zip・5203.zip・5202.zip も足してください。
+
+出典: https://data.astrometry.net/4100/
+      4100 シリーズ (Tycho-2)
+      https://portal.nersc.gov/project/cosmo/temp/dstn/index-5200/LITE/
+      5200 シリーズ LITE (Tycho-2 + Gaia DR2)
+
+""" + README_COND + """\
+展開のしかた
+------------
+C:\\ 直下に展開してください。次のようになれば正しい配置です。
+
+    C:\\AstrometryData\\index-4107.fits
+    ...
+    C:\\AstrometryData\\index-5206-47.fits
+
+""" + README_TAIL
+BASE_NAME = "AstrometryData.zip"
+BASE_README_NAME = "AstrometryData/README-index-base.txt"
 
 
 def human(n):
@@ -133,23 +175,54 @@ def build(scale, src, out_dir, level=1):
     return zip_path, size, h.hexdigest()
 
 
+def add_base_readme(base_zip, out_dir):
+    """配布中の基本セットの zip を out_dir へ写し、README を足す(追記なので FITS の中身・圧縮・並びはそのまま)。"""
+    with zipfile.ZipFile(base_zip) as z:
+        names = [i.filename for i in z.infolist()]
+    fits = [n for n in names if n.endswith(".fits")]
+    if len(fits) != 109:
+        raise SystemExit(f"{base_zip}: FITS が {len(fits)} 個(基本セットは 109 個のはず)")
+    if BASE_README_NAME in names:
+        raise SystemExit(f"{base_zip}: もう README が入っています")
+    zip_path = os.path.join(out_dir, BASE_NAME)
+    if os.path.abspath(zip_path) == os.path.abspath(base_zip):
+        raise SystemExit("--out は元の zip と別のフォルダーにしてください")
+    with open(base_zip, "rb") as f, open(zip_path, "wb") as g:
+        for chunk in iter(lambda: f.read(1 << 22), b""):
+            g.write(chunk)
+    with zipfile.ZipFile(zip_path, "a", zipfile.ZIP_DEFLATED, allowZip64=True) as z:
+        z.writestr(BASE_README_NAME, README_BASE)
+    size = os.path.getsize(zip_path)
+    h = hashlib.sha256()
+    with open(zip_path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 22), b""):
+            h.update(chunk)
+    print(f"基本セット: {os.path.basename(base_zip)} に README を足した -> {zip_path}  {human(size)}  sha256 {h.hexdigest()[:16]}…")
+    return zip_path, size, h.hexdigest()
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("scales", nargs="+", type=int)
+    ap.add_argument("scales", nargs="*", type=int)
+    ap.add_argument("--base-from", help="配布中の基本セット AstrometryData.zip。これに README を足したものを --out に書く")
     ap.add_argument("--src", default=r"C:\AstrometryData")
     ap.add_argument("--out", default=r"C:\AstrometryData\dist")
     ap.add_argument("--level", type=int, default=1,
                     help="zip の圧縮レベル (1 が速くて十分)")
     args = ap.parse_args()
 
+    if not args.scales and not args.base_from:
+        ap.error("スケールか --base-from のどちらかを指定してください")
     os.makedirs(args.out, exist_ok=True)
     results = []
+    if args.base_from:
+        results.append(add_base_readme(args.base_from, args.out))
     for s in args.scales:
         if s not in SCALE_FOV:
             sys.exit(f"未知の scale: {s}")
         results.append(build(s, args.src, args.out, args.level))
 
-    lines = ["# AstrometryData 追加分  sha256  サイズ"]
+    lines = ["# AstrometryData の zip  sha256  サイズ" if args.base_from else "# AstrometryData 追加分  sha256  サイズ"]
     for path, size, digest in results:
         lines.append(f"{digest}  {os.path.basename(path)}  {size}")
     manifest = os.path.join(args.out, "SHA256SUMS.txt")

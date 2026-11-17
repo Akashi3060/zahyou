@@ -972,7 +972,8 @@ f677908c1c64fc1965de7076c670f5ed7ef6cf773a6296be35b35e60e40b451e  THIRD-PARTY-NO
   - `cargo clippy --workspace --all-targets -- -D warnings` 指摘 0、`test_make_release_assets.py`(この exe を渡して)34 本通過
   - `dev/test_solver_core.py` 46/46、`dev/test_solver_real.py --engine --both` 62/62
   - `dev/test_solver_synth.py` は 63/64。落ちる `ra0` は main でも同じで、Python では 60 秒に収まったことの無い場面
-    (PR #54 で、失敗の説明の星の順位を解法の並びで数えるように直した。タイムアウトは 60 秒のまま)
+    (PR #54 で、失敗の説明の星の順位を解法の並びで数えるように直した。タイムアウトは 60 秒のまま)。
+    同じ日に、ユーザーが「Python で遅いのは既知の失敗として受け入れる」と決めた(テストは直さず、FAIL のまま。dev/README.md にも書いた)
   - `dev/test_notebook_run.py` は nbclient が入っていないので、このときは走らせていない。公開のあと(11-17 の夜)に、一時の venv
     (`--system-site-packages` に nbclient・nbformat・ipykernel を足したもの)で走らせ、zahyou-native なし・あり(Release の Windows の wheel)とも 5/5
 - **アセット**(6 節): `%USERPROFILE%\zahyou-dist-v9`(main をマージする前に作ったもの。wheel はまだ無いので、wheels の検査は飛ばした)。
@@ -1056,6 +1057,23 @@ f3f9e1eb5a05a726632a4b32d8e420a448b72a4147c231648a849c0697244b2f  zahyou_native-
 
 ```
 # AstrometryData 追加分  sha256  サイズ
+e198e0ec5761ded05228222fe3f275ffaf6635d82ade4498bf7d692c2318f93a  AstrometryData-index-5204.zip  910424521
+4415ce4fa720ce3017601ddd93ed04c51a0f82cac4c0d7c57dc5777e409a631b  AstrometryData-index-5203.zip  1838276861
+d410376cf4c330fcc6f5363ad9bdf35810a657d277d2b596c8d4c35aa0a4cdfe  AstrometryData-index-5202.zip  3661346499
+```
+
+- **基本セットの `AstrometryData.zip` にも README を入れた**(同じ日の 21:50。ユーザーの指示「README を入れる」)。
+  - 基本セットは 2026-08-16 に作ったもので、FITS 109 個だけ(README も、データの条件も無かった)。スケールごとの zip と同じく
+    データの条件・クレジット・使い方を入れた `AstrometryData/README-index-base.txt` を足した。出典は 4100 系(Tycho-2)と 5200 LITE(Gaia DR2 + Tycho-2)
+  - 詰め直さず、配布中の zip の後ろに README を足した(`make_index_zips.py --base-from`)。FITS の部分(先頭から 911,354,998 バイト)は
+    配布中の zip とバイト単位で同じで、項目の大きさ・圧縮後の大きさ・CRC・位置も同じ。大きさは 911,367,613 → 911,369,519 バイトで、
+    説明文などの「869 MB」は変わらない。`testzip` と Windows の tar で 111 項目(フォルダー・FITS 109・README)が読めた
+  - 配布ページの `SHA256SUMS.txt` に基本セットも載せた(見出しは「AstrometryData の zip」)。TrueNAS の root で 2 つを `cat >` で入れ替え、
+    公開 URL からダウンロードして SHA256 と README を確かめた
+
+```
+# AstrometryData の zip  sha256  サイズ
+c477d7b5b7aef20347445de700cdf05596b682295ca20f55584ccb33fc5db69d  AstrometryData.zip  911369519
 e198e0ec5761ded05228222fe3f275ffaf6635d82ade4498bf7d692c2318f93a  AstrometryData-index-5204.zip  910424521
 4415ce4fa720ce3017601ddd93ed04c51a0f82cac4c0d7c57dc5777e409a631b  AstrometryData-index-5203.zip  1838276861
 d410376cf4c330fcc6f5363ad9bdf35810a657d277d2b596c8d4c35aa0a4cdfe  AstrometryData-index-5202.zip  3661346499
