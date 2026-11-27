@@ -1129,7 +1129,11 @@ d410376cf4c330fcc6f5363ad9bdf35810a657d277d2b596c8d4c35aa0a4cdfe  AstrometryData
 
 1. PR #66 を merge commit で main へ入れた(`209143a`)。main の中身はブランチ `release-v10` の最後の commit(`792d4be`)と同じで、exe をビルドしたあと `rs/` は変わっていない
    (exe のビルドのあとの直しは README・マニュアル・この文書だけ)。ブランチ `release-v10` は消した(origin と手元)。
-   - 最後の commit(文書だけの直し)の PR の wheels の run は、マージの時点でまだ待ち行列にあった(マージの前に終わるのを待つべきだった)。同じコードの main の run(下の 2)が通ったので、それで確かめた
+   - 最後の commit(文書だけの直し)の PR の wheels の run は、マージの時点でまだ待ち行列にあった(マージの前に終わるのを待つべきだった)。同じコードの main の run(下の 2)が通ったので、それで確かめた。
+     この run はあとで(01:25)失敗になった。macos-universal2 のジョブに GitHub のランナーが割り当てられないまま 15 分で取り消されたもので
+     (注記は「The job was not acquired by Runner of type hosted even after multiple attempts」)、コードの失敗ではない。
+     中身(tree `7f6df0d`)は main(`209143a`)・タグ `v10` と同じで、その 2 つの run は mac を含めて通っている。
+     取り消されたジョブだけを `gh run rerun 46031351849 --failed` で動かし直し、5 つのジョブとも success になった(02:26)
 2. main で wheels ワークフローを動かした(run `46031417253`、4 つの OS・CPU とも success)。wheel 4 つを `%USERPROFILE%\zahyou-wheels-v10` へダウンロードし、
    `make_release_assets.py --wheels` でアセット 11 個を作った。6 つの検査が全部 OK、`sha256sum -c` も OK。
    - 公開の前に、Windows の wheel を一時の venv に入れて `dev/test_native.py` を回した(9/9)
