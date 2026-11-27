@@ -1089,7 +1089,7 @@ d410376cf4c330fcc6f5363ad9bdf35810a657d277d2b596c8d4c35aa0a4cdfe  AstrometryData
 - v9 のあとの main の変更で、exe とノートブック版の動きが変わるのは PR #65 だけ:
   白地に黒い星(星図や、明暗を反転した写真)かどうかの判定(`looks_inverted`)が、孤立した飛び抜けて暗い画素につられないようにした。
   HST の画像で、外れ値 1 画素のせいで明暗を反転し、約 100° 離れた答えを出していた。最も暗い画素が孤立した外れ値なら、暗いほうから 10 番目の画素の値で測る。
-  手元の画像 6,664 枚で判定が変わるのは HST の 7 枚だけ。正しい答えの分かっている手元の画像 682 枚で、変わったのは v9 の誤答 2 枚だけ(→ 解けない)
+  手元の画像 6,664 枚で判定が変わるのは HST の 7 枚だけ。手元の画像 682 枚(正しい答えがある 458 枚と、解けないのが正しい 224 枚)で、変わったのは v9 の誤答 2 枚だけ(→ 解けない)
 - ほかは文書・コメント・ビルドの整理(#57〜#64。v9 の記録、インデックスファイルの zip の README、基本セットの zip の README、
   使っていない workspace の依存、古い配布フォルダーの記述、コメントの用語)
 
@@ -1097,7 +1097,7 @@ d410376cf4c330fcc6f5363ad9bdf35810a657d277d2b596c8d4c35aa0a4cdfe  AstrometryData
   - `Cargo.lock`(cargo が更新)、`zahyou_v9.ipynb` → `zahyou_v10.ipynb`(git mv)、`NB_VERSION = "v10"` と `build_nb.py`、`gen_notices.py`
   - 表の 12: `rs/py/Cargo.toml` を 10.0.0 にし、`rs/py/Cargo.lock` と `rs/py/THIRD-PARTY-NOTICES.md` を作り直した
   - README・`dev/make_manual.py`・`dev/README.md` を v10 向けに(v10 で変わったこと・v9 から入れ替える・ノートブックの名前・起動と大きさ)。
-    v7・v8・v9 で測った表は、その値のまま断りを入れた
+    v7・v8 で測った表は、その値のまま残した(v7 の表の断りに v10 を足した)。「起動と大きさ」は v10 の exe で測り直した
   - `app-help.png` を v10 の exe で撮り直し、マニュアル v4 を作り直した(34 ページ)
 - **道具**: rustc 1.100.0・cargo 1.100.0(MSYS2)・gcc 16.2.0(v9 と同じ。MSYS2 のパッケージの改訂が Rev1 → Rev2 になり、同梱物の表示の 1 行が変わった)
 - **exe**: 4 節の置き換えを付けてビルドした。
@@ -1108,3 +1108,15 @@ d410376cf4c330fcc6f5363ad9bdf35810a657d277d2b596c8d4c35aa0a4cdfe  AstrometryData
 - **テスト**(4 節の置き換えを付けて): `cargo test --workspace -- --include-ignored --skip live` で **330/330**、`cargo clippy --workspace --all-targets -- -D warnings` 指摘 0、
   `test_make_release_assets.py`(この exe を渡して)36 本通過、`test_tools.py` 17 本通過、`dev/test_solver_core.py` 46/46、`dev/test_robust.py` 40/40、
   `dev/test_solver_real.py --engine --both` 62/62(合わせて 45 分)。利用者の cache.json・gui.json は前後で同じ
+- wiki は手元の `zahyou.wiki` のブランチ `release-v10` に v10 向けの直しまでコミットしてある(push していない)
+- Release の本文と配布ページの `はじめにお読みください.txt` の下書きは、作者の手元の `Documents\claude\zahyou\release-backup\v10-release-20261128\`
+- **残り**(v9 のときと同じ順):
+  1. PR #66 を merge commit で main へ。ブランチ `release-v10` を消す
+  2. main で wheels ワークフローを動かし、wheel 4 つを `$USERPROFILE/zahyou-wheels-v10` へダウンロードして、`make_release_assets.py --wheels` でアセット 11 個をそろえる
+  3. タグ `v10` を merge の commit に打って push
+  4. Release を下書きで作り、prerelease=false・タイトル「zahyou v10」・アセット 11 個・digest を見てから `--latest` で出す。`expanded_assets/v10` から wheel が入ることを確かめる
+  5. 公開中の v9 の exe(のコピー、一時の LOCALAPPDATA)で「更新を確認」→「更新する」が v10 に入れ替わり、`zahyou.exe.old` が v10 の起動で消えること
+  6. 配布ページの差し替え: `zahyou.exe`・`zahyou_engine.py`・`THIRD-PARTY-NOTICES.md`・マニュアル v4・`はじめにお読みください.txt` は `cat >` で中身を入れ替え、
+     `zahyou_v9.ipynb` は中身を v10 のものに入れ替えてから `zahyou_v10.ipynb` に改名する。`LICENSE.txt`・`SHA256SUMS.txt`(zip 用)・インデックスファイルの zip は触らない。
+     最後に公開 URL からダウンロードして SHA256 を確かめる
+  7. wiki のブランチ `release-v10` を master へ入れて push する
