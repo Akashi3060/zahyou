@@ -450,7 +450,9 @@ gh api repos/Akashi3060/zahyou/releases/latest --jq .tag_name                   
 
 公開共有(token `M2sNsnA2K4oJ4Co`)は**閲覧のみ**で、WebDAV の PUT は 403(v6 のころの `dev/upload_share.py` で確かめた。この道具は
 7.0.0 の準備で消した)。`R:`(YoFu)からも書けない。
-実体は `/mnt/tank/TrueNAS/AstroKIT/掩蔽観測班/外部共有フォルダー/天体画像解析プログラム「zahyou」`(所有者 AstroKIT)。
+実体は `/mnt/tank/TrueNAS/AstroKIT/10_探究課/1011_掩蔽観測班/外部共有/天体画像解析プログラム_zahyou`(所有者 AstroKIT。2026-11-26 に AstroKIT の
+フォルダーを組み直したときに、この場所と名前になった。v9 までは `…/AstroKIT/掩蔽観測班/外部共有フォルダー/天体画像解析プログラム「zahyou」`)。
+差し替えの前に、`R:\AstroKIT` の下の今の場所と、公開共有の一覧(public.php/webdav の PROPFIND)が同じ中身かを確かめる。
 
 **差し替えたあとの配布ページに置くもの**(2026-10-18 のユーザーの決定): `zahyou.exe`・`zahyou_v7.ipynb`・`zahyou_engine.py`・
 マニュアル v4(`…マニュアルv4.pdf`)・`LICENSE.txt`・`THIRD-PARTY-NOTICES.md`(`rs/` のもの)・`はじめにお読みください.txt`・インデックスファイルの zip
@@ -1120,3 +1122,48 @@ d410376cf4c330fcc6f5363ad9bdf35810a657d277d2b596c8d4c35aa0a4cdfe  AstrometryData
      `zahyou_v9.ipynb` は中身を v10 のものに入れ替えてから `zahyou_v10.ipynb` に改名する。`LICENSE.txt`・`SHA256SUMS.txt`(zip 用)・インデックスファイルの zip は触らない。
      最後に公開 URL からダウンロードして SHA256 を確かめる
   7. wiki のブランチ `release-v10` を master へ入れて push する
+
+### v10(タグ `v10`。2026-11-28 01:17 JST に公開。ユーザーの指示「ドキュメントの方針と同じように, バージョンの番号は整数で v10としてリリースして」)
+
+上の「v10 の準備」の「残り」を、この順に行った。
+
+1. PR #66 を merge commit で main へ入れた(`209143a`)。main の中身はブランチ `release-v10` の最後の commit(`792d4be`)と同じで、exe をビルドしたあと `rs/` は変わっていない
+   (exe のビルドのあとの直しは README・マニュアル・この文書だけ)。ブランチ `release-v10` は消した(origin と手元)。
+   - 最後の commit(文書だけの直し)の PR の wheels の run は、マージの時点でまだ待ち行列にあった(マージの前に終わるのを待つべきだった)。同じコードの main の run(下の 2)が通ったので、それで確かめた
+2. main で wheels ワークフローを動かした(run `46031417253`、4 つの OS・CPU とも success)。wheel 4 つを `%USERPROFILE%\zahyou-wheels-v10` へダウンロードし、
+   `make_release_assets.py --wheels` でアセット 11 個を作った。6 つの検査が全部 OK、`sha256sum -c` も OK。
+   - 公開の前に、Windows の wheel を一時の venv に入れて `dev/test_native.py` を回した(9/9)
+3. タグ `v10` を `209143a` に打って push(`git ls-remote` は `refs/tags/v10` だけ)。Release を下書きで作り、prerelease=false・タイトル「zahyou v10」・アセット 11 個で、
+   digest は SHA256SUMS.txt の 10 個と一致した。本文のリンク 22 個は 200(1 回目に 3 個が一時的に 503、2 回目は全部 200。README の見出しへのリンク 3 つは見出しが実在する)、
+   本文の大文字の SHA256 は zahyou.exe の digest と同じ。`gh api markdown` で描かせて、太字にならずに残る `**` が 0 個であることも確かめた
+   (v9 の本文から引き継いだ 6 組が「」や）の隣で閉じて残っていたので、`<strong>` に直した)。`--latest` で出し、`releases/latest` は v10、`expanded_assets/v10` も 200。
+4. 公開中の v9 の exe(`5f97551b…`)を一時のフォルダーにダウンロードし、一時の LOCALAPPDATA で `--update-check --update-apply` を動かした。
+   - 「新しいバージョンがあります: v10 (2026-11-27 版 / 14 MB)」と出て、SHA256 が一致し、入れ替わった(`zahyou.exe` = `8019fb1a…`、`zahyou.exe.old` = v9)。
+     「2026-11-27 版」は Release の公開時刻(UTC)の日付で、日本時間では 11-28
+   - v10 を一時の設定(API キーを空・オフラインのみ)で 1 回起動すると、15 秒以内に `zahyou.exe.old` が消えた。起動したその 1 つだけを PID で閉じた。
+   - ノートブックのセル A の 2 つ目の pip の行と同じ形(`--no-index --find-links …/expanded_assets/v10`)で、一時の venv に zahyou-native 10.0.0 が入り、import できた。
+   - 利用者の cache.json・gui.json は前後で同じ。
+5. 配布ページを差し替えた。TrueNAS の root(一時 cronjob)で、スクリプトは先に新しいファイルの SHA256 と、今の中身が v9 であることを確かめる。
+   - 1 回目は配布フォルダーの場所が変わっていたため「no dir」で何もせずに止まった(8 節の実体の場所を直した)。今の場所で 2 回目を走らせた。
+   - `cat >` で中身を入れ替えたもの: `zahyou.exe`・`zahyou_engine.py`・`THIRD-PARTY-NOTICES.md`・マニュアル v4・`はじめにお読みください.txt`(v10 向け。BOM 付き・CRLF)。
+   - `zahyou_v9.ipynb` は中身を v10 のものに `cat >` で入れ替えてから、`mv` で `zahyou_v10.ipynb` にした。
+   - inode・所有者(AstroKIT:YoFu)・ACL は前のまま。`LICENSE.txt`・`SHA256SUMS.txt`(zip 用)・インデックスファイルの zip は触っていない。
+   - 公開 URL(public.php/webdav)から 6 つをダウンロードして、SHA256 がアセットと同じことを確かめた。`zahyou_v9.ipynb` は 404。
+   - 置き場の `_claude-tmp/zahyou-v10-swap` は root で消した(`_claude-tmp` のほかのものには触れていない)。スクリプト・ログ・本文・説明文のバックアップは
+     作者の手元の `Documents\claude\zahyou\release-backup\v10-release-20261128\`。
+6. wiki のブランチ `release-v10` を master へ fast-forward で入れて push した(`fe65aff`)。公開の wiki に「v10 で変わったこと」が出ることを確かめた。
+
+アセット(`SHA256SUMS.txt`):
+
+```
+8019fb1a22bf097e3f424110a2d2eaaa8369845317f256568a2df97bd6f62b6e  zahyou.exe
+849e225587990ab49502e467ba05cdeac5a7a8930e5d5f215bae408b970a62f0  zahyou_v10.ipynb
+ae65acfecc7802b8ad4fcc6b7922753d5a0249f8d245be6d46c8de30043a8637  zahyou_engine.py
+37b931e9516b89240f39b0b8914a0d85ffa0944898d02d8051293b469dd6625c  zahyou-manual-v4.pdf
+4efc7babf6be215d508636aefa67428a28d1c9977b02d1b580c47b26dd34a3f8  LICENSE.txt
+0edc612956eb44de3e477767dabaa466e8450b6565132cbf3afecdb336f73f94  THIRD-PARTY-NOTICES.md
+dbe1eae6d4242246cb8d6dd8d32391ec82d1338c2e40a7a82643c9cd2917a679  zahyou_native-10.0.0-cp39-abi3-macosx_10_12_universal2.macosx_10_12_x86_64.macosx_11_0_arm64.whl
+4b8ab0ce12dc5f2593330aedb8bef44394d694814126e09f4ae9c2c96e7bf6d4  zahyou_native-10.0.0-cp39-abi3-manylinux_2_28_aarch64.whl
+015eea766a357b5dcbab16e5121a6846c7b68c8f09d2627acd67a6b6522f880b  zahyou_native-10.0.0-cp39-abi3-manylinux_2_28_x86_64.whl
+6154757a6d756609b5b6f6c15feedccd32cc85e6394ac24b908ef7965cd772ba  zahyou_native-10.0.0-cp39-abi3-win_amd64.whl
+```
