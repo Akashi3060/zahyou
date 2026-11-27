@@ -10,7 +10,7 @@
 下の LICENSE —— MIT ライセンス —— が及ぶのは **zahyou 自身のソースコードだけ**です。
 
     rs/app/ / rs/crates/ / rs/tools/ / rs/testdata/(Rust 版)
-    zahyou_engine.py / zahyou_v9.ipynb / dev/ / docs/(Python 版)
+    zahyou_engine.py / zahyou_v10.ipynb / dev/ / docs/(Python 版)
 
 オフライン解析のエンジン(`zahyou-solver`・`zahyou-index`・`zahyou-wcs`)も zahyou 自身のコードです。
 `zahyou.exe` に入っている第三者のソフトウェア(この文書の後半)、
@@ -184,7 +184,7 @@ Windows のシステムのものだけです。ライセンスは Apache-2.0 AND
 ### Rust の標準ライブラリと実行時ライブラリ
 
 `x86_64-pc-windows-gnu` 向けにリンクすると、次のものが exe に静的に結合されます(`rustc --print link-args` で確かめたもの)。
-コンパイラーは rustc 1.100.0 (0ef1bc386 2026-11-09) (Rev1, Built by MSYS2 project)、リンカーは MSYS2 UCRT64 の gcc 16.2.0。
+コンパイラーは rustc 1.100.0 (0ef1bc386 2026-11-09) (Rev2, Built by MSYS2 project)、リンカーは MSYS2 UCRT64 の gcc 16.2.0。
 
 | 結合されるもの | ライセンス式 | 表示 |
 |---|---|---|

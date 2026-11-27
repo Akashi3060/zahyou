@@ -1082,3 +1082,29 @@ d410376cf4c330fcc6f5363ad9bdf35810a657d277d2b596c8d4c35aa0a4cdfe  AstrometryData
 - 後片付け(同じ日。ユーザーの指示「過去の Release の作業フォルダーも消して」): 作者の PC の `%USERPROFILE%` にあった v7・v8 のアセットの
   作業フォルダー 10 個(`zahyou-dist-v7*`・`zahyou-dist-v8`・上の v8 の準備にある `zahyou-dist-v8-prev-20261024` など、約 200 MB)をごみ箱へ移した。
   残したのは v9 の `zahyou-dist-v9` と `zahyou-wheels-v9`。公開したものは GitHub の Release にある。
+
+### v10 の準備(2026-11-28。ユーザーの指示「ドキュメントの方針と同じように, バージョンの番号は整数で v10としてリリースして」)
+
+ブランチ `release-v10`(main の `c8955dc` から)。中身は、v9 のあとに main へ入った変更と、次のバージョン上げ。
+- v9 のあとの main の変更で、exe とノートブック版の動きが変わるのは PR #65 だけ:
+  白地に黒い星(星図や、明暗を反転した写真)かどうかの判定(`looks_inverted`)が、孤立した飛び抜けて暗い画素につられないようにした。
+  HST の画像で、外れ値 1 画素のせいで明暗を反転し、約 100° 離れた答えを出していた。最も暗い画素が孤立した外れ値なら、暗いほうから 10 番目の画素の値で測る。
+  手元の画像 6,664 枚で判定が変わるのは HST の 7 枚だけ。正しい答えの分かっている手元の画像 682 枚で、変わったのは v9 の誤答 2 枚だけ(→ 解けない)
+- ほかは文書・コメント・ビルドの整理(#57〜#64。v9 の記録、インデックスファイルの zip の README、基本セットの zip の README、
+  使っていない workspace の依存、古い配布フォルダーの記述、コメントの用語)
+
+- **バージョン**: `rs/Cargo.toml` を `10.0.0` に(バージョン名 `v10`)。2 節の表のとおり、次のものを直した。
+  - `Cargo.lock`(cargo が更新)、`zahyou_v9.ipynb` → `zahyou_v10.ipynb`(git mv)、`NB_VERSION = "v10"` と `build_nb.py`、`gen_notices.py`
+  - 表の 12: `rs/py/Cargo.toml` を 10.0.0 にし、`rs/py/Cargo.lock` と `rs/py/THIRD-PARTY-NOTICES.md` を作り直した
+  - README・`dev/make_manual.py`・`dev/README.md` を v10 向けに(v10 で変わったこと・v9 から入れ替える・ノートブックの名前・起動と大きさ)。
+    v7・v8・v9 で測った表は、その値のまま断りを入れた
+  - `app-help.png` を v10 の exe で撮り直し、マニュアル v4 を作り直した(34 ページ)
+- **道具**: rustc 1.100.0・cargo 1.100.0(MSYS2)・gcc 16.2.0(v9 と同じ。MSYS2 のパッケージの改訂が Rev1 → Rev2 になり、同梱物の表示の 1 行が変わった)
+- **exe**: 4 節の置き換えを付けてビルドした。
+  - 14,125,056 バイト、SHA256 `8019fb1a22bf097e3f424110a2d2eaaa8369845317f256568a2df97bd6f62b6e`。作者のホームのパスは 0 か所(`/cargo` 500・`/zahyou` 2)
+  - `--engine-check` の version=v10、`--selftest --offline` 25/25
+  - `--update-check` は「最新版です (v10)。公開されている最新版 v9 より新しいバージョンを使っています。」
+  - 最初の描画まで: DirectX 12 で 0.32〜0.40 秒、OpenGL で 0.20〜0.23 秒(3 回ずつ。README の「起動と大きさ」・マニュアル 3.2)
+- **テスト**(4 節の置き換えを付けて): `cargo test --workspace -- --include-ignored --skip live` で **330/330**、`cargo clippy --workspace --all-targets -- -D warnings` 指摘 0、
+  `test_make_release_assets.py`(この exe を渡して)36 本通過、`test_tools.py` 17 本通過、`dev/test_solver_core.py` 46/46、`dev/test_robust.py` 40/40、
+  `dev/test_solver_real.py --engine --both` 62/62(合わせて 45 分)。利用者の cache.json・gui.json は前後で同じ
