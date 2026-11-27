@@ -3393,9 +3393,9 @@ def _load_pil(path):
     return data, fits.Header(), notes, True     # 画像ファイルは 1 行目が上
 
 
-def looks_inverted(data):
+def looks_inverted(data, smoothed=False):
     """
-    白地に黒い星 (星図・ネガ) かどうか。
+    白地に黒い星 (星図や、明暗を反転した写真) かどうか。
 
     見るのは「背景 (中央値) が、明るさの幅のどのあたりに居るか」。
       ふつうの天体写真 … 背景は下のほう。上へ大きく伸びる (星・月)
@@ -3403,19 +3403,75 @@ def looks_inverted(data):
 
     裾の「太さ」(パーセンタイル) では測れない。星図に描かれた星は
     画素数でいえばごく一部なので、0.5 パーセンタイルでも背景のままになる
-    (合成した星図で実際に見落とした)。端の値との距離で測る。
+    (合成した星図で実際に見落とした)。最大値・最小値と背景との差で測る。
 
     逆に、周辺減光やケラレで隅が真っ黒な写真は「下へ長い裾」を持つが、
     背景の上にはもっと長い裾 (星) があるので取り違えない
     (これも実際に取り違えたので、比を 5% と厳しくしてある)。
+
+    ただし最も暗い画素が孤立した外れ値なら、暗い側の幅を、暗いほうから 10 番目 (DARK_RANK) の
+    画素の値で測る (中央値 − 10 番目の値)。以下の「背景との差」は 中央値 − 値 で、背景より明るい
+    画素は 0 とする。孤立した外れ値とみるのは、次の 2 つを満たすとき。
+      (1) 最も暗い画素の背景との差が、10 番目の画素の背景との差の 10 倍 (DARK_OUTLIER) を超える
+      (2) 最も暗い値のどの画素でも、周りの画素 (隣の 8 画素。ベイヤーの 3x3 の平滑化のあとは、
+          その外側の 16 画素 = 5x5 の外周) の背景との差が、すべて 10 番目の画素の背景との差以下
+    HST の画像の -20,977 の 1 画素 (背景 0.47・最大 179、10 番目の値は -62) のような写真を、星図と
+    取り違えないため。取り違えると雑音を星として検出し、誤答した (2026-11、手元の画像で)。
+    10 番目にしたのは、外れ値 1 画素がベイヤーの平滑化で 9 画素に広がるから。(2) が要るのは、
+    明暗を反転した写真で星像が小さいと、明るい星のピークの 1 画素が (1) を満たしてしまうから
+    (星なら隣の画素も背景との差が大きい)。
+    つまり、孤立した 1〜9 画素の外れ値では判定が変わらない。そのため次のような画像は、外れ値の画素の
+    おかげで今までは反転していたが、反転しなくなった (外れ値が無ければ今までも反転しなかった画像):
+      - 白地に孤立した黒い画素が 9 個以下しかない画像
+      - 孤立したホットピクセル・宇宙線が 1〜9 個あり、暗い星だけが写った、明暗を反転した写真
+      - ベイヤー配列で星像がとても小さい (FWHM 1 px 前後)、明暗を反転した写真
+    逆に、外れ値が隣り合っているとき (2 画素以上の塊) と、ベイヤー配列の画像で外れ値が 2 個以上
+    あるときは、今までどおり反転しうる。手元の画像 6,664 枚で、判定が変わったのは HST の 7 枚だけだった。
+    smoothed: ベイヤーの 3x3 の平滑化をかけた面なら True (周りを 5x5 の外周にする)。
     """
     v = data[np.isfinite(data)]
     if v.size == 0:
         return False
     med = float(np.median(v))
     up = float(v.max()) - med
-    down = med - float(v.min())
+    lo = float(v.min())
+    down = med - lo
+    if not (down > 0 and up <= down * 0.05):
+        return False            # 暗い側の幅を 10 番目の値で測り直しても小さくなるだけなので、反転しない
+    k = min(DARK_RANK, v.size)
+    if k > 1:
+        down_k = med - float(np.partition(v.ravel(), k - 1)[k - 1])
+        if down > DARK_OUTLIER * down_k and _dark_isolated(data, lo, med, down_k, smoothed):
+            down = down_k
     return down > 0 and up <= down * 0.05
+
+
+def _dark_isolated(data, lo, med, down_k, smoothed):
+    """値が lo の画素 (最も暗い画素。ここに来るときは 9 個以下) のどれも、周りの画素の背景 med との差 (med − 値。背景より明るい画素は 0) が down_k 以下か。
+    周りは隣の 8 画素、smoothed なら 5x5 の外周の 16 画素 (画像の縁ではみ出す分は除く)。非有限値も背景との差 0 とする。
+    全部を見るのは、画像の向き (上下の反転) で結果が変わらないようにするため。"""
+    a = data if data.ndim == 2 else data.reshape(1, -1)
+    ny, nx = a.shape
+    r = 2 if smoothed else 1
+    for i in np.flatnonzero(a.ravel() == lo):
+        y, x = divmod(int(i), nx)
+        deepest = 0.0
+        for yy in range(max(0, y - r), min(ny, y + r + 1)):
+            for xx in range(max(0, x - r), min(nx, x + r + 1)):
+                if max(abs(yy - y), abs(xx - x)) < r:
+                    continue        # 中心 (平滑化のあとは中心の 3x3) は見ない
+                val = float(a[yy, xx])
+                if math.isfinite(val):
+                    deepest = max(deepest, med - val)
+        if deepest > down_k:
+            return False
+    return True
+
+
+# looks_inverted: 最も暗い画素の背景との差が、暗いほうから DARK_RANK 番目の画素の背景との差の
+# DARK_OUTLIER 倍を超え、周りから孤立していれば、外れ値とみて DARK_RANK 番目の画素の値で測る
+DARK_RANK = 10
+DARK_OUTLIER = 10.0
 
 
 def load_image_any(path):
@@ -3466,7 +3522,7 @@ def load_image_any(path):
     # 星図 (白地に黒い星) は明暗が逆。星の検出は「明るい点」を
     # 探すので、そのままでは 1 つも検出できない。検出に使う面だけ反転する。
     # 表示は元のまま (白地の星図は白地で見せたほうが自然)。
-    if looks_inverted(data):
+    if looks_inverted(data, smoothed=bool(pat and ndimage is not None)):
         data = float(np.nanmax(data)) - data
         notes.append("白地に黒い星 (星図) とみて明暗を反転")
 

@@ -2,7 +2,8 @@
 
 星のリストは 2 つ。detect_sources (図に緑の丸で出す星) と detect_sources_deep
 (解析エンジンに渡す、暗い星まで検出した星)。各ケースで両方を確かめる。
-34 番以降はディープ検出だけのケース (暗い星・雑音だけ・十字のホットピクセル・位置の精度・実写)。
+34〜38 番はディープ検出だけのケース (暗い星・雑音だけ・十字のホットピクセル・位置の精度・実写)。
+39・40 番は読み込みの明暗の反転の判定 (暗い外れ値・境目)。
 
 ここで書き出す tcase/*.fits の一部は test_solver_real.py の陰性の画像 (sha256 で照合) なので、
 共通の乱数 rng を使う順番を変えないこと。新しいケースは自分の seed を使う。
@@ -498,6 +499,96 @@ def case_zz38_deep_real_few_stars():
                     f"標準 {len(std)} 個  深い {len(deep)} 個 (u={info['u']}、星の σ "
                     f"{info['s_psf'] and round(info['s_psf'], 2)} px、{info['seconds']:.2f} 秒)"))
 
+
+# ------------------------------------------------------- 読み込み (明暗の反転) ---
+# 上と同じく共通の rng は使わない。名前は既存のケースの後に並べる。
+
+def case_zz39_dark_outlier_pixel():
+    """飛び抜けて暗い画素が 1 個だけある星野 (HST の画像の -20,977 の 1 画素にならった。あちらは背景 0.47・最大 179)。
+    最小値で判定すると星図とみて明暗を反転し、雑音を星として検出していた (2026-11 に誤答)。反転せずに星を検出する。
+    この星野は最大が約 8,900 (背景 400) なので、最小値で判定すると背景より約 17 万暗ければ反転する。-2,000,000 にしてある。"""
+    img, pl = make_field(seed=39)
+    img = img.astype(np.float32)
+    img[123, 456] = -2.0e6
+    p = os.path.join(TMP, "dark_outlier_pixel.fits")
+    fits.PrimaryHDU(img).writeto(p, overwrite=True)
+    b = zc.load_image_any(p)
+    if "反転" in b.note:
+        RESULTS.append(("39 暗い外れ値が 1 画素の星野 → 反転しない", False, f"反転した [{b.note[:58]}]"))
+        return
+    check("39 暗い外れ値が 1 画素の星野 → 反転しない", p, 25, pl)
+
+
+def case_zz40_invert_boundaries():
+    """反転の判定の境目 (looks_inverted)。最も暗い画素の背景との差が、暗いほうから DARK_RANK (10) 番目の
+    画素の背景との差の DARK_OUTLIER (10) 倍を超え、周りから孤立していれば、外れ値とみて 10 番目の画素の値で測る。
+    順位・比・孤立の判定がずれたら気づけるように。"""
+    msgs, ok = [], True
+
+    def expect(label, got, want):
+        nonlocal ok
+        ok = ok and (bool(got) == want)
+        msgs.append(f"{label}={'反転' if got else '-'}{'' if bool(got) == want else '(違う)'}")
+
+    # 暗い背景の星野 (背景 0.5・星 180) に、飛び抜けて暗い画素を 1 個 / 9 個 / 10 個
+    base = np.full((400, 500), 0.5, np.float32)
+    base.ravel()[::997] = 180.0
+    for n, want in ((1, False), (9, False), (10, True)):
+        d = base.copy()
+        for j in range(n):
+            d.ravel()[12345 + 101 * j] = -20976.9 - j
+        expect(f"外れ値{n}", zc.looks_inverted(d), want)
+    # 比の境目: 背景 1000・最大 1010、最も暗い画素は背景より a 暗く、2〜10 番目は背景との差 40 (隣にも 40 が 1 個)
+    for a, want in ((300.0, True), (400.0, True), (401.0, False)):
+        d = np.full((20, 20), 1000.0, np.float32)
+        d.ravel()[0] = 1010.0
+        d.ravel()[1] = 1000.0 - a
+        d.ravel()[2:11] = 960.0
+        expect(f"a={a:g}", zc.looks_inverted(d), want)
+    # 孤立の境目: a = 401 でも、隣の画素の背景との差が 10 番目より大きければ (120 > 40) 星のピークとみて最小値で測る
+    d = np.full((20, 20), 1000.0, np.float32)
+    d.ravel()[0] = 1010.0
+    d[2, 5] = 1000.0 - 401.0
+    d[2, 6] = 1000.0 - 120.0
+    d.ravel()[200:208] = 960.0
+    expect("a=401+隣", zc.looks_inverted(d), True)
+    # 最も暗い値の画素が 2 個 (片方は孤立、片方は隣の画素も背景との差が大きい)。上下を反転しても判定は同じ
+    # (どちらも最小値で測って反転)
+    d = np.full((20, 20), 1000.0, np.float32)
+    d.ravel()[0] = 1010.0
+    d[2, 5] = 599.0
+    d[15, 10] = 599.0
+    d[15, 11] = 880.0
+    d.ravel()[100:107] = 960.0
+    expect("同じ最小2個", zc.looks_inverted(d) and zc.looks_inverted(d[::-1].copy()), True)
+    # 星の少ない、明暗を反転した写真 (星 15 個) は、今までどおり白地に黒い星とみて反転する
+    img, _ = make_field(n=15, peak=(120, 1800), seed=40)
+    expect("反転した写真", zc.looks_inverted((img.max() - img).astype(np.float32)), True)
+    # 明暗を反転した写真で星像が小さいとき (FWHM 1.5 px、星 15 個 + ピーク 20,000 の星 1 個)。明るい星のピークの
+    # 1 画素は背景との差が 10 番目の 10 倍を超えるが、隣の画素も背景との差が大きいので外れ値とみない。
+    # float と 8 bit (線形) の両方で反転する (読み込みの注記で確かめる)
+    img, _ = make_field(n=15, peak=(120, 900), fwhm=1.5, seed=42)
+    yy, xx = np.mgrid[0:img.shape[0], 0:img.shape[1]]
+    sig = 1.5 / 2.3548
+    img += 20000.0 * np.exp(-((xx - 450) ** 2 + (yy - 300) ** 2) / (2 * sig ** 2))
+    neg = (img.max() - img).astype(np.float32)
+    p = os.path.join(TMP, "sharp_negative.fits")
+    fits.PrimaryHDU(neg).writeto(p, overwrite=True)
+    b = zc.load_image_any(p)
+    expect("星像の小さい反転した写真", "反転" in b.note, True)
+    p8 = os.path.join(TMP, "sharp_negative8.png")
+    Image.fromarray(np.round(neg / neg.max() * 255.0).astype(np.uint8)).save(p8)
+    expect("星像の小さい反転した写真 8bit", "反転" in zc.load_image_any(p8).note, True)
+    # ベイヤー: 外れ値 1 画素は平滑化で 3x3 に広がるが、5x5 の外周を見るので外れ値とみて反転しない
+    img, pl = make_field(seed=41)
+    img = img.astype(np.float32)
+    img[300, 450] = -2.0e7
+    p = os.path.join(TMP, "dark_outlier_bayer.fits")
+    h = fits.Header()
+    h["BAYERPAT"] = "RGGB"
+    fits.PrimaryHDU(img, header=h).writeto(p, overwrite=True)
+    expect("ベイヤー", "反転" in zc.load_image_any(p).note, False)
+    RESULTS.append(("40 反転の判定の境目 (順位 10・比 10 倍・孤立・反転した写真・ベイヤー)", ok, "  ".join(msgs)))
 
 def main():
     for fn in sorted(k for k in globals() if k.startswith("case_")):

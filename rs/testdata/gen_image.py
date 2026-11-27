@@ -380,6 +380,32 @@ def gen_fixtures():
     add("nosimple", bytes(b), ".fits")
     inv = (base.max() + 10 - base).astype(np.float32)
     add("inverted", fits_bytes([fits.PrimaryHDU(inv)]), ".fits")
+    # 反転の判定: 最も暗い画素の背景との差が、暗いほうから 10 番目(looks_inverted の DARK_RANK)の画素の背景との差の
+    # 10 倍(DARK_OUTLIER)を超え、周りから孤立していれば、外れ値とみて 10 番目の画素の値で測る。境目で順位と比を固定する
+    # 飛び抜けて暗い画素が 9 個なら星図とみない(反転しない)、10 個なら星図とみる(反転する)
+    for n_out in (9, 10):
+        o = base.astype(np.float32)
+        for j in range(n_out):
+            o[2 + 3 * j, 5 + 2 * j] = -2.0e6 - j
+        add(f"dark_outliers{n_out}", fits_bytes([fits.PrimaryHDU(o)]), ".fits")
+    # 背景 1000・最大 1010。最も暗い画素は背景より a 暗く、2〜10 番目は背景との差 40。
+    # a = 400 は最小値で測って反転、401 は 10 番目の値で測って反転しない
+    for a in (400, 401):
+        o = np.full((32, 40), 1000.0, np.float32)
+        o[0, 0] = 1010.0
+        o[5, 7] = 1000.0 - a
+        for j in range(9):
+            o[10 + j, 3 + 3 * j] = 960.0
+        add(f"dark_ratio{a}", fits_bytes([fits.PrimaryHDU(o)]), ".fits")
+    # 孤立の境目: a = 401 でも、隣の画素の背景との差が 10 番目より大きければ(120 > 40)星のピークとみて
+    # 最小値で測る(反転する)
+    o = np.full((32, 40), 1000.0, np.float32)
+    o[0, 0] = 1010.0
+    o[5, 7] = 1000.0 - 401.0
+    o[5, 8] = 1000.0 - 120.0
+    for j in range(8):
+        o[10 + j, 3 + 3 * j] = 960.0
+    add("dark_ratio401_star", fits_bytes([fits.PrimaryHDU(o)]), ".fits")
     nanimg = base.astype(np.float32)
     nanimg[10:14, 10:20] = np.nan
     add("nan_block", fits_bytes([fits.PrimaryHDU(nanimg)]), ".fits")
