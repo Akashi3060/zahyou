@@ -1,7 +1,7 @@
 # ==============================================================================
 #  zahyou 解析エンジン
 #
-#  zahyou_v9.ipynb のセル A から読み込まれます。単体では実行しません。
+#  zahyou_v10.ipynb のセル A から読み込まれます。単体では実行しません。
 #  中身を読む必要はありません (直したいときだけ dev/ の元のファイルを触ってください)。
 #  オフライン解析は自前のエンジン (dev/solver_*.py) で行い、WSL は使いません。
 # ==============================================================================
@@ -5366,7 +5366,7 @@ def _sanity_ok(wcs, shape):
 # ログの見出しのバージョン。exe と同じバージョン名にする(rs/Cargo.toml の [workspace.package] version に "v" を付け、末尾の 0 の部分を
 # 省いたもの。8.0.0 → "v8"、β版は "v<メジャーバージョン>-beta.<番号>" の形。rs/app/build.rs の version_label と同じ決まり)。
 # 食い違うと rs/tools/make_release_assets.py の notebook の検査と、テスト version_in_docs_matches_cargo が止める。
-NB_VERSION = "v9"
+NB_VERSION = "v10"
 
 
 def run():
