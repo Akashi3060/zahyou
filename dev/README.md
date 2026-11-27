@@ -73,7 +73,7 @@ python test_solver_synth.py      # 合成星野をブラインドとヒントで
 #                                    既知の失敗として受け入れている。2026-11-17 の決定。Rust の解き方では解ける)
 python test_solver_real.py       # 実写を解いて、v6 で求めた正解と比べる
 python test_solver_real.py --engine --both   # 同じことを、組み立てた直下の zahyou_engine.py と sv_solve 直接で
-python test_robust.py            # いろいろな画像で星が検出できるか (38 ケース)
+python test_robust.py            # いろいろな画像で星が検出できるか (40 ケース)
 python test_online_settings.py   # オンライン解析が nova へ送る中身 (公開しない指定 publicly_visible="n" など)。
 #                                    astroquery の送信を偽物に差し替えるのでネットには出ない
 python test_notebook_run.py      # 本物のカーネルでセル A/B を実行し、画面に出るものを数える
@@ -89,7 +89,7 @@ python test_native.py            # 拡張モジュール zahyou-native(../rs/py)
 | `test_solver_index.py` | インデックスの読み込み（コードを星から計算し直して保存値と整数まで一致）、kd-tree の探索 = 総当たり | 全件一致 |
 | `test_solver_synth.py` | インデックスの星から作った合成星野（5202〜5206・4107〜4110・三角形の 4111〜4119、回転・鏡像・スケール・タイル境界・赤経 0°・極付近、星の欠け 30%・偽の星 30%）をブラインドとヒントで解く | 中心 2″（か 0.5 px）以内、スケール 0.2%、回転 0.1°、鏡像一致。一様乱数の星野は 1 つも解けない |
 | `test_solver_real.py` | v6 の WSL 版で解いた正解（`solver_truth.json`）と同じ画像を解く（画像が手元にあるときだけ。パスはリポジトリからの相対か `$ZAHYOU_TEST_IMAGES/` から。陽性の画像が 1 枚も走らなければ終了コード 2） | 中心 2″、スケール 0.2%、回転 0.1°、鏡像一致。ピンぼけ・光条・乱数の星野は解けず、タイムアウトの超過 1 秒以内 |
-| `test_robust.py` | 読み込み・前処理・検出（図の星と、解析エンジンに渡すディープ検出の星） | 38 ケース（うち 3 つは手元に実写があるときだけ走る。置き場所は `ZAHYOU_TEST_IMAGES`（既定はホームフォルダー）の下の `Downloads`） |
+| `test_robust.py` | 読み込み・前処理・検出（図の星と、解析エンジンに渡すディープ検出の星） | 40 ケース（うち 3 つは手元に実写があるときだけ走る。置き場所は `ZAHYOU_TEST_IMAGES`（既定はホームフォルダー）の下の `Downloads`） |
 
 画面のテストは Rust 版のもの（[../rs/README.md](../rs/README.md)）。v6 と試作版（`v7-dev`）の Python の画面（`gui/`）と
 そのテストは 7.0.0 の準備で消した（commit `0b73d36`(旧タグ v7.0.0-beta.2。main の歴史にある)の木に残っている。`git show 0b73d36:gui/README.md`）。
