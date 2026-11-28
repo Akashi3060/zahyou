@@ -74,7 +74,7 @@ Release を作って試したり、nova へ送ったりはしていない。ソ�
 ## 1. v6 の利用者がどうなるか
 
 - v6 の exe の「更新を確認」(起動時にも既定で確かめる)は、`https://api.github.com/repos/Akashi3060/zahyou/releases/latest` の
-  アセット **`zahyou.exe`** の digest(SHA256)を手元の exe と比較し、**違えば「新しい版があります」**と出す。バージョン名は見ない。
+  アセット **`zahyou.exe`** の digest(SHA256)を手元の exe と比較し、<strong>違えば「新しい版があります」</strong>と出す。バージョン名は見ない。
 - **β版をプレリリースで出している間は、latest は v6 のまま**なので、v6 の利用者には何も出ない(GitHub の API はプレリリースを latest として
   返さず、プレリリースは latest にできない。0.1 節。出したあとに 7 節の 6 (a)・(b) で確かめる)。
 - **v7 の正式版を Latest で出した時点で、v6 の全員に「新しい版があります」が出る**(新しく公開する正式の Release は既定で latest になる。
@@ -347,7 +347,7 @@ gh release edit v7.0.0-beta.N --repo Akashi3060/zahyou --draft=false --latest=fa
    同じタグのビルドし直しはβの利用者に届かない)。
 4. **間違えて正式の Release(pre-release のチェックなし)で出すと、そのまま v6 の全員に入れ替えが出る**。チェックを入れ忘れたら、すぐ pre-release に直す。
 5. Release 本文に書くこと(v6 の本文を土台に): β版であること・v6 の更新には出ないこと・v6 との行き来(1 節)、ダウンロードの警告(5 枚の図。
-   exe の中身によらない)、画面の写真(raw の URL は **`…/zahyou/v7.0.0-beta.N/docs/img/…`(タグ)**で書く。`main` には β の写真が無い)、
+   exe の中身によらない)、画面の写真(raw の URL は <strong>`…/zahyou/v7.0.0-beta.N/docs/img/…`(タグ)</strong>で書く。`main` には β の写真が無い)、
    v6 からの変更(WSL 不要・Rust・速さと大きさ。数字は README の「実測値」と同じもの)、API キーの欄と、外へ送るもの(まず星の位置、
    解けなければ画像ファイルそのもの。送る前に聞かない。**公開しない指定 `publicly_visible = n` を付けて送るが、nova に送ったものは
    第三者に見られることがある**)と送らない方法(方法を「オフラインのみ」/ API キーの欄を空)、
