@@ -1222,3 +1222,46 @@ dbe1eae6d4242246cb8d6dd8d32391ec82d1338c2e40a7a82643c9cd2917a679  zahyou_native-
   5. 公開中の v10 の exe(のコピー、一時の LOCALAPPDATA)で「更新を確認」→「更新する」が v11 に入れ替わり、`zahyou.exe.old` が v11 の起動で消えること
   6. 配布ページの差し替え(v10 と同じ。`zahyou_v10.ipynb` は中身を v11 のものに入れ替えてから `zahyou_v11.ipynb` に改名する)
   7. wiki のブランチ `release-v11` を master へ入れて push する
+
+### v11(タグ `v11`。2026-11-28 21:50 JST に公開。ユーザーの指示「造語ではなく一般的な用語になっているか確認し, 問題なければv11として公開して」)
+
+上の「v11 の準備」の「残り」を、この順に行った。
+
+1. PR #69 を merge commit で main へ入れた(`167b865`)。マージの前に、PR の CI 5 件(collect と wheel 4 つ)が先頭の `837d4ac` で通ったのを確かめた。
+   main の中身は `837d4ac` と同じ(tree `dd8766b`)で、exe をビルドしたあと `rs/` は変わっていない(exe のビルドのあとの直しは README・マニュアル・wiki・この文書だけ)。
+   ブランチ `release-v11` は消した(origin と手元)。
+2. main で wheels ワークフローを動かした(run `46146190190`、4 つの OS・CPU とも success)。wheel 4 つを `%USERPROFILE%\zahyou-wheels-v11` へダウンロードし、
+   `make_release_assets.py --wheels` でアセット 11 個を作った。6 つの検査が全部 OK、`sha256sum -c` も OK。
+   - 公開の前に、Windows の wheel を一時の venv に入れて `dev/test_native.py` を回した(9/9)
+3. タグ `v11` を `167b865` に打って push(v10 と同じ軽量タグ。`git ls-remote` は `refs/tags/v11` だけ)。Release を下書きで作り、prerelease=false・タイトル「zahyou v11」・
+   アセット 11 個で、digest は SHA256SUMS.txt の 10 個と一致した。本文のリンク 23 個は有効(README の見出しへのリンク 2 つは、見出しがタグ `v11` の README にある)。
+   `gh api markdown` で HTML に変換して、太字にならずに残る `**` が 0 個であることも確かめた。`--latest` で出し、`releases/latest` は v11、`expanded_assets/v11` も 200。
+4. 公開中の v10 の exe(`8019fb1a…`)を一時のフォルダーにダウンロードし、一時の LOCALAPPDATA で `--update-check --update-apply` を動かした。
+   - 「新しいバージョンがあります: v11 (2026-11-28 版 / 14 MB)」と出て、SHA256 が一致し、入れ替わった(`zahyou.exe` = `bf39a323…`、`zahyou.exe.old` = v10)。
+   - v11 を一時の設定(API キーを空・オフラインのみ)で 1 回起動すると、0.5 秒で `zahyou.exe.old` が消えた。起動したその 1 つだけを閉じた。
+   - ノートブックのセル A の 2 つ目の pip の行と同じ形(`--no-index --find-links …/expanded_assets/v11`)で、一時の venv に zahyou-native 11.0.0 が入り、import できた。
+   - 利用者の cache.json・gui.json は前後で同じ。
+5. 配布ページを差し替えた。TrueNAS の root(一時 cronjob)で、スクリプトは先に新しいファイルの SHA256 と、今の中身が v10 であることを確かめる。
+   - 差し替えの前に、配布フォルダーの実体と公開共有の PROPFIND の一覧が同じ 12 ファイルであることを確かめた。
+   - `cat >` で中身を入れ替えたもの: `zahyou.exe`・`zahyou_engine.py`・`THIRD-PARTY-NOTICES.md`・マニュアル v4・`はじめにお読みください.txt`(v11 向け。BOM 付き・CRLF)。
+   - `zahyou_v10.ipynb` は中身を v11 のものに `cat >` で入れ替えてから、`mv` で `zahyou_v11.ipynb` にした。
+   - inode・所有者・ACL は前のまま。`LICENSE.txt`・`SHA256SUMS.txt`(zip 用)・インデックスファイルの zip は触っていない。
+   - 公開 URL(public.php/webdav)から 6 つをダウンロードして、SHA256 がアセットと同じことを確かめた。`zahyou_v10.ipynb` は 404。
+   - 置き場の `_claude-tmp/zahyou-v11-swap` は root で消した(`_claude-tmp` のほかのものには触れていない)。スクリプト・ログ・本文・説明文のバックアップは
+     作者の手元の `Documents\claude\zahyou\release-backup\v11-release-20261128\`。
+6. wiki のブランチ `release-v11` を master へ fast-forward で入れて push した(`5c8f0e4`)。公開の wiki に「v11 で変わったこと」が出ることを確かめた。
+
+アセット(`SHA256SUMS.txt`):
+
+```
+bf39a323adc3fba4b10659aa7327ce42b877b5a1888d03c3467d20f1771d5a26  zahyou.exe
+3083662df4c2edd0c1bc54a3f55a4cd8ae096b4b7daa4aba003e1f955138980f  zahyou_v11.ipynb
+fd6c1de7cfd39d66e851415a30c550dae3f73c0d31cc27a81c546532e99ec8fa  zahyou_engine.py
+735d9433974d656d180df1b3837e95369df20787915669df7dc9dbc9fcaf4387  zahyou-manual-v4.pdf
+4efc7babf6be215d508636aefa67428a28d1c9977b02d1b580c47b26dd34a3f8  LICENSE.txt
+9473dbf537f4704ba7d330e94bd469879203f8c830b8db89521895f8003ee1b8  THIRD-PARTY-NOTICES.md
+d82e554323f486e3d59d3d10a24ccb70dcb9a82f8b766cb13f1d04b751b95ca0  zahyou_native-11.0.0-cp39-abi3-macosx_10_12_universal2.macosx_10_12_x86_64.macosx_11_0_arm64.whl
+4f07190eb05ee97493986c747776b0da7c1145a88006d0710fb485a84a4671b8  zahyou_native-11.0.0-cp39-abi3-manylinux_2_28_aarch64.whl
+4dc31b7714718e75a08262f0ec18e59398f7a80b61a8dcd5899b71529c5546e9  zahyou_native-11.0.0-cp39-abi3-manylinux_2_28_x86_64.whl
+16461f5ac552a9b6b19dc5ce531e85b247657bd85372d2fe42513671151a37a6  zahyou_native-11.0.0-cp39-abi3-win_amd64.whl
+```
