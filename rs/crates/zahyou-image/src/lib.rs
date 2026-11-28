@@ -39,7 +39,7 @@ mod tile;
 pub use deep::{detect_deep, detect_deep_raw, detect_sources_deep};
 pub use detect::{detect_raw, detect_sources};
 pub use load::{LoadError, load_image_any, looks_inverted};
-pub use prep::preprocess;
+pub use prep::{median_prep, preprocess};
 pub use zahyou_wcs::{Card, CardValue};
 
 /// 2 次元の画像(float32、行優先)。`data[y * width + x]`。
