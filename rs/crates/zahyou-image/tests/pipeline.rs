@@ -1,7 +1,8 @@
 //! 実画像の通しの照合(rs/testdata/image_pipeline.json、gen_image.py の gen_pipeline)。
 //!
 //! dev/tcase の全画像と手元の実写について、読み込み・前処理(焼き込み文字のマスクあり/なし)・
-//! 検出(min_sources 12 / 60)・ディープ検出の結果を Python と比べる。画像が手元に無い(または中身が違う)ときは SKIP。
+//! 検出(min_sources 12 / 60)・ディープ検出と、3×3 の中央値フィルター(median_prep)の後の σ・検出・ディープ検出の結果を
+//! Python と比べる。画像が手元に無い(または中身が違う)ときは SKIP。
 //! 画像の path は dev/solver_truth.json と同じ決まり(common::image_path)。
 //! 許容差: 星の位置 1e-4 px、σ 相対 1e-6、光量 相対 1e-9、伸び・FWHM・SNR 相対 1e-6(実際はほぼビット一致)。
 //! ディープ検出は上位 50 個の全部の値に加えて、全部の星の位置(xy)と測った値(info)も比べる。
@@ -12,7 +13,9 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use common::*;
-use zahyou_image::{DeepInfo, DeepOpts, DetectOpts, Source, detect_deep, detect_sources, load_image_any, preprocess};
+use zahyou_image::{
+    DeepInfo, DeepOpts, DetectOpts, Source, detect_deep, detect_sources, load_image_any, median_prep, preprocess,
+};
 
 const POS_TOL: f64 = 1e-4;
 const SIGMA_TOL: f64 = 1e-6;
@@ -225,6 +228,32 @@ fn pipeline_matches_python() {
         mine.extend(star_issues(&format!("{short} det60"), &it["det60"], &d60, &mut worst));
         mine.extend(star_issues(&format!("{short} deep"), &it["deep"], &deep, &mut worst));
         mine.extend(deep_issues(&format!("{short} deep"), &it["deep"], &deep3, &mut worst));
+
+        // オフライン解析でホットピクセルの多い画像に使う 3×3 の中央値フィルター(median_prep)と、それで検出し直した星
+        let pm = &it["med"];
+        if pm.is_object() {
+            let mp = median_prep(&prep);
+            let dm = rel(mp.sigma, f(&pm["sigma"]));
+            sigma_worst = sigma_worst.max(dm);
+            if dm > SIGMA_TOL {
+                mine.push(format!(
+                    "{short}: 中央値フィルター後の σ {} ≠ {} (相対 {dm:.2e})",
+                    mp.sigma,
+                    f(&pm["sigma"])
+                ));
+            }
+            mine.extend(cmp_stats(&format!("{short}.med.sub"), &pm["sub"], shape, &mp.sub.data));
+            let md60 = detect_sources(&mp, &DetectOpts::with_min_sources(60));
+            let mdeep3 = detect_deep(&mp, &DeepOpts::default());
+            let mdeep = (mdeep3.0.clone(), mdeep3.1);
+            mine.extend(star_issues(&format!("{short} med det60"), &pm["det60"], &md60, &mut worst));
+            mine.extend(star_issues(&format!("{short} med deep"), &pm["deep"], &mdeep, &mut worst));
+            mine.extend(deep_issues(&format!("{short} med deep"), &pm["deep"], &mdeep3, &mut worst));
+        } else {
+            mine.push(format!(
+                "{short}: image_pipeline.json に med(中央値フィルター後)が無い(gen_image.py で作り直す)"
+            ));
+        }
 
         let ps = &it["py_seconds"];
         let pyt = [f(&ps["load"]), f(&ps["preprocess"]), f(&ps["detect_x2"]), f(&ps["deep"])];

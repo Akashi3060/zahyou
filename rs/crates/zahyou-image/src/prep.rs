@@ -401,6 +401,31 @@ pub fn preprocess(img: &Image2D, mask_overlay: bool) -> Prep {
     Prep { sub: Image2D { width: nx, height: ny, data: sub }, mask, sigma, info }
 }
 
+/// `median_prep(sub, mask, sigma)`: 前処理の結果の画像に 3×3 の中央値フィルター(`mode="nearest"`)をかけ、
+/// σ を測り直したもの。マスクはそのまま。σ は [`preprocess`] の最後と同じく、マスクの外(全部マスクなら全体)の
+/// σ クリップの標準偏差で、有限で正でなければ元の σ のまま。info は空。
+///
+/// オフライン解析で、ホットピクセルの多い画像(ダーク補正をしていない画像の、色の補間で広がったホットピクセルが星の検出を埋めたとき)に使う。
+/// 星(FWHM 3 画素ほど以上)は頂の値の 7 割ほどが残り、色の補間で十字・3×3 に広がった点は 2.5〜5 割に、1 画素だけの点は
+/// 背景の高さまで下がるので、明るさの順で星が前に出る(FWHM 2 画素ほどの星は 5 割ほどで、3×3 に広がった点と区別しにくい)。
+pub fn median_prep(prep: &Prep) -> Prep {
+    let (ny, nx) = (prep.sub.height, prep.sub.width);
+    let n = prep.sub.data.len();
+    if ny.checked_mul(nx) != Some(n) || prep.mask.len() != n {
+        // 大きさの合わない入力(呼ぶ側の誤り)。落ちずにそのまま返す
+        return Prep { info: Vec::new(), ..prep.clone() };
+    }
+    let sub = median3(&prep.sub.data, ny, nx);
+    let n_masked = prep.mask.par_iter().filter(|&&m| m).count();
+    let s = if n_masked == 0 || n_masked == n {
+        sigma_clipped_std(&sub) as f64
+    } else {
+        sigma_clipped_std(&unmasked(&sub, &prep.mask)) as f64
+    };
+    let sigma = if s.is_finite() && s > 0.0 { s } else { prep.sigma };
+    Prep { sub: Image2D { width: nx, height: ny, data: sub }, mask: prep.mask.clone(), sigma, info: Vec::new() }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -679,5 +704,43 @@ mod tests {
             let got = background_sub(&img);
             assert!(got.iter().zip(&want).all(|(a, b)| a.to_bits() == b.to_bits()), "{ny}x{nx}");
         }
+    }
+
+    #[test]
+    fn median_prep_filters_and_remeasures_sigma() {
+        // 画像は 3×3 の中央値フィルター(median3)をかけたもの、マスクはそのまま、σ はマスクの外で測り直す(info は空)
+        for (ny, nx, seed, band, dead) in [(120usize, 160usize, 11u64, false, false), (300, 517, 12, true, true)] {
+            let prep = preprocess(&test_image(ny, nx, seed, 40, band, dead), true);
+            let m = median_prep(&prep);
+            let want = median3(&prep.sub.data, ny, nx);
+            assert!(m.sub.data.iter().zip(&want).all(|(a, b)| a.to_bits() == b.to_bits()), "{ny}x{nx}");
+            assert_eq!((m.sub.width, m.sub.height), (nx, ny));
+            assert_eq!(m.mask, prep.mask);
+            assert!(m.info.is_empty());
+            let n_masked = prep.mask.iter().filter(|&&b| b).count();
+            let s =
+                if n_masked == 0 { sigma_clipped_std(&want) } else { sigma_clipped_std(&unmasked(&want, &prep.mask)) };
+            assert_eq!(m.sigma, s as f64, "{ny}x{nx} masked={n_masked}");
+            // 雑音は中央値フィルターで減る
+            assert!(m.sigma < prep.sigma, "{ny}x{nx}: {} → {}", prep.sigma, m.sigma);
+        }
+        // 一様な画像(σ が 0)は元の σ のまま
+        let flat = Prep {
+            sub: Image2D { width: 8, height: 6, data: vec![3.0; 48] },
+            mask: vec![false; 48],
+            sigma: 2.5,
+            info: vec!["x".into()],
+        };
+        let m = median_prep(&flat);
+        assert_eq!((m.sigma, m.sub.data.len(), m.info.len()), (2.5, 48, 0));
+        // 大きさの合わない入力は落ちずにそのまま
+        let bad = Prep {
+            sub: Image2D { width: 4, height: 4, data: vec![1.0; 10] },
+            mask: vec![false; 10],
+            sigma: 1.0,
+            info: Vec::new(),
+        };
+        let m = median_prep(&bad);
+        assert_eq!((m.sub.data.len(), m.sigma), (10, 1.0));
     }
 }

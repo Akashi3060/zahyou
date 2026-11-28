@@ -4,6 +4,8 @@
 (解析エンジンに渡す、暗い星まで検出した星)。各ケースで両方を確かめる。
 34〜38 番はディープ検出だけのケース (暗い星・雑音だけ・十字のホットピクセル・位置の精度・実写)。
 39・40 番は読み込みの明暗の反転の判定 (暗い外れ値・境目)。
+41 番はオフライン解析でホットピクセルの多い画像に使う 3×3 の中央値フィルター (median_prep)、42 番はそれを使うかの判定、
+43 番はフィルター後の星を入れた試行の並び (_build_attempts)。42・43 番は検出を走らせず、関数の値だけを見る。
 
 ここで書き出す tcase/*.fits の一部は test_solver_real.py の陰性の画像 (sha256 で照合) なので、
 共通の乱数 rng を使う順番を変えないこと。新しいケースは自分の seed を使う。
@@ -589,6 +591,78 @@ def case_zz40_invert_boundaries():
     fits.PrimaryHDU(img, header=h).writeto(p, overwrite=True)
     expect("ベイヤー", "反転" in zc.load_image_any(p).note, False)
     RESULTS.append(("40 反転の判定の境目 (順位 10・比 10 倍・孤立・反転した写真・ベイヤー)", ok, "  ".join(msgs)))
+
+def plant_spread_hot(img, n, amp, seed):
+    """ダーク補正をしていないカラーの画像の、色の補間で広がったホットピクセルを n 個植える (半分ずつ)。
+    緑の面の欠陥は十字 (上下左右に 1/4)、赤・青の面の欠陥は 3×3 (上下左右に 1/2、斜めに 1/4)。
+    どちらも前処理の「1 画素だけの突出」の消し方にはかからない。"""
+    r = np.random.default_rng(seed)
+    ny, nx = img.shape
+    for k, (y, x, a) in enumerate(zip(r.integers(3, ny - 3, n), r.integers(3, nx - 3, n), r.uniform(*amp, n))):
+        if k % 2 == 0:
+            img[y, x] += a
+            for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                img[y + dy, x + dx] += a * 0.25
+        else:
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    img[y + dy, x + dx] += a * (1.0 if dy == dx == 0 else 0.5 if dy == 0 or dx == 0 else 0.25)
+    return img
+
+
+def case_zz41_median_prep_spread_hot():
+    """
+    色の補間で広がったホットピクセル 400 個 (星より明るい) を植えた星野。標準の検出の明るいほうから 30 個は
+    ホットピクセルが多いが、median_prep (3×3 の中央値フィルター) をかけて検出し直すと星が前に出る
+    (オフライン解析がフィルター後の星を先に試すときに頼っている性質)。σ は測り直して下がり、判定も通る。
+    """
+    img, pl = make_field(seed=41)
+    img = plant_spread_hot(img, 400, (10000, 20000), 1041)
+    sub, mask, sigma, _ = zc.preprocess(np.asarray(img, dtype=np.float64))
+    std, _ = zc.detect_sources(sub, mask, sigma, min_sources=60)
+    fsub, fmask, fsig = zc.median_prep(sub, mask, sigma)
+    fstd, _ = zc.detect_sources(fsub, fmask, fsig, min_sources=60)
+    m0, _ = match_planted(std[:30], pl, 2.0)
+    m1, _ = match_planted(fstd[:30], pl, 2.0)
+    same = np.array_equal(fsub, ndimage.median_filter(sub, size=3, mode="nearest")) and fmask is mask
+    hit = zc._hot_point_count(std, fstd)
+    ok = same and m0 <= 15 and m1 >= 20 and fsig < sigma and hit is not None
+    RESULTS.append(("41 色の補間で広がったホットピクセル 400 個 → 中央値フィルターで星が前に出る", ok,
+                    f"明るい 30 個のうち植えた星: 元 {m0} → フィルター後 {m1}  σ {sigma:.2f} → {fsig:.2f}"
+                    f"  判定 (見た数, 外れた数) {hit}"))
+
+
+def case_zz42_median_rule():
+    """中央値フィルター後の星を先に試すかの判定 (_hot_point_count)。
+    Rust の offline.rs の hot_point_count_looks_at_the_bright_end と同じ値。"""
+    def grid(n, y0):
+        return [{"x": 10.0 * k, "y": y0} for k in range(n)]
+    a = grid(40, 0.0)
+    shifted = [{"x": s["x"] + 1.2, "y": s["y"] + 0.9} for s in a]
+    got = [zc._hot_point_count(a, a), zc._hot_point_count(a, shifted),
+           zc._hot_point_count(a, a[12:] + grid(20, 500.0) + a[:12]),
+           zc._hot_point_count(a, a[11:] + grid(20, 500.0) + a[:11]),
+           zc._hot_point_count(a, grid(30, 500.0)), zc._hot_point_count(a, grid(29, 500.0)), zc._hot_point_count(a, []),
+           zc._hot_point_count(grid(8, 0.0), grid(8, 500.0)), zc._hot_point_count(grid(7, 0.0), grid(7, 500.0))]
+    want = [None, None, (30, 12), None, (30, 30), None, None, (8, 8), None]
+    RESULTS.append(("42 中央値フィルター後の星を先に試すかの判定", got == want, f"判定 {got}"))
+
+
+def case_zz43_attempt_order():
+    """試行の並び (_build_attempts): 条件ごとにフィルター後の星 → 元の星、フィルター後の星は残りの 1 割まで。
+    Rust の offline.rs の filtered_sets_come_first_with_a_short_share と同じ値。"""
+    s = [{"x": 10.0 * k, "y": 0.0} for k in range(5)]
+    conds = [("全天 + スケール既知", None, (1.0, 2.0), 0.25), ("全天 + スケール全域", None, (0.5, 50.0), 0.5)]
+    o = [("O1", s[:4]), ("O2", s)]
+    got = [[(a[0], a[4]) for a in zc._build_attempts(conds, f, o)] for f in ([("F1", s), ("F2", s[:3])], None)]
+    want = [[("F1の星 5 個 + 全天 + スケール既知", 0.1), ("F2の星 3 個 + 全天 + スケール既知", 0.1),
+             ("O1の星 4 個 + 全天 + スケール既知", 0.25), ("O2の星 5 個 + 全天 + スケール既知", 0.25),
+             ("F1の星 5 個 + 全天 + スケール全域", 0.1), ("F2の星 3 個 + 全天 + スケール全域", 0.1),
+             ("O1の星 4 個 + 全天 + スケール全域", 0.5), ("O2の星 5 個 + 全天 + スケール全域", 0.5)],
+            [("O1の星 4 個 + 全天 + スケール既知", 0.25), ("O2の星 5 個 + 全天 + スケール既知", 0.25),
+             ("O1の星 4 個 + 全天 + スケール全域", 0.5), ("O2の星 5 個 + 全天 + スケール全域", 0.5)]]
+    RESULTS.append(("43 試行の並び (フィルター後の星は先に、時間は 1 割まで)", got == want, f"{sum(map(len, got))} 試行"))
+
 
 def main():
     for fn in sorted(k for k in globals() if k.startswith("case_")):

@@ -11,7 +11,7 @@ Python 基準実装は既定でこのリポジトリの dev/zahyou_core.py(環�
 書くもの(このスクリプトと同じフォルダー):
   image_kernels.json   numpy / scipy / astropy の部品(和・中央値・σ クリップ・フィルター・zoom・label)の値
   image_formats.json   小さな合成ファイル(FITS の型・圧縮・PNG/TIFF/JPEG)を gzip+base64 で持ち、load_image_any の結果を書く
-  image_pipeline.json  dev/tcase と手元の実写について、読み込み・前処理・検出の結果を書く(画像そのものは入れない)。
+  image_pipeline.json  dev/tcase と手元の実写について、読み込み・前処理・検出(3×3 の中央値フィルター後も)の結果を書く(画像そのものは入れない)。
                        画像の path は dev/solver_truth.json と同じ決まり: リポジトリからの相対(dev/tcase は
                        test_robust.py が作る)か、$ZAHYOU_TEST_IMAGES/(環境変数。無ければホームフォルダー)からの相対。
                        dev/tcase がリポジトリに無ければ $ZAHYOU_DEV/tcase、隣の Python 版のリポジトリ ../zahyou/dev/tcase の順に探す
@@ -635,6 +635,11 @@ def run_pipeline(path):
         r[key] = {"n": len(found), "thr": thr, "stars": sources_list(found)}
     t4 = time.perf_counter()
     r["deep"], t_deep = deep_record(sub, mask, sigma)
+    # オフライン解析でホットピクセルの多い画像に使う 3×3 の中央値フィルター(median_prep)と、それで検出し直した星
+    fsub, fmask, fsig = zc.median_prep(sub, mask, sigma)
+    found, thr = zc.detect_sources(fsub, fmask, fsig, min_sources=60)
+    r["med"] = {"sigma": float(fsig), "sub": stats(fsub), "det60": {"n": len(found), "thr": thr, "stars": sources_list(found)}}
+    r["med"]["deep"], _ = deep_record(fsub, fmask, fsig)
     r["py_seconds"] = {"load": t1 - t0, "preprocess": t2 - t1, "detect_x2": t4 - t3, "deep": t_deep}
     return r
 

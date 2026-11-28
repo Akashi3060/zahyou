@@ -6,15 +6,25 @@
 //!   → 全天 + スケール全域(50 %。最後の試行は残り全部)
 //! 全体のタイムアウトは timeout_s 秒の壁時計で、試行ごとに残り時間の一部を割り当てる。残りが 2 秒を切ったらやめる。
 //!
+//! 試行の前に、前処理の結果に 3×3 の中央値フィルターをかけて(`zahyou_image::median_prep`)星を検出し直す。
+//! 元の画像の明るい星の多くがフィルター後の明るい星から外れるとき(ダーク補正をしていない画像のホットピクセルなど、
+//! 星より小さい点が明るい星として検出されているとき。フィルター後の星が少なすぎるときは見ない)は、条件ごとに、
+//! フィルター後の星(ディープ → 標準)を元の星より先に試す。フィルター後の星の試行 1 回に使う時間は残りの 1 割まで
+//! (`MEDIAN_SHARE`。判定は元の星ですぐ解ける画像でも通ることがあるので、そうした画像を長く待たせない)。
+//! 判定にかかるのは中央値フィルター 1 回と検出 1 回(2 MP で 20 ms ほど、24 MP で 0.2 秒ほど)。
+//!
 //! モジュールの分担(app/src/pipeline.rs): 事前のログ(画素スケール・手持ちのスケール・足りないスケール・探索するスケール)と、
-//! 解けなかったときの案内と、「■ 中止しました。」は app が出す。ここが出すのは、ディープ検出・`[i/N] ラベル  (最大 t 秒)`・
-//! 探索のログ(`    · ` を付けて)・解の要約・`✅ 解析成功 (ラベル)`・時間切れ・エンジンのエラー。
+//! 解けなかったときの案内(「❌ すべての条件で解けませんでした」以下)と、「■ 中止しました。」は app が出す。ここが出すのは、
+//! ディープ検出・中央値フィルターの判定(「元の画像の明るい星 N 個のうち M 個が…」の 2 行)とフィルター後のディープ検出・
+//! `[i/N] ラベル  (最大 t 秒)`・探索のログ(`    · ` を付けて)・解の要約・`✅ 解析成功 (ラベル)`・時間切れ・エンジンのエラーと、
+//! 判定が通って解けなかったときの「中央値フィルターをかけた画像でも解けませんでした。ダーク補正をした画像で試してください。」
+//! (app の案内の前に出る)。
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use zahyou_image::{DeepInfo, DeepOpts, Source};
+use zahyou_image::{DeepInfo, DeepOpts, DetectOpts, Source};
 use zahyou_index::Catalog;
 
 use crate::clock::{Abort, Clock};
@@ -147,6 +157,33 @@ struct Attempt<'s> {
     share: f64,
 }
 
+/// 条件 1 つ: (名前, ヒント, スケールの範囲, 残り時間の何割まで使うか)。
+type Cond<'c> = (&'c str, Option<(f64, f64, f64)>, (f64, f64), f64);
+/// 星の組 1 つ: (名前, 星)。
+type StarSet<'n, 's> = (&'n str, &'s [FieldStar]);
+
+/// 試行の並びを作る(Python の `_build_attempts`): 条件ごとに、フィルター後の星の組(判定が通ったときだけある)→
+/// 元の星の組の順。フィルター後の星の試行が使う時間は残りの MEDIAN_SHARE までに抑える(元の星の試行は条件どおり)。
+fn build_attempts<'s>(
+    conds: &[Cond<'_>],
+    f_sets: &[StarSet<'_, 's>],
+    star_sets: &[StarSet<'_, 's>],
+) -> Vec<Attempt<'s>> {
+    let sets: Vec<_> = f_sets.iter().map(|&s| (s, MEDIAN_SHARE)).chain(star_sets.iter().map(|&s| (s, 1.0))).collect();
+    conds
+        .iter()
+        .flat_map(|&(cond, hint, range, share)| {
+            sets.iter().map(move |&((name, stars), cap)| Attempt {
+                label: format!("{name}の星 {} 個 + {cond}", stars.len()),
+                stars,
+                hint,
+                range,
+                share: share.min(cap),
+            })
+        })
+        .collect()
+}
+
 /// 段階的な試行の本体(Python の `_solve_offline` の試行の部分)。
 pub(crate) fn run(req: &OfflineRequest, catalog: &Catalog, params: &Params, ctl: &Control) -> Result<OfflineOutcome, SolveError> {
     let t_start = Instant::now();
@@ -190,7 +227,7 @@ pub(crate) fn run(req: &OfflineRequest, catalog: &Catalog, params: &Params, ctl:
     let to_stars = |s: &[Source]| -> Vec<FieldStar> { s.iter().map(|c| FieldStar { x: c.x, y: c.y, flux: c.flux }).collect() };
     let deep_stars = to_stars(&deep_src);
     let std_stars = to_stars(req.sources);
-    let star_sets: Vec<(&str, &[FieldStar])> = [("ディープ検出", &deep_stars[..]), ("標準の検出", &std_stars[..])]
+    let star_sets: Vec<StarSet> = [("ディープ検出", &deep_stars[..]), ("標準の検出", &std_stars[..])]
         .into_iter()
         .filter(|(_, s)| s.len() >= 3)
         .collect();
@@ -207,7 +244,6 @@ pub(crate) fn run(req: &OfflineRequest, catalog: &Catalog, params: &Params, ctl:
 
     // 段階的な試行: (条件, ヒント, スケールの範囲, 残り時間の何割まで使うか)
     let hint = req.hint;
-    type Cond<'c> = (&'c str, Option<(f64, f64, f64)>, (f64, f64), f64);
     let mut conds: Vec<Cond> = Vec::new();
     if let (Some(h), Some(n)) = (hint, narrow) {
         conds.push(("座標ヒント + スケール既知", Some(h), n, 0.25));
@@ -219,28 +255,87 @@ pub(crate) fn run(req: &OfflineRequest, catalog: &Catalog, params: &Params, ctl:
         conds.push(("全天 + スケール既知", None, n, 0.25));
     }
     conds.push(("全天 + スケール全域", None, wide, 0.5));
-    let attempts: Vec<Attempt> = conds
-        .iter()
-        .flat_map(|&(cond, h, range, share)| {
-            star_sets.iter().map(move |&(name, stars)| Attempt {
-                label: format!("{name}の星 {} 個 + {cond}", stars.len()),
-                stars,
-                hint: h,
-                range,
-                share,
-            })
-        })
-        .collect();
+    // ホットピクセルの多い画像の手当て(Python の `_median_sets`): 前処理の結果に 3×3 の中央値フィルターをかけて
+    // 星を検出し直し、元の画像の明るい星の多くがフィルター後の明るい星から外れる(= 星より小さい点が明るい星として
+    // 検出されている)ときは、フィルター後の星の試行を条件ごとに先に行う
+    let fprep = zahyou_image::median_prep(req.prep);
+    let (f_std_src, _) = zahyou_image::detect_sources(&fprep, &DetectOpts::with_min_sources(60));
+    if ctl.cancelled() {
+        return Err(SolveError::Cancelled);
+    }
+    let hot = hot_point_count(req.sources, &f_std_src);
+    let (f_deep_stars, f_std_stars) = match hot {
+        Some((top, lost)) => {
+            log(&format!(
+                "\n  - 元の画像の明るい星 {top} 個のうち {lost} 個が、3×3 の中央値フィルターをかけると明るい星から外れます。"
+            ));
+            log(
+                "    ホットピクセルなど星より小さい点が星として検出されているとみて、中央値フィルターをかけた画像の星を先に試します。",
+            );
+            let f_deep = catch_unwind(AssertUnwindSafe(|| zahyou_image::detect_deep(&fprep, &DeepOpts::default())));
+            let (f_deep_src, fu, fdinfo) = match f_deep {
+                Ok(r) => r,
+                Err(p) => {
+                    log(&format!("  ⚠️ 中央値フィルター後のディープ検出に失敗しました: panic: {}", panic_text(&*p)));
+                    (Vec::new(), None, None)
+                }
+            };
+            if !f_deep_src.is_empty() {
+                log(&format!(
+                    "  - 中央値フィルター後のディープ検出: {}、星を {} 個検出 (しきい値 {}σ)",
+                    deep_how(fdinfo.as_ref()),
+                    f_deep_src.len(),
+                    fu.map_or("None".to_string(), |u| fmt_g(u, 6))
+                ));
+            }
+            (to_stars(&f_deep_src), to_stars(&f_std_src))
+        }
+        None => (Vec::new(), Vec::new()),
+    };
+    drop(fprep);
+    let f_sets: Vec<StarSet> =
+        [("中央値フィルター後のディープ検出", &f_deep_stars[..]), ("中央値フィルター後の標準の検出", &f_std_stars[..])]
+            .into_iter()
+            .filter(|(_, s)| s.len() >= 3)
+            .collect();
+    let attempts = build_attempts(&conds, &f_sets, &star_sets);
 
     let store = Store::new(catalog);
+    if let Some(sol) = run_attempts(&attempts, req, &store, params, ctl, t_end)? {
+        return Ok(tried(Some(sol)));
+    }
+    if ctl.cancelled() {
+        return Err(SolveError::Cancelled);
+    }
+    if hot.is_some() {
+        log("  - 中央値フィルターをかけた画像でも解けませんでした。ダーク補正をした画像で試してください。");
+    }
+    Ok(tried(None))
+}
+
+/// 壁時計の残り時間 [秒](過ぎていれば負)。
+fn seconds_left(t_end: Instant) -> f64 {
+    let now = Instant::now();
+    if t_end > now { (t_end - now).as_secs_f64() } else { -(now - t_end).as_secs_f64() }
+}
+
+/// 試行の並びを順に解く(Python の `_run_attempts`)。解けたら Some。中止なら Err(Cancelled)。残りが 2 秒を切ったらやめる。
+fn run_attempts(
+    attempts: &[Attempt],
+    req: &OfflineRequest,
+    store: &Store,
+    params: &Params,
+    ctl: &Control,
+    t_end: Instant,
+) -> Result<Option<Solution>, SolveError> {
+    let log = |s: &str| (ctl.log)(s);
     let total = attempts.len();
     for (i, a) in attempts.iter().enumerate() {
         let i = i + 1;
         if ctl.cancelled() {
             return Err(SolveError::Cancelled);
         }
-        let now = Instant::now();
-        let left = if t_end > now { (t_end - now).as_secs_f64() } else { -(now - t_end).as_secs_f64() };
+        let left = seconds_left(t_end);
         if left < 2.0 {
             log("  ⏱ 制限時間に達したので、これ以上の再試行はしません。");
             break;
@@ -260,7 +355,7 @@ pub(crate) fn run(req: &OfflineRequest, catalog: &Catalog, params: &Params, ctl:
             hint: a.hint,
         };
         let solver_log = |m: &str| log(&format!("    · {m}"));
-        let r = crate::solve_in(&sreq, &store, params, Clock::new(Some(deadline), ctl.cancel), &solver_log, None);
+        let r = crate::solve_in(&sreq, store, params, Clock::new(Some(deadline), ctl.cancel), &solver_log, None);
         let sol = match r {
             Ok(Some(d)) => d.solution,
             Ok(None) => continue,
@@ -280,12 +375,44 @@ pub(crate) fn run(req: &OfflineRequest, catalog: &Catalog, params: &Params, ctl:
         }
         log(&format!("    {}", solution_note(&sol)));
         log(&format!("  ✅ 解析成功 ({})", a.label));
-        return Ok(tried(Some(sol)));
+        return Ok(Some(sol));
     }
-    if ctl.cancelled() {
-        return Err(SolveError::Cancelled);
+    Ok(None)
+}
+
+/// フィルター後の星を先に試すかの判定に見る、標準の検出の明るいほうの星の数(元の画像・フィルター後とも)
+const MEDIAN_TOP: usize = 30;
+/// 判定に要る、元の画像の標準の検出の星の数の下限(少なければフィルター後の星は試さない)
+const MEDIAN_MIN_TOP: usize = 8;
+/// 同じ星とみなす距離 [px]
+const MEDIAN_NEAR_PX: f64 = 2.0;
+/// 元の明るい星のうち、これ以上の割合がフィルター後の明るい星から外れたら、フィルター後の星を先に試す
+/// (実写では、フィルター後の星で解けたダーク補正なしのコマが 4〜8 割。元の星で解ける画像でも 4 割を超えることがある)
+const MEDIAN_MIN_LOST: f64 = 0.4;
+/// フィルター後の星の試行 1 回に使う、残り時間の割合の上限(元の星の試行は条件どおり)。判定が元の星ですぐ解ける
+/// 画像で通ったとき、フィルター後の星で解けない探索が条件どおりの時間(全天・スケール全域なら残りの半分)を
+/// 使い切ると、そうした画像を長く待たせる。実写では、フィルター後の星で解けた試行はどれも始めてから 6 秒以内に
+/// 解けた(既定の制限 300 秒なら、この上限は 30 秒)。
+const MEDIAN_SHARE: f64 = 0.1;
+
+/// 元の画像の標準の検出の明るいほうから MEDIAN_TOP 個のうち、中央値フィルター後の標準の検出の明るいほうから
+/// MEDIAN_TOP 個の中に MEDIAN_NEAR_PX 以内の星が無いもの(= 明るい星から外れたもの)を数える(Python の `_hot_point_count`)。
+/// ホットピクセルは消えずに 2.5〜5 割の明るさで残ることが多いので、「どこかに残っているか」ではなく
+/// 「明るいほうに残っているか」で見る。フィルター後の星を先に試すべき(外れたものが MEDIAN_MIN_LOST 以上)なら
+/// Some((見た数, 外れた数))。フィルター後の星が見た数より少ないときは None: フィルターが星まで消している
+/// (8 bit で量子化した暗い星・星像の小さい画像など)ので、ホットピクセルとはみない。
+fn hot_point_count(orig: &[Source], filtered: &[Source]) -> Option<(usize, usize)> {
+    let top = orig.len().min(MEDIAN_TOP);
+    if top < MEDIAN_MIN_TOP || filtered.len() < top {
+        return None;
     }
-    Ok(tried(None))
+    let near2 = MEDIAN_NEAR_PX * MEDIAN_NEAR_PX;
+    let cands = &filtered[..filtered.len().min(MEDIAN_TOP)];
+    let lost = orig[..top]
+        .iter()
+        .filter(|a| !cands.iter().any(|b| (b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y) <= near2))
+        .count();
+    if (lost as f64) >= MEDIAN_MIN_LOST * top as f64 { Some((top, lost)) } else { None }
 }
 
 #[cfg(test)]
@@ -339,5 +466,71 @@ mod tests {
         assert_eq!(deep_how(Some(&info(None, 1.5))), "星の幅を測れなかったので σ 1.5 px でぼかし");
         assert_eq!(deep_how(Some(&info(Some(0.0), 1.0))), "星の幅を測れなかったので σ 1.0 px でぼかし");
         assert_eq!(deep_how(None), "星の幅を測れなかったので σ 1.5 px でぼかし");
+    }
+
+    #[test]
+    fn filtered_sets_come_first_with_a_short_share() {
+        let s: Vec<FieldStar> = (0..5).map(|k| FieldStar { x: 10.0 * k as f64, y: 0.0, flux: 1.0 }).collect();
+        let conds: Vec<Cond> =
+            vec![("全天 + スケール既知", None, (1.0, 2.0), 0.25), ("全天 + スケール全域", None, (0.5, 50.0), 0.5)];
+        let f: Vec<StarSet> = vec![("F1", &s[..]), ("F2", &s[..3])];
+        let o: Vec<StarSet> = vec![("O1", &s[..4]), ("O2", &s[..])];
+        let got = |f: &[StarSet]| -> Vec<(String, f64)> {
+            build_attempts(&conds, f, &o).iter().map(|a| (a.label.clone(), a.share)).collect()
+        };
+        let want = |v: &[(&str, f64)]| -> Vec<(String, f64)> { v.iter().map(|&(l, s)| (l.to_string(), s)).collect() };
+        // 条件ごとにフィルター後の星 → 元の星。フィルター後の星は残りの 1 割まで
+        assert_eq!(
+            got(&f),
+            want(&[
+                ("F1の星 5 個 + 全天 + スケール既知", 0.1),
+                ("F2の星 3 個 + 全天 + スケール既知", 0.1),
+                ("O1の星 4 個 + 全天 + スケール既知", 0.25),
+                ("O2の星 5 個 + 全天 + スケール既知", 0.25),
+                ("F1の星 5 個 + 全天 + スケール全域", 0.1),
+                ("F2の星 3 個 + 全天 + スケール全域", 0.1),
+                ("O1の星 4 個 + 全天 + スケール全域", 0.5),
+                ("O2の星 5 個 + 全天 + スケール全域", 0.5),
+            ])
+        );
+        // 判定が通らなければ今までどおり
+        assert_eq!(
+            got(&[]),
+            want(&[
+                ("O1の星 4 個 + 全天 + スケール既知", 0.25),
+                ("O2の星 5 個 + 全天 + スケール既知", 0.25),
+                ("O1の星 4 個 + 全天 + スケール全域", 0.5),
+                ("O2の星 5 個 + 全天 + スケール全域", 0.5),
+            ])
+        );
+    }
+
+    #[test]
+    fn hot_point_count_looks_at_the_bright_end() {
+        let src = |x: f64, y: f64| Source { x, y, flux: 1.0, peak: 1.0, area: 1, elong: 1.0, fwhm: 2.0, snr: 10.0 };
+        let grid = |n: usize, y0: f64| -> Vec<Source> { (0..n).map(|k| src(10.0 * k as f64, y0)).collect() };
+        // 同じ星が同じ順なら外れたものは 0(フィルター後の星は試さない)
+        let a = grid(40, 0.0);
+        assert_eq!(hot_point_count(&a, &a), None);
+        // 1.5 px ずれても同じ星(2 px 以内)
+        let shifted: Vec<Source> = a.iter().map(|s| src(s.x + 1.2, s.y + 0.9)).collect();
+        assert_eq!(hot_point_count(&a, &shifted), None);
+        // 明るいほうの 30 個のうち 12 個(4 割)がフィルター後の明るい 30 個から外れる(後ろへ下がる)→ フィルター後の星を先に
+        let mut f: Vec<Source> = a[12..].to_vec();
+        f.extend(grid(20, 500.0));
+        f.extend_from_slice(&a[..12]);
+        assert_eq!(hot_point_count(&a, &f), Some((30, 12)));
+        // 11 個ならそのまま
+        let mut f: Vec<Source> = a[11..].to_vec();
+        f.extend(grid(20, 500.0));
+        f.extend_from_slice(&a[..11]);
+        assert_eq!(hot_point_count(&a, &f), None);
+        // フィルター後の星が全部別の場所なら全部外れる。ただしフィルター後の星が見た数より少なければ判定しない
+        // (フィルターが星まで消した)。元の星が 8 個未満でも判定しない
+        assert_eq!(hot_point_count(&a, &grid(30, 500.0)), Some((30, 30)));
+        assert_eq!(hot_point_count(&a, &grid(29, 500.0)), None);
+        assert_eq!(hot_point_count(&a, &[]), None);
+        assert_eq!(hot_point_count(&grid(8, 0.0), &grid(8, 500.0)), Some((8, 8)));
+        assert_eq!(hot_point_count(&grid(7, 0.0), &grid(7, 500.0)), None);
     }
 }

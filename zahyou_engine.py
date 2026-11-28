@@ -3665,6 +3665,23 @@ def preprocess(data, mask_overlay=True):
     return sub, mask, sigma, info
 
 
+def median_prep(sub, mask, sigma):
+    """
+    前処理の結果 (sub, mask, sigma) の画像に 3×3 の中央値フィルターをかけ、σ を測り直す。戻り値 (sub, mask, sigma)。
+    マスクはそのまま。σ は preprocess の最後と同じく、マスクの外 (全部マスクなら全体) の σ クリップの標準偏差で、
+    有限で正でなければ元の σ のまま。
+
+    オフライン解析で、ホットピクセルの多い画像 (ダーク補正をしていない画像の、色の補間で広がったホットピクセルが星の検出を埋めたとき) に
+    使う。星 (FWHM 3 画素ほど以上) は頂の値の 7 割ほどが残り、色の補間で十字・3×3 に広がった点は 2.5〜5 割に、
+    1 画素だけの点は背景の高さまで下がるので、明るさの順で星が前に出る (FWHM 2 画素ほどの星は 5 割ほどで、
+    3×3 に広がった点と区別しにくい)。
+    """
+    sub_m = ndimage.median_filter(sub, size=3, mode="nearest")
+    ref = sub_m[~mask] if (~mask).any() else sub_m
+    s = float(sigma_clipped_stats(ref, sigma=3.0)[2])
+    return sub_m, mask, (s if np.isfinite(s) and s > 0 else sigma)
+
+
 # ================================================================ 星の検出 ===
 
 def _measure(sub, labels, keep):
@@ -4532,6 +4549,8 @@ def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
     オフライン (zahyou 自前の解析エンジン sv_solve) で解く。条件を変えながら粘り強く挑む。
     星はディープ検出 (detect_sources_deep) の星を先に、sources (図に出す標準の検出の星) を
     予備に使う。戻り値: WCS ヘッダ (CRPIX は 1 始まり) or None。
+    明るい星の多くがホットピクセルなど星より小さい点のときは、3×3 の中央値フィルターをかけた画像の星を
+    条件ごとに先に試す (_median_sets)。
 
     例外は投げない (中止したときも None)。全体のタイムアウトは timeout 秒の壁時計で、
     試行ごとに残り時間の一部を割り当て、そのタイムアウトの時刻を sv_solve に渡す。
@@ -4558,6 +4577,135 @@ def solve_offline(bundle, sources, work_dir, timeout=300, focal_length_mm=None,
                 cat.close()
             except Exception:
                 pass
+
+
+_CANCELLED = object()      # _run_attempts が「中止した」ことを返すための特別な値 (「■ 中止しました。」は出し済み)
+
+
+def _deep_how(dinfo):
+    """ディープ検出のぼかし方の説明 (星の幅を測れたかどうか)。"""
+    s_psf = dinfo.get("s_psf")
+    return (f"星の幅 (FWHM {2.3548 * s_psf:.1f} px) に合わせてぼかし" if s_psf else
+            f"星の幅を測れなかったので σ {dinfo.get('s', 1.5):.1f} px でぼかし")
+
+
+def _run_attempts(attempts, nx, ny, catalog, t_end, stopped, solver_log):
+    """
+    試行の並び [(ラベル, 星, ヒント, スケールの範囲, 残り時間の何割まで使うか)] を順に解く
+    (Rust の offline.rs の run_attempts)。解けたら WCS ヘッダー、解けなければ None、中止したら _CANCELLED
+    (「■ 中止しました。」はここで出す)。残りが 2 秒を切ったらやめる。
+    """
+    for i, (label, stars, hint_i, (s_lo, s_hi), share) in enumerate(attempts, 1):
+        if stopped():
+            _log("\n  ■ 中止しました。")
+            return _CANCELLED
+        left = t_end - time.monotonic()
+        if left < 2.0:
+            _log("  ⏱ 制限時間に達したので、これ以上の再試行はしません。")
+            break
+        t = left if i == len(attempts) else left * share
+        _log(f"\n  [{i}/{len(attempts)}] {label}  (最大 {t:.0f} 秒)")
+        xy = np.array([[s["x"], s["y"]] for s in stars], dtype=np.float64)
+        flux = np.array([s["flux"] for s in stars], dtype=np.float64)
+        try:
+            sol = _solve_stars(xy, flux, nx, ny, catalog, scale_lo=s_lo, scale_hi=s_hi,
+                               hint=hint_i, deadline=time.monotonic() + t,
+                               cancel=stopped, log=solver_log)
+        except SvCancelled:
+            _log("  ■ 中止しました。")
+            return _CANCELLED
+        except Exception as e:
+            _log(f"  ⚠️ 解析エンジンでエラー: {type(e).__name__}: {e}")
+            continue
+        if sol is None:
+            continue
+        try:
+            hdr = _solution_header(sol, nx, ny)
+        except Exception as e:
+            _log(f"  ⚠️ 解の WCS を読めませんでした: {type(e).__name__}: {e}")
+            continue
+        note = _solution_note(sol)
+        if note:
+            _log(f"    {note}")
+        _log(f"  ✅ 解析成功 ({label})")
+        return hdr
+    return None
+
+
+_MEDIAN_TOP = 30           # フィルター後の星を先に試すかの判定に見る、標準の検出の明るいほうの星の数 (元の画像・フィルター後とも)
+_MEDIAN_MIN_TOP = 8        # 判定に要る、元の画像の標準の検出の星の数の下限 (少なければフィルター後の星は試さない)
+_MEDIAN_NEAR_PX = 2.0      # 同じ星とみなす距離 [px]
+_MEDIAN_MIN_LOST = 0.4     # 元の明るい星のうち、これ以上の割合がフィルター後の明るい星から外れたら、フィルター後の星を先に試す
+                           # (実写では、フィルター後の星で解けたダーク補正なしのコマが 4〜8 割。元の星で解ける画像でも 4 割を超えることがある)
+_MEDIAN_SHARE = 0.1        # フィルター後の星の試行 1 回に使う、残り時間の割合の上限 (元の星の試行は条件どおり)。判定が元の星ですぐ
+                           # 解ける画像で通ったとき、フィルター後の星で解けない探索に長く待たせないため (実写では、フィルター後の星で
+                           # 解けた試行はどれも始めてから 6 秒以内に解けた。既定の制限 300 秒なら、この上限は 30 秒)
+
+
+def _hot_point_count(orig, filtered):
+    """
+    元の画像の標準の検出 orig の明るいほうから _MEDIAN_TOP 個のうち、中央値フィルター後の標準の検出 filtered の
+    明るいほうから _MEDIAN_TOP 個の中に _MEDIAN_NEAR_PX 以内の星が無いもの (= 明るい星から外れたもの) を数える
+    (Rust の offline.rs の hot_point_count)。ホットピクセルは消えずに 2.5〜5 割の明るさで残ることが多いので、
+    「どこかに残っているか」ではなく「明るいほうに残っているか」で見る。
+    フィルター後の星を先に試すべき (外れたものが _MEDIAN_MIN_LOST 以上) なら (見た数, 外れた数)、そうでなければ None。
+    フィルター後の星が見た数より少ないときも None: フィルターが星まで消している (8 bit で量子化した暗い星・
+    星像の小さい画像など) ので、ホットピクセルとはみない。
+    """
+    top = min(len(orig), _MEDIAN_TOP)
+    if top < _MEDIAN_MIN_TOP or len(filtered) < top:
+        return None
+    near2 = _MEDIAN_NEAR_PX * _MEDIAN_NEAR_PX
+    cands = filtered[:_MEDIAN_TOP]
+    lost = sum(1 for a in orig[:top]
+               if not any((b["x"] - a["x"]) * (b["x"] - a["x"]) + (b["y"] - a["y"]) * (b["y"] - a["y"]) <= near2
+                          for b in cands))
+    return (top, lost) if lost >= _MEDIAN_MIN_LOST * top else None
+
+
+def _build_attempts(conds, f_sets, star_sets):
+    """
+    試行の並び [(ラベル, 星, ヒント, スケールの範囲, 残り時間の何割まで使うか)] を作る (Rust の offline.rs の build_attempts)。
+    条件 conds [(名前, ヒント, スケールの範囲, 割合)] ごとに、フィルター後の星の組 f_sets (判定が通ったときだけある) →
+    元の星の組 star_sets の順。フィルター後の星の試行が使う時間は残りの _MEDIAN_SHARE までに抑える (元の星の試行は条件どおり)。
+    """
+    sets = [(s, _MEDIAN_SHARE) for s in (f_sets or [])] + [(s, 1.0) for s in star_sets]
+    return [(f"{name}の星 {len(stars)} 個 + {cond}", stars, hint_i, rng, min(share, cap))
+            for cond, hint_i, rng, share in conds for (name, stars), cap in sets]
+
+
+def _median_sets(prep, sources, stopped):
+    """
+    ホットピクセルの多い画像の手当て (Rust の offline.rs の run の中ほどと同じ)。前処理の結果 prep に 3×3 の
+    中央値フィルターをかけて (median_prep) 星を検出し直し、元の画像の明るい星 (sources) の多くがフィルター後の
+    明るい星から外れるときは、フィルター後の星の組 [(名前, 星)] (3 個以上のものだけ) を返す。外れなければ None。
+    中止の確かめは Rust と同じく、フィルター後の標準の検出の直後 (中止なら None。「■ 中止しました。」は呼ぶ側)。
+    ダーク補正をしていない長い露出のコマでは、ホットピクセル (カラーの画像では色の補間で十字・3×3 に広がる) が
+    星より明るく数百個検出されて、星の並びを埋める。フィルターをかけると星が明るさの順で前に出る。
+    """
+    if prep is None:
+        return None
+    fprep = median_prep(*prep[:3])
+    f_std, _ = detect_sources(*fprep, min_sources=60)
+    if stopped():
+        return None
+    hit = _hot_point_count(sources, f_std)
+    if hit is None:
+        return None
+    top, lost = hit
+    _log(f"\n  - 元の画像の明るい星 {top} 個のうち {lost} 個が、3×3 の中央値フィルターをかけると明るい星から外れます。")
+    _log("    ホットピクセルなど星より小さい点が星として検出されているとみて、中央値フィルターをかけた画像の星を先に試します。")
+    f_deep, dinfo, u = [], {}, None
+    try:
+        f_deep, u = detect_sources_deep(*fprep, info=dinfo)
+    except Exception as e:
+        _log(f"  ⚠️ 中央値フィルター後のディープ検出に失敗しました: {type(e).__name__}: {e}")
+    if f_deep:
+        _log(f"  - 中央値フィルター後のディープ検出: {_deep_how(dinfo)}、星を {len(f_deep)} 個検出"
+             f" (しきい値 {u:g}σ)")
+    return [(name, stars) for name, stars in (("中央値フィルター後のディープ検出", f_deep),
+                                              ("中央値フィルター後の標準の検出", f_std))
+            if len(stars) >= 3]
 
 
 def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
@@ -4632,10 +4780,7 @@ def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
     except Exception as e:
         _log(f"\n  ⚠️ ディープ検出に失敗したので、標準の検出の星だけで解きます: {type(e).__name__}: {e}")
     if deep_stars:
-        s_psf = dinfo.get("s_psf")
-        how = (f"星の幅 (FWHM {2.3548 * s_psf:.1f} px) に合わせてぼかし" if s_psf else
-               f"星の幅を測れなかったので σ {dinfo.get('s', 1.5):.1f} px でぼかし")
-        _log(f"\n  - ディープ検出 (解析エンジンに渡す星): {how}、星を {len(deep_stars)} 個検出"
+        _log(f"\n  - ディープ検出 (解析エンジンに渡す星): {_deep_how(dinfo)}、星を {len(deep_stars)} 個検出"
              f" (しきい値 {u:g}σ)")
     elif dinfo:
         _log("\n  - ディープ検出: 星が見つかりませんでした。")
@@ -4647,7 +4792,14 @@ def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
              f"  ❌ 星が {n_max} 個しかないので解析できません (3 個以上要ります)。")
         return None
 
-    # 段階的な試行: 探す範囲の狭い (速い) 条件から順に、条件ごとに ディープ → 標準 の星で。
+    # ホットピクセルが星として検出されているときは、中央値フィルターをかけた画像の星を条件ごとに先に試す (_median_sets)
+    f_sets = _median_sets(prep, sources, stopped)
+    if stopped():
+        _log("\n  ■ 中止しました。")
+        return None
+
+    # 段階的な試行: 探す範囲の狭い (速い) 条件から順に、条件ごとに ディープ → 標準 の星で
+    # (中央値フィルターの判定が通ったときは、その前にフィルター後のディープ → 標準 の星で)。
     # (ラベル, 星, ヒント, スケールの範囲, 残り時間の何割まで使うか)
     # sv_solve は quad を試し尽くせばタイムアウト前に戻るので、狭い条件は両方の星で試しても安い。
     conds = []
@@ -4658,48 +4810,20 @@ def _solve_offline(bundle, sources, timeout, focal_length_mm, hint_radec,
     if narrow:
         conds.append(("全天 + スケール既知", None, narrow, 0.25))
     conds.append(("全天 + スケール全域", None, wide, 0.5))
-    attempts = [(f"{name}の星 {len(stars)} 個 + {cond}", stars, hint_i, rng, share)
-                for cond, hint_i, rng, share in conds for name, stars in star_sets]
+    attempts = _build_attempts(conds, f_sets, star_sets)
 
     solver_log = (lambda m: _log(f"    · {m}")) if verbose else None
-    for i, (label, stars, hint_i, (s_lo, s_hi), share) in enumerate(attempts, 1):
-        if stopped():
-            _log("\n  ■ 中止しました。")
-            return None
-        left = t_end - time.monotonic()
-        if left < 2.0:
-            _log("  ⏱ 制限時間に達したので、これ以上の再試行はしません。")
-            break
-        t = left if i == len(attempts) else left * share
-        _log(f"\n  [{i}/{len(attempts)}] {label}  (最大 {t:.0f} 秒)")
-        xy = np.array([[s["x"], s["y"]] for s in stars], dtype=np.float64)
-        flux = np.array([s["flux"] for s in stars], dtype=np.float64)
-        try:
-            sol = _solve_stars(xy, flux, nx, ny, catalog, scale_lo=s_lo, scale_hi=s_hi,
-                               hint=hint_i, deadline=time.monotonic() + t,
-                               cancel=stopped, log=solver_log)
-        except SvCancelled:
-            _log("  ■ 中止しました。")
-            return None
-        except Exception as e:
-            _log(f"  ⚠️ 解析エンジンでエラー: {type(e).__name__}: {e}")
-            continue
-        if sol is None:
-            continue
-        try:
-            hdr = _solution_header(sol, nx, ny)
-        except Exception as e:
-            _log(f"  ⚠️ 解の WCS を読めませんでした: {type(e).__name__}: {e}")
-            continue
-        note = _solution_note(sol)
-        if note:
-            _log(f"    {note}")
-        _log(f"  ✅ 解析成功 ({label})")
+    hdr = _run_attempts(attempts, nx, ny, catalog, t_end, stopped, solver_log)
+    if hdr is _CANCELLED:
+        return None
+    if hdr is not None:
         return hdr
 
     if stopped():
         _log("\n  ■ 中止しました。")
         return None
+    if f_sets is not None:
+        _log("  - 中央値フィルターをかけた画像でも解けませんでした。ダーク補正をした画像で試してください。")
     _log("\n  ❌ すべての条件で解けませんでした。心当たりの順に:")
     n_best = max(len(sources), len(deep_stars))
     if n_best < 15:
