@@ -1139,7 +1139,7 @@ d410376cf4c330fcc6f5363ad9bdf35810a657d277d2b596c8d4c35aa0a4cdfe  AstrometryData
    - 公開の前に、Windows の wheel を一時の venv に入れて `dev/test_native.py` を回した(9/9)
 3. タグ `v10` を `209143a` に打って push(`git ls-remote` は `refs/tags/v10` だけ)。Release を下書きで作り、prerelease=false・タイトル「zahyou v10」・アセット 11 個で、
    digest は SHA256SUMS.txt の 10 個と一致した。本文のリンク 22 個は 200(1 回目に 3 個が一時的に 503、2 回目は全部 200。README の見出しへのリンク 3 つは見出しが実在する)、
-   本文の大文字の SHA256 は zahyou.exe の digest と同じ。`gh api markdown` で描かせて、太字にならずに残る `**` が 0 個であることも確かめた
+   本文の大文字の SHA256 は zahyou.exe の digest と同じ。`gh api markdown` で HTML に変換して、太字にならずに残る `**` が 0 個であることも確かめた
    (v9 の本文から引き継いだ 6 組が「」や）の隣で閉じて残っていたので、`<strong>` に直した)。`--latest` で出し、`releases/latest` は v10、`expanded_assets/v10` も 200。
 4. 公開中の v9 の exe(`5f97551b…`)を一時のフォルダーにダウンロードし、一時の LOCALAPPDATA で `--update-check --update-apply` を動かした。
    - 「新しいバージョンがあります: v10 (2026-11-27 版 / 14 MB)」と出て、SHA256 が一致し、入れ替わった(`zahyou.exe` = `8019fb1a…`、`zahyou.exe.old` = v9)。
@@ -1171,3 +1171,54 @@ dbe1eae6d4242246cb8d6dd8d32391ec82d1338c2e40a7a82643c9cd2917a679  zahyou_native-
 015eea766a357b5dcbab16e5121a6846c7b68c8f09d2627acd67a6b6522f880b  zahyou_native-10.0.0-cp39-abi3-manylinux_2_28_x86_64.whl
 6154757a6d756609b5b6f6c15feedccd32cc85e6394ac24b908ef7965cd772ba  zahyou_native-10.0.0-cp39-abi3-win_amd64.whl
 ```
+
+### v11 の準備(2026-11-28。ユーザーの指示「造語ではなく一般的な用語になっているか確認し, 問題なければv11として公開して」)
+
+ブランチ `release-v11`(main の `bb98a7e` から)。中身は、v10 のあとに main へ入った変更と、用語の直しと、次のバージョン上げ。
+- v10 のあとの main の変更で、exe とノートブック版の動きが変わるのは PR #68 だけ:
+  ダーク補正をしていない長時間露出の画像(ホットピクセルが数百個、星より明るく検出される画像)のために、解く前に 3×3 の中央値フィルターを
+  かけた画像でも星を検出し、明るい星の多くが入れ替わる画像では、フィルター後の星を先に試す(設計は design-native-solver.md の
+  「ホットピクセルの多い画像(2026-11-28)」)。手元の実写で、v10 が解けなかった 269 枚のうち 11 枚が解け、誤答 0。
+  v10 が解けていた 572 枚で解けなくなった画像は 0。ほかは v10 の記録(PR #67)
+- **用語の確認**(ユーザーの指示): v10 から main までの差分を、観点を分けて(画面・ログの文言 / 文書 / コメントとテスト)洗い出し、
+  反論役で確かめた。画面・ログの文言には直すものが無かった。コメント・docstring・設計の文書・PR #68 の本文で、次を直した:
+  頂の値 → ピーク値、背景の高さまで下がる → 背景との差がほぼ 0 になる、止める数 → `min_sources`、色の補間 → ベイヤーの補間
+  (リポジトリが v10 より前から使う言い方)、この文書の「描かせて」→「HTML に変換して」。あわせて、コマ → 画像・長い露出 → 長時間露出・
+  手当て → 対策・前に出る → 明るい順の上位に来る(どれも造語ではないが、同じ説明の中の書き方にそろえた)。commit のメッセージは直していない
+- **公開済みの比較が変わらないこと**: README の「ほかのプレートソルバーとの比較」の画像を含む 155 枚(実写 64 枚・形式・星図など。
+  benchmark-20261020 の S1 の画像)を、v10 と v11 の解析(`zbench --mode app --via-pipeline`、制限 60 秒)で 1 回ずつ解いた。
+  解けたのはどちらも 142 枚で、答えは全部同じ(2″ 以内・スケール 0.1 % 以内)。中央値フィルターの判定が通ったのは 2 枚で、
+  どちらもフィルター後の星の 1 回目の試行で同じ答えに解けた。かかった時間の比(v11 / v10)の中央値は 0.999(最大 1.22)
+- **追加の処理の時間**(作業用の計測(`median_prep` と `detect_sources`(`min_sources` = 60)を 5 回ずつ測った最速。CPU のほかの重い処理なし): 2015×1001 で 0.026 秒、2704×1536 で 0.052 秒、6000×4000 の合成画像で 0.28 秒。offline.rs と設計の文書の「2 MP で 20 ms ほど、24 MP で 0.2 秒ほど」は、この値に合わせて「0.03 秒ほど・0.3 秒ほど」に直した。上の 155 枚の解法の段階(`stages_s.solve`)の差の中央値は、1 メガ画素未満で 0.009 秒、1〜2.5 メガ画素で 0.023 秒、2.5〜5 メガ画素で 0.060 秒)
+- **バージョン**: `rs/Cargo.toml` を `11.0.0` に(バージョン名 `v11`)。2 節の表のとおり、次のものを直した。
+  - `Cargo.lock`(cargo が更新)、`zahyou_v10.ipynb` → `zahyou_v11.ipynb`(git mv)、`NB_VERSION = "v11"` と `build_nb.py`、`gen_notices.py`
+  - 表の 12: `rs/py/Cargo.toml` を 11.0.0 にし、`rs/py/Cargo.lock` と `rs/py/THIRD-PARTY-NOTICES.md` を作り直した
+  - README・`dev/make_manual.py`・`dev/README.md` を v11 向けに(v11 で変わったこと・v10 から入れ替える・ノートブックの名前・起動と大きさ・
+    うまくいかないときの表に「中央値フィルターをかけた画像でも解けませんでした」の行、マニュアル 7 章の 2 に中央値フィルターの説明)。
+    v7・v8 で測った表は、その値のまま残した。「起動と大きさ」は v11 の exe で測り直した
+  - `app-help.png` を v11 の exe で撮り直し、マニュアル v4 を作り直した(34 ページ)
+- **道具**: rustc 1.100.0・cargo 1.100.0(MSYS2 の Rev2)・gcc 16.2.0(Rev7)(v10 と同じ)
+- **exe**: 4 節の置き換えを付けてビルドした。
+  - 14,136,320 バイト、SHA256 `bf39a323adc3fba4b10659aa7327ce42b877b5a1888d03c3467d20f1771d5a26`。作者のホームのパスは 0 か所(`/cargo` 500・`/zahyou` 2)
+  - `--engine-check` の version=v11、`--selftest --offline` 25/25
+  - `--update-check` は「最新版です (v11)。公開されている最新版 v10 より新しいバージョンを使っています。」
+  - 最初の描画まで: DirectX 12 で 0.32〜0.35 秒、OpenGL で 0.20〜0.23 秒(3 回ずつ。README の「起動と大きさ」・マニュアル 3.2)
+- **テスト**(4 節の置き換えを付けて): `cargo test --workspace -- --include-ignored --skip live` で **333/333**、`cargo clippy --workspace --all-targets -- -D warnings` 指摘 0、
+  `test_make_release_assets.py`(この exe を渡して)36 本通過、`test_tools.py` 17 本通過、`dev/test_solver_core.py` 46/46、`dev/test_robust.py` 43/43、
+  `dev/test_solver_real.py --engine --both` 62/62(合わせて 44 分)。利用者の cache.json・gui.json は前後で同じ
+- wiki は手元の `zahyou.wiki` のブランチ `release-v11` に v11 向けの直しまでコミットしてある(push していない)
+- Release の本文と配布ページの `はじめにお読みください.txt` の下書きは、作者の手元の `Documents\claude\zahyou\release-backup\v11-release-20261128\`
+- **v11 の説明の点検**: README・マニュアル・wiki・Release の本文・配布ページの説明の新しい文を、用語と事実の 2 つの観点で読み直し、反論役で確かめた。
+  PR #68 と設計の文書で「v10 が解けなかった 269 枚」「v10 が解けていた 572 枚」としていたのは、11-27 の 682 枚を v9 の結果で分けていたためで、
+  v9 が誤答していた HST の 2 枚(v10 では答えが出ない)を数え違えていた。v10 の答えは 454 + 116 = 570 枚で、解けなかったのは 271 枚
+  (判定が通る 119 枚と新しく解けた 11 枚は変わらない)。設計の文書・PR #68 の本文も直した。ほかに、v10 の時間を「1 秒ほど」→「0.1〜1.3 秒」、
+  うまくいかないときの行を「ホットピクセルなど…とみられます」(判定は星像の小さい画像でも通るため)、新しく解けた 11 枚のうち 1 枚は
+  astrometry.net 0.98 でも解けること・1 枚はスケールの一致だけで確かめたことを書き分け、「中央値フィルター」の最初の 1 か所に「メディアンフィルター」を添えた
+- **残り**(v10 のときと同じ順):
+  1. この PR を merge commit で main へ。ブランチ `release-v11` を消す
+  2. main で wheels ワークフローを動かし、wheel 4 つを `$USERPROFILE/zahyou-wheels-v11` へダウンロードして、`make_release_assets.py --wheels` でアセット 11 個をそろえる
+  3. タグ `v11` を merge の commit に打って push
+  4. Release を下書きで作り、prerelease=false・タイトル「zahyou v11」・アセット 11 個・digest を見てから `--latest` で出す。`expanded_assets/v11` から wheel が入ることを確かめる
+  5. 公開中の v10 の exe(のコピー、一時の LOCALAPPDATA)で「更新を確認」→「更新する」が v11 に入れ替わり、`zahyou.exe.old` が v11 の起動で消えること
+  6. 配布ページの差し替え(v10 と同じ。`zahyou_v10.ipynb` は中身を v11 のものに入れ替えてから `zahyou_v11.ipynb` に改名する)
+  7. wiki のブランチ `release-v11` を master へ入れて push する
