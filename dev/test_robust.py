@@ -593,7 +593,7 @@ def case_zz40_invert_boundaries():
     RESULTS.append(("40 反転の判定の境目 (順位 10・比 10 倍・孤立・反転した写真・ベイヤー)", ok, "  ".join(msgs)))
 
 def plant_spread_hot(img, n, amp, seed):
-    """ダーク補正をしていないカラーの画像の、色の補間で広がったホットピクセルを n 個植える (半分ずつ)。
+    """ダーク補正をしていないカラーの画像の、ベイヤーの補間で広がったホットピクセルを n 個植える (半分ずつ)。
     緑の面の欠陥は十字 (上下左右に 1/4)、赤・青の面の欠陥は 3×3 (上下左右に 1/2、斜めに 1/4)。
     どちらも前処理の「1 画素だけの突出」の消し方にはかからない。"""
     r = np.random.default_rng(seed)
@@ -612,8 +612,8 @@ def plant_spread_hot(img, n, amp, seed):
 
 def case_zz41_median_prep_spread_hot():
     """
-    色の補間で広がったホットピクセル 400 個 (星より明るい) を植えた星野。標準の検出の明るいほうから 30 個は
-    ホットピクセルが多いが、median_prep (3×3 の中央値フィルター) をかけて検出し直すと星が前に出る
+    ベイヤーの補間で広がったホットピクセル 400 個 (星より明るい) を植えた星野。標準の検出の明るいほうから 30 個は
+    ホットピクセルが多いが、median_prep (3×3 の中央値フィルター) をかけて検出し直すと星が明るい順の上位に来る
     (オフライン解析がフィルター後の星を先に試すときに頼っている性質)。σ は測り直して下がり、判定も通る。
     """
     img, pl = make_field(seed=41)
@@ -627,7 +627,7 @@ def case_zz41_median_prep_spread_hot():
     same = np.array_equal(fsub, ndimage.median_filter(sub, size=3, mode="nearest")) and fmask is mask
     hit = zc._hot_point_count(std, fstd)
     ok = same and m0 <= 15 and m1 >= 20 and fsig < sigma and hit is not None
-    RESULTS.append(("41 色の補間で広がったホットピクセル 400 個 → 中央値フィルターで星が前に出る", ok,
+    RESULTS.append(("41 ベイヤーの補間で広がったホットピクセル 400 個 → 中央値フィルターで星が明るい順の上位に来る", ok,
                     f"明るい 30 個のうち植えた星: 元 {m0} → フィルター後 {m1}  σ {sigma:.2f} → {fsig:.2f}"
                     f"  判定 (見た数, 外れた数) {hit}"))
 

@@ -1139,7 +1139,7 @@ d410376cf4c330fcc6f5363ad9bdf35810a657d277d2b596c8d4c35aa0a4cdfe  AstrometryData
    - 公開の前に、Windows の wheel を一時の venv に入れて `dev/test_native.py` を回した(9/9)
 3. タグ `v10` を `209143a` に打って push(`git ls-remote` は `refs/tags/v10` だけ)。Release を下書きで作り、prerelease=false・タイトル「zahyou v10」・アセット 11 個で、
    digest は SHA256SUMS.txt の 10 個と一致した。本文のリンク 22 個は 200(1 回目に 3 個が一時的に 503、2 回目は全部 200。README の見出しへのリンク 3 つは見出しが実在する)、
-   本文の大文字の SHA256 は zahyou.exe の digest と同じ。`gh api markdown` で描かせて、太字にならずに残る `**` が 0 個であることも確かめた
+   本文の大文字の SHA256 は zahyou.exe の digest と同じ。`gh api markdown` で HTML に変換して、太字にならずに残る `**` が 0 個であることも確かめた
    (v9 の本文から引き継いだ 6 組が「」や）の隣で閉じて残っていたので、`<strong>` に直した)。`--latest` で出し、`releases/latest` は v10、`expanded_assets/v10` も 200。
 4. 公開中の v9 の exe(`5f97551b…`)を一時のフォルダーにダウンロードし、一時の LOCALAPPDATA で `--update-check --update-apply` を動かした。
    - 「新しいバージョンがあります: v10 (2026-11-27 版 / 14 MB)」と出て、SHA256 が一致し、入れ替わった(`zahyou.exe` = `8019fb1a…`、`zahyou.exe.old` = v9)。

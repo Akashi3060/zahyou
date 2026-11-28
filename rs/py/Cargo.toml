@@ -3,7 +3,7 @@
 # ビルドのしかたと配り方は README.md。
 [package]
 name = "zahyou-native"
-version = "10.0.0"
+version = "11.0.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"

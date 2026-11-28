@@ -5,7 +5,7 @@
 依存を変えたら作り直してください(`python rs/tools/gen_notices.py --wheel`、古いかどうかは `--wheel --check`)。
 同じものが wheel(`zahyou_native-*.whl`)の `.dist-info/licenses/` に入っています。
 
-zahyou-native は、ノートブック版(`zahyou_v10.ipynb`)のオフライン解析を Rust で速く解くための Python の拡張モジュールです。
+zahyou-native は、ノートブック版(`zahyou_v11.ipynb`)のオフライン解析を Rust で速く解くための Python の拡張モジュールです。
 中身は exe と同じ Rust の解法(`zahyou-solver`・`zahyou-index`・`zahyou-wcs`)で、Python 版のエンジン
 (`dev/solver_*.py`)を Rust に移したものです。
 
